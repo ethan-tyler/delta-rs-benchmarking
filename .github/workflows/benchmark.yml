@@ -1,0 +1,215 @@
+name: PR Benchmark (Option B)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  benchmark:
+    if: github.event.issue.pull_request != null
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 180
+    concurrency:
+      group: delta-bench-serial
+      cancel-in-progress: false
+
+    steps:
+      - name: Parse command
+        id: parse
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = (context.payload.comment?.body || "").trim();
+            const firstLine = body.split(/\r?\n/)[0].trim();
+            const allowedSuites = new Set([
+              "read_scan",
+              "write",
+              "merge_dml",
+              "metadata",
+              "optimize_vacuum",
+              "all",
+            ]);
+
+            let mode = "ignore";
+            let suite = "";
+            let invalidReason = "";
+
+            if (/^show benchmark queue$/i.test(firstLine)) {
+              mode = "queue";
+            } else {
+              const match = firstLine.match(/^run benchmark\s+(\S+)$/i);
+              if (match) {
+                suite = match[1].toLowerCase();
+                if (allowedSuites.has(suite)) {
+                  mode = "run";
+                } else {
+                  mode = "invalid";
+                  invalidReason = `invalid command: unknown benchmark suite '${suite}'. Allowed suites: ${Array.from(allowedSuites).join(", ")}`;
+                }
+              }
+            }
+
+            core.setOutput("mode", mode);
+            core.setOutput("suite", suite);
+            core.setOutput("first_line", firstLine);
+            core.setOutput("invalid_reason", invalidReason);
+
+      - name: Check authorization
+        id: auth
+        if: steps.parse.outputs.mode != 'ignore'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const username = context.payload.comment.user.login;
+            let permission = "none";
+            try {
+              const response = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner,
+                repo,
+                username,
+              });
+              permission = response.data.permission || "none";
+            } catch (error) {
+              permission = "none";
+            }
+
+            const allowed = ["admin", "maintain", "write"].includes(permission);
+            core.setOutput("allowed", allowed ? "true" : "false");
+            core.setOutput("permission", permission);
+
+      - name: Comment unauthorized
+        if: steps.parse.outputs.mode != 'ignore' && steps.auth.outputs.allowed != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.issue.number;
+            const actor = context.payload.comment.user.login;
+            const permission = `${{ steps.auth.outputs.permission }}`;
+            const body = [
+              `@${actor} is not authorized to run benchmarks.`,
+              `Required permission: write/maintain/admin.`,
+              `Detected permission: ${permission}.`,
+            ].join("\n");
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number,
+              body,
+            });
+
+      - name: Comment queue unavailable
+        if: steps.parse.outputs.mode == 'queue' && steps.auth.outputs.allowed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: "Queue status is not available in workflow mode (Option B). Runs are serialized via workflow concurrency.",
+            });
+
+      - name: Comment invalid command
+        if: steps.parse.outputs.mode == 'invalid' && steps.auth.outputs.allowed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `${{ steps.parse.outputs.invalid_reason }}`,
+            });
+
+      - name: Resolve PR refs
+        id: pr
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput("base_ref", pr.data.base.ref);
+            core.setOutput("head_ref", pr.data.head.ref);
+
+      - name: Checkout repository
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run branch compare
+        id: bench
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true'
+        shell: bash
+        env:
+          BASE_REF: ${{ steps.pr.outputs.base_ref }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          SUITE: ${{ steps.parse.outputs.suite }}
+        run: |
+          set -euo pipefail
+          status=0
+          set +e
+          ./scripts/compare_branch.sh \
+            --ci \
+            --max-allowed-regressions 0 \
+            "$BASE_REF" \
+            "$HEAD_REF" \
+            "$SUITE" > benchmark_output.md 2>&1
+          status=$?
+          set -e
+
+          echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "status_label=PASS" >> "$GITHUB_OUTPUT"
+          else
+            echo "status_label=FAIL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post benchmark result
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const issue_number = context.issue.number;
+            const suite = `${{ steps.parse.outputs.suite }}`;
+            const status = `${{ steps.bench.outputs.status_label }}`;
+            const exitCode = `${{ steps.bench.outputs.exit_code }}`;
+            let output = "(no output produced)";
+            if (fs.existsSync("benchmark_output.md")) {
+              output = fs.readFileSync("benchmark_output.md", "utf8");
+            }
+            if (output.length > 60000) {
+              output = output.slice(output.length - 60000);
+            }
+
+            const body = [
+              `### Benchmark ${status}: ${suite}`,
+              `Exit code: ${exitCode}`,
+              "",
+              "<details><summary>compare_branch.sh output</summary>",
+              "",
+              "```text",
+              output,
+              "```",
+              "</details>",
+            ].join("\n");
+
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number,
+              body,
+            });
+
+      - name: Fail workflow on CI regression policy violation
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.bench.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          echo "Benchmark CI policy failed"
+          exit 1

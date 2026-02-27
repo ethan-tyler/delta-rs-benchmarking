@@ -1,0 +1,189 @@
+use std::collections::HashMap;
+use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use deltalake_core::{open_table, open_table_with_storage_options, DeltaTable};
+use url::Url;
+
+use crate::cli::StorageBackend;
+use crate::error::{BenchError, BenchResult};
+
+pub const TABLE_ROOT_KEY: &str = "table_root";
+static ISOLATION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone, Debug)]
+pub struct StorageConfig {
+    backend: StorageBackend,
+    options: HashMap<String, String>,
+    table_root: Option<Url>,
+}
+
+impl StorageConfig {
+    pub fn local() -> Self {
+        Self {
+            backend: StorageBackend::Local,
+            options: HashMap::new(),
+            table_root: None,
+        }
+    }
+
+    pub fn new(backend: StorageBackend, options: HashMap<String, String>) -> BenchResult<Self> {
+        let table_root = if matches!(backend, StorageBackend::Local) {
+            None
+        } else {
+            let root = options.get(TABLE_ROOT_KEY).ok_or_else(|| {
+                BenchError::InvalidArgument(format!(
+                    "storage option '{TABLE_ROOT_KEY}=<uri>' is required when backend is not local"
+                ))
+            })?;
+            let parsed = Url::parse(root).map_err(|e| {
+                BenchError::InvalidArgument(format!("invalid table_root URI '{root}': {e}"))
+            })?;
+            validate_table_root_scheme(backend, &parsed)?;
+            Some(parsed)
+        };
+
+        Ok(Self {
+            backend,
+            options,
+            table_root,
+        })
+    }
+
+    pub fn backend(&self) -> StorageBackend {
+        self.backend
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self.backend, StorageBackend::Local)
+    }
+
+    pub fn object_store_options(&self) -> HashMap<String, String> {
+        let mut out = self.options.clone();
+        out.remove(TABLE_ROOT_KEY);
+        out
+    }
+
+    pub fn fixture_table_url(&self, scale: &str, table_name: &str) -> BenchResult<Url> {
+        let mut root = self.table_root.clone().ok_or_else(|| {
+            BenchError::InvalidArgument(
+                "fixture_table_url requires a non-local storage backend".to_string(),
+            )
+        })?;
+
+        let base_path = root.path().trim_end_matches('/');
+        let joined = if base_path.is_empty() || base_path == "/" {
+            format!("/{scale}/{table_name}")
+        } else {
+            format!("{base_path}/{scale}/{table_name}")
+        };
+        root.set_path(&joined);
+        Ok(root)
+    }
+
+    pub fn isolated_table_url(
+        &self,
+        scale: &str,
+        base_table_name: &str,
+        isolation_key: &str,
+    ) -> BenchResult<Url> {
+        if self.is_local() {
+            return Err(BenchError::InvalidArgument(
+                "isolated_table_url requires a non-local storage backend".to_string(),
+            ));
+        }
+
+        let sanitized_key = sanitize_path_component(isolation_key);
+        let table_name = format!(
+            "{base_table_name}__isolated__{sanitized_key}__{}",
+            next_isolation_suffix()
+        );
+        self.fixture_table_url(scale, &table_name)
+    }
+
+    pub fn table_url_for(
+        &self,
+        local_table_path: &Path,
+        scale: &str,
+        table_name: &str,
+    ) -> BenchResult<Url> {
+        if self.is_local() {
+            Url::from_directory_path(local_table_path).map_err(|()| {
+                BenchError::InvalidArgument(format!(
+                    "failed to create table URL for {}",
+                    local_table_path.display()
+                ))
+            })
+        } else {
+            self.fixture_table_url(scale, table_name)
+        }
+    }
+
+    pub async fn open_table(&self, table_url: Url) -> BenchResult<DeltaTable> {
+        let options = self.object_store_options();
+        if options.is_empty() {
+            Ok(open_table(table_url).await?)
+        } else {
+            Ok(open_table_with_storage_options(table_url, options).await?)
+        }
+    }
+
+    pub async fn try_from_url_for_write(&self, table_url: Url) -> BenchResult<DeltaTable> {
+        let options = self.object_store_options();
+        if options.is_empty() {
+            Ok(DeltaTable::try_from_url(table_url).await?)
+        } else {
+            Ok(DeltaTable::try_from_url_with_storage_options(table_url, options).await?)
+        }
+    }
+}
+
+fn validate_table_root_scheme(backend: StorageBackend, table_root: &Url) -> BenchResult<()> {
+    let expected: &[&str] = match backend {
+        StorageBackend::Local => return Ok(()),
+        StorageBackend::S3 => &["s3"],
+        StorageBackend::Gcs => &["gs", "gcs"],
+        StorageBackend::Azure => &["az", "abfs", "abfss", "adl", "wasb", "wasbs"],
+    };
+
+    if expected.iter().any(|scheme| *scheme == table_root.scheme()) {
+        return Ok(());
+    }
+
+    let expected_display = expected
+        .iter()
+        .map(|scheme| format!("{scheme}://"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Err(BenchError::InvalidArgument(format!(
+        "table_root '{}' is incompatible with backend {:?}; expected scheme one of: {}",
+        table_root, backend, expected_display
+    )))
+}
+
+fn sanitize_path_component(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        "table".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn next_isolation_suffix() -> String {
+    let counter = ISOLATION_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    format!("{nanos}-{counter}")
+}

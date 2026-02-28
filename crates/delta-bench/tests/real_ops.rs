@@ -1,6 +1,6 @@
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{optimize_vacuum, read_scan};
+use delta_bench::suites::{merge_dml, optimize_vacuum, read_scan};
 
 #[tokio::test]
 async fn generated_fixtures_support_real_read_scan_suite() {
@@ -162,5 +162,41 @@ async fn generated_fixtures_support_optimize_vacuum_suite() {
     assert!(
         files_scanned >= files_pruned,
         "files_scanned should be >= files_pruned"
+    );
+}
+
+#[tokio::test]
+async fn merge_partition_localized_case_reports_pruned_files() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let cases = merge_dml::run(temp.path(), "sf1", 0, 1, &storage)
+        .await
+        .expect("run merge suite");
+    let localized = cases
+        .iter()
+        .find(|case| case.case == "merge_partition_localized_1pct")
+        .expect("expected merge_partition_localized_1pct case");
+    assert!(
+        localized.success,
+        "localized merge case failed: {:?}",
+        localized.failure
+    );
+    let metrics = localized
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("expected localized merge metrics");
+    assert!(metrics.files_scanned.is_some());
+    assert!(metrics.files_pruned.is_some());
+    assert!(metrics.scan_time_ms.is_some());
+    assert!(metrics.rewrite_time_ms.is_some());
+    assert!(
+        metrics.files_pruned.unwrap_or(0) > 0,
+        "expected localized merge to prune files, got {:?}",
+        metrics.files_pruned
     );
 }

@@ -60,3 +60,40 @@ async fn generates_wave1_specialized_fixture_tables() {
         );
     }
 }
+
+#[tokio::test]
+async fn regenerates_when_wave1_fixture_tables_are_missing_without_force() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("initial generate fixtures");
+
+    let root = temp.path().join("sf1");
+    for table_name in [
+        "read_partitioned_delta",
+        "merge_partitioned_target_delta",
+        "optimize_compacted_delta",
+    ] {
+        std::fs::remove_dir_all(root.join(table_name))
+            .unwrap_or_else(|err| panic!("remove {table_name}: {err}"));
+    }
+
+    generate_fixtures(temp.path(), "sf1", 42, false, &storage)
+        .await
+        .expect("should regenerate when wave1 fixture tables are missing");
+
+    for table_name in [
+        "read_partitioned_delta",
+        "merge_partitioned_target_delta",
+        "optimize_compacted_delta",
+    ] {
+        let table_path = root.join(table_name);
+        assert!(
+            table_path.join("_delta_log").exists(),
+            "expected regenerated table dir: {}",
+            table_path.display()
+        );
+    }
+}

@@ -17,6 +17,9 @@ use crate::runner::{
 };
 use crate::storage::StorageConfig;
 
+const OPTIMIZE_COMPACT_TARGET_SIZE: u64 = 1_000_000;
+const OPTIMIZE_HEAVY_TARGET_SIZE: u64 = 64_000;
+
 struct IterationSetup {
     _temp: tempfile::TempDir,
     table_url: Url,
@@ -65,7 +68,7 @@ pub async fn run(
                 async move {
                     let table_url = setup.table_url.clone();
                     let _keep_temp = setup;
-                    run_optimize_case(table_url, &storage)
+                    run_optimize_case(table_url, OPTIMIZE_COMPACT_TARGET_SIZE, &storage)
                         .await
                         .map_err(|e| e.to_string())
                 }
@@ -84,7 +87,7 @@ pub async fn run(
                 async move {
                     let table_url = setup.table_url.clone();
                     let _keep_temp = setup;
-                    run_optimize_case(table_url, &storage)
+                    run_optimize_case(table_url, OPTIMIZE_COMPACT_TARGET_SIZE, &storage)
                         .await
                         .map_err(|e| e.to_string())
                 }
@@ -103,7 +106,7 @@ pub async fn run(
                 async move {
                     let table_url = setup.table_url.clone();
                     let _keep_temp = setup;
-                    run_optimize_case(table_url, &storage)
+                    run_optimize_case(table_url, OPTIMIZE_HEAVY_TARGET_SIZE, &storage)
                         .await
                         .map_err(|e| e.to_string())
                 }
@@ -195,7 +198,7 @@ pub async fn run(
         |table_url| {
             let storage = storage.clone();
             async move {
-                run_optimize_case(table_url, &storage)
+                run_optimize_case(table_url, OPTIMIZE_COMPACT_TARGET_SIZE, &storage)
                     .await
                     .map_err(|e| e.to_string())
             }
@@ -228,7 +231,7 @@ pub async fn run(
         |table_url| {
             let storage = storage.clone();
             async move {
-                run_optimize_case(table_url, &storage)
+                run_optimize_case(table_url, OPTIMIZE_COMPACT_TARGET_SIZE, &storage)
                     .await
                     .map_err(|e| e.to_string())
             }
@@ -261,7 +264,7 @@ pub async fn run(
         |table_url| {
             let storage = storage.clone();
             async move {
-                run_optimize_case(table_url, &storage)
+                run_optimize_case(table_url, OPTIMIZE_HEAVY_TARGET_SIZE, &storage)
                     .await
                     .map_err(|e| e.to_string())
             }
@@ -331,9 +334,13 @@ pub async fn run(
     Ok(out)
 }
 
-async fn run_optimize_case(table_url: Url, storage: &StorageConfig) -> BenchResult<SampleMetrics> {
+async fn run_optimize_case(
+    table_url: Url,
+    target_size: u64,
+    storage: &StorageConfig,
+) -> BenchResult<SampleMetrics> {
     let table = storage.open_table(table_url).await?;
-    let (table, metrics) = table.optimize().with_target_size(1_000_000).await?;
+    let (table, metrics) = table.optimize().with_target_size(target_size).await?;
     Ok(SampleMetrics {
         rows_processed: Some(metrics.total_considered_files as u64),
         bytes_processed: None,

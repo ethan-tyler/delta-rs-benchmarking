@@ -167,6 +167,9 @@ async fn generated_fixtures_support_optimize_vacuum_suite() {
         files_scanned >= files_pruned,
         "files_scanned should be >= files_pruned"
     );
+    let compact_operations = optimize_metrics
+        .operations
+        .expect("compact optimize operations should be present");
 
     let noop_case = cases
         .iter()
@@ -196,9 +199,13 @@ async fn generated_fixtures_support_optimize_vacuum_suite() {
         .first()
         .and_then(|sample| sample.metrics.as_ref())
         .expect("heavy optimize metrics should exist");
+    let heavy_operations = heavy_metrics
+        .operations
+        .expect("heavy optimize operations should be present");
+    assert!(heavy_operations > 0, "heavy optimize should rewrite files");
     assert!(
-        heavy_metrics.operations.unwrap_or(0) > 0,
-        "heavy optimize should rewrite files"
+        heavy_operations > compact_operations,
+        "heavy optimize should perform more rewrite operations than compact case, got {heavy_operations} vs {compact_operations}"
     );
     assert!(
         heavy_metrics.files_scanned.unwrap_or(0) >= heavy_metrics.files_pruned.unwrap_or(0),

@@ -19,6 +19,7 @@ const MERGE_PARTITIONED_TARGET_TABLE_DIR: &str = "merge_partitioned_target_delta
 const OPTIMIZE_SMALL_FILES_TABLE_DIR: &str = "optimize_small_files_delta";
 const OPTIMIZE_COMPACTED_TABLE_DIR: &str = "optimize_compacted_delta";
 const VACUUM_READY_TABLE_DIR: &str = "vacuum_ready_delta";
+const FIXTURE_SCHEMA_VERSION: u32 = 2;
 
 pub fn scale_to_row_count(scale: &str) -> BenchResult<usize> {
     match scale {
@@ -61,6 +62,20 @@ pub fn optimize_compacted_table_path(fixtures_dir: &Path, scale: &str) -> PathBu
 
 pub fn vacuum_ready_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
     fixture_root(fixtures_dir, scale).join(VACUUM_READY_TABLE_DIR)
+}
+
+fn required_local_fixture_tables_exist(root: &Path) -> bool {
+    [
+        NARROW_SALES_TABLE_DIR,
+        MERGE_TARGET_TABLE_DIR,
+        READ_PARTITIONED_TABLE_DIR,
+        MERGE_PARTITIONED_TARGET_TABLE_DIR,
+        OPTIMIZE_SMALL_FILES_TABLE_DIR,
+        OPTIMIZE_COMPACTED_TABLE_DIR,
+        VACUUM_READY_TABLE_DIR,
+    ]
+    .iter()
+    .all(|table| root.join(table).join("_delta_log").exists())
 }
 
 pub fn narrow_sales_table_url(
@@ -162,10 +177,13 @@ pub async fn generate_fixtures(
 
     if root.exists() && !force {
         if let Ok(existing) = load_manifest(fixtures_dir, scale) {
-            let matches_request = existing.schema_version == 1
+            let local_tables_ready =
+                !storage.is_local() || required_local_fixture_tables_exist(&root);
+            let matches_request = existing.schema_version == FIXTURE_SCHEMA_VERSION
                 && existing.seed == seed
                 && existing.scale == scale
-                && existing.rows == rows;
+                && existing.rows == rows
+                && local_tables_ready;
             if matches_request {
                 return Ok(());
             }
@@ -249,7 +267,7 @@ pub async fn generate_fixtures(
     .await?;
 
     let manifest = FixtureManifest {
-        schema_version: 1,
+        schema_version: FIXTURE_SCHEMA_VERSION,
         seed,
         scale: scale.to_string(),
         rows,

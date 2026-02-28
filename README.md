@@ -9,9 +9,20 @@ Repo-first benchmark harness for `delta-rs` with manual branch comparison.
 ./scripts/sync_harness_to_delta_rs.sh
 ./scripts/bench.sh data --scale sf1 --seed 42
 ./scripts/bench.sh run --suite all --scale sf1 --warmup 1 --iters 5 --label local
+./scripts/bench.sh run --suite tpcds --scale sf1 --warmup 1 --iters 1 --label local
 ```
 
 Results are written to `results/<label>/<suite>.json`.
+
+## TPC-DS suite (phase 1)
+
+- Target name: `tpcds`
+- Query cases: `tpcds_q03`, `tpcds_q07`, `tpcds_q64`, `tpcds_q72`
+- Skip policy: `q72` is intentionally included but emitted as `skipped` until DataFusion issue-tracker parity is resolved for that query.
+- Local fixture contract: `fixtures/<scale>/tpcds/<table>/` (Delta tables)
+- Non-local fixture contract: `<table_root>/<scale>/tpcds/<table>/`
+
+`bench.sh` and `delta-bench run --target tpcds` consume pre-generated TPC-DS table fixtures; they do not generate TPC-DS data in this repository.
 
 ## Compare two branches
 
@@ -126,7 +137,7 @@ Example:
 Workflow mode storage configuration:
 - Optional repository variable `BENCH_STORAGE_BACKEND` (`s3`, `gcs`, or `azure`)
 - Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line; for example `table_root=...`, `AWS_REGION=...`)
-- Benchmark workflow comments are advisory and do not gate PR merge.
+- Benchmark workflow comments are advisory and do not gate PR merge; CI gating remains opt-in via `--ci`.
 
 ## Security operations
 
@@ -300,10 +311,10 @@ DELTA_RS_DIR="$(pwd)/.delta-rs-under-test" \
 
 ## Current scope
 
-- Implemented suites: `read_scan`, `write`, `merge_dml`, `metadata`, `optimize_vacuum`
+- Implemented suites: `read_scan`, `write`, `merge_dml`, `metadata`, `optimize_vacuum`, `tpcds` (phase 1; `q72` skipped)
 - Implemented: Wave 1 pruning/compaction benchmark expansion across read, merge, and optimize suites
 - Implemented: suites execute real `deltalake-core` operations (read provider scans, write builders, merge builders, metadata loads)
 - Implemented: deterministic fixture generation + result schema v1
-- Implemented: manual comparison workflow (`scripts/compare_branch.sh` + Python compare) in advisory mode (non-gating)
+- Implemented: manual comparison workflow (`scripts/compare_branch.sh` + Python compare) in advisory mode (non-gating), with optional CI gating mode
 - Implemented: Option B PR benchmark workflow (`.github/workflows/benchmark.yml`) with issue-comment trigger, role-based authorization, and serialized execution
 - Limitation: workflow mode currently relies on `compare_branch.sh` branch names being available in the upstream `delta-rs` checkout; fork PR heads may require manual handling

@@ -18,11 +18,20 @@
 
 1. `delta-bench data` generates deterministic fixtures under `fixtures/<scale>/`.
 2. Fixture generation writes both JSON row snapshots and concrete Delta tables (`narrow_sales_delta`, `merge_target_delta`, `read_partitioned_delta`, `merge_partitioned_target_delta`, `optimize_small_files_delta`, `optimize_compacted_delta`, `vacuum_ready_delta`).
-3. `delta-bench run` executes suite cases using real `deltalake-core` read/write/merge/metadata operations and writes `results/<label>/<suite>.json`.
-4. `compare.py` reads baseline/candidate result JSON and classifies per-case changes.
-5. `security_check.sh` runs before benchmark execution to validate security/fidelity invariants.
-6. Manual compare script prints markdown output suitable for PR comments.
-7. Longitudinal workflow selects revision manifests, builds per-revision artifacts, runs resumable suite/scale matrix (with optional parallelism and host-load guards), ingests normalized JSONL rows, applies retention policies, and generates markdown/HTML trend reports (with optional significance checks).
+3. TPC-DS suite execution consumes pre-generated Delta tables at `fixtures/<scale>/tpcds/<table>/` (or `<table_root>/<scale>/tpcds/<table>/` in object-store mode).
+4. `delta-bench run` executes suite cases using real `deltalake-core` read/write/merge/metadata/DataFusion SQL operations and writes `results/<label>/<suite>.json`.
+5. `compare.py` reads baseline/candidate result JSON and classifies per-case changes.
+6. `security_check.sh` runs before benchmark execution to validate security/fidelity invariants.
+7. Manual compare script prints markdown output suitable for PR comments.
+8. Longitudinal workflow selects revision manifests, builds per-revision artifacts, runs resumable suite/scale matrix (with optional parallelism and host-load guards), ingests normalized JSONL rows, applies retention policies, and generates markdown/HTML trend reports (with optional significance checks).
+
+## TPC-DS target specifics
+
+- Target: `tpcds`
+- Deterministic case naming: `tpcds_qXX`
+- Phase-1 query set: `q03`, `q07`, `q64` enabled
+- Explicit skip policy: `q72` remains cataloged but is emitted as a deterministic skipped case (`success=false`, failure message prefixed with `skipped:`) pending DataFusion issue-tracker parity for query semantics.
+- Scan-efficiency metrics for successful TPC-DS samples are collected from DataFusion physical plan metrics (`files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`) when available.
 
 ## Result schema v1
 
@@ -62,3 +71,4 @@
 - Single-machine sequential branch comparisons
 - Stable default threshold (`0.05`) for no-change classification
 - Explicit benchmark run mode to suppress update/scan/log-noise during timed runs
+- Benchmark policy remains advisory by default; CI gating is explicit and opt-in.

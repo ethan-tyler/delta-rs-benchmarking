@@ -4,10 +4,12 @@
 
 - `crates/delta-bench`: Rust CLI + benchmark execution engine.
 - `python/delta_bench_compare`: result comparison and rendering.
+- `python/delta_bench_longitudinal`: revision selection, artifact builds, matrix orchestration, normalized store, trend reporting.
 - `scripts/prepare_delta_rs.sh`: manages local checkout at `.delta-rs-under-test`.
 - `scripts/sync_harness_to_delta_rs.sh`: syncs `crates/delta-bench` into the checked-out `delta-rs` workspace.
 - `scripts/bench.sh`: wraps `delta-bench` subcommands.
 - `scripts/compare_branch.sh`: sequential base vs candidate run orchestration.
+- `scripts/longitudinal_bench.sh`: shell wrapper for longitudinal orchestration CLI.
 - `scripts/security_mode.sh`: toggles benchmark run mode vs maintenance mode.
 - `scripts/security_check.sh`: preflight guardrails for run mode, interface exposure, and egress policy drift.
 - `scripts/provision_vultr.sh`: Terraform orchestration wrapper for Vultr provisioning operations.
@@ -20,6 +22,7 @@
 4. `compare.py` reads baseline/candidate result JSON and classifies per-case changes.
 5. `security_check.sh` runs before benchmark execution to validate security/fidelity invariants.
 6. Manual compare script prints markdown output suitable for PR comments.
+7. Longitudinal workflow selects revision manifests, builds per-revision artifacts, runs resumable suite/scale matrix (with optional parallelism and host-load guards), ingests normalized JSONL rows, applies retention policies, and generates markdown/HTML trend reports (with optional significance checks).
 
 ## Result schema v1
 

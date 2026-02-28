@@ -135,17 +135,15 @@ async fn run_sql_query(
         })
     });
 
-    Ok(SampleMetrics {
-        rows_processed: Some(rows_processed),
-        bytes_processed: None,
-        operations: None,
-        table_version: None,
-        files_scanned: scan_metrics.files_scanned,
-        files_pruned,
-        bytes_scanned: scan_metrics.bytes_scanned,
-        scan_time_ms: scan_metrics.scan_time_ms,
-        rewrite_time_ms: None,
-    })
+    Ok(
+        SampleMetrics::base(Some(rows_processed), None, None, None).with_scan_rewrite_metrics(
+            scan_metrics.files_scanned,
+            files_pruned,
+            scan_metrics.bytes_scanned,
+            scan_metrics.scan_time_ms,
+            None,
+        ),
+    )
 }
 
 fn into_case_result(result: CaseExecutionResult) -> CaseResult {
@@ -294,4 +292,25 @@ fn sum_pruned_metrics(metrics: &MetricsSet, names: &[&str]) -> Option<u64> {
         }
     }
     seen.then_some(total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deltalake_core::datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
+    use deltalake_core::datafusion::physical_plan::metrics::MetricBuilder;
+
+    #[test]
+    fn files_pruned_uses_file_counts_not_range_pruning_stats() {
+        let metrics_set = ExecutionPlanMetricsSet::new();
+        MetricBuilder::new(&metrics_set)
+            .counter("count_files_pruned", 0)
+            .add(2);
+        MetricBuilder::new(&metrics_set)
+            .pruning_metrics("files_ranges_pruned_statistics", 0)
+            .add_pruned(9);
+        let metrics = metrics_set.clone_inner();
+
+        assert_eq!(sum_file_pruned_metrics(&metrics), Some(2));
+    }
 }

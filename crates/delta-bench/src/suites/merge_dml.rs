@@ -272,17 +272,19 @@ async fn run_merge_case(
         }
     };
 
-    Ok(SampleMetrics {
-        rows_processed: Some(source_rows as u64),
-        bytes_processed: None,
-        operations: Some(1),
-        table_version: table.version().map(|v| v as u64),
-        files_scanned: Some(merge_metrics.num_target_files_scanned as u64),
-        files_pruned: Some(merge_metrics.num_target_files_skipped_during_scan as u64),
-        bytes_scanned: None,
-        scan_time_ms: Some(merge_metrics.scan_time_ms),
-        rewrite_time_ms: Some(merge_metrics.rewrite_time_ms),
-    })
+    Ok(SampleMetrics::base(
+        Some(source_rows as u64),
+        None,
+        Some(1),
+        table.version().map(|v| v as u64),
+    )
+    .with_scan_rewrite_metrics(
+        Some(merge_metrics.num_target_files_scanned as u64),
+        Some(merge_metrics.num_target_files_skipped_during_scan as u64),
+        None,
+        Some(merge_metrics.scan_time_ms),
+        Some(merge_metrics.rewrite_time_ms),
+    ))
 }
 
 async fn seed_merge_target_table(

@@ -341,17 +341,19 @@ async fn run_optimize_case(
 ) -> BenchResult<SampleMetrics> {
     let table = storage.open_table(table_url).await?;
     let (table, metrics) = table.optimize().with_target_size(target_size).await?;
-    Ok(SampleMetrics {
-        rows_processed: Some(metrics.total_considered_files as u64),
-        bytes_processed: None,
-        operations: Some(metrics.num_files_added + metrics.num_files_removed),
-        table_version: table.version().map(|v| v as u64),
-        files_scanned: Some(metrics.total_considered_files as u64),
-        files_pruned: Some(metrics.total_files_skipped as u64),
-        bytes_scanned: None,
-        scan_time_ms: None,
-        rewrite_time_ms: None,
-    })
+    Ok(SampleMetrics::base(
+        Some(metrics.total_considered_files as u64),
+        None,
+        Some(metrics.num_files_added + metrics.num_files_removed),
+        table.version().map(|v| v as u64),
+    )
+    .with_scan_rewrite_metrics(
+        Some(metrics.total_considered_files as u64),
+        Some(metrics.total_files_skipped as u64),
+        None,
+        None,
+        None,
+    ))
 }
 
 async fn run_vacuum_case(
@@ -366,17 +368,12 @@ async fn run_vacuum_case(
         .with_retention_period(ChronoDuration::seconds(0))
         .with_enforce_retention_duration(false)
         .await?;
-    Ok(SampleMetrics {
-        rows_processed: Some(metrics.files_deleted.len() as u64),
-        bytes_processed: None,
-        operations: Some(1),
-        table_version: table.version().map(|v| v as u64),
-        files_scanned: None,
-        files_pruned: None,
-        bytes_scanned: None,
-        scan_time_ms: None,
-        rewrite_time_ms: None,
-    })
+    Ok(SampleMetrics::base(
+        Some(metrics.files_deleted.len() as u64),
+        None,
+        Some(1),
+        table.version().map(|v| v as u64),
+    ))
 }
 
 fn prepare_iteration(source_table_path: &Path) -> BenchResult<IterationSetup> {

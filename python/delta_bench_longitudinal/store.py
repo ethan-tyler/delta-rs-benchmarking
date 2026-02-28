@@ -182,18 +182,51 @@ def _rows_path(store_dir: Path) -> Path:
 
 def _load_index(store_dir: Path) -> set[str]:
     path = _index_path(store_dir)
+    rows_path = _rows_path(store_dir)
     run_ids: set[str]
+    rows_mtime_ns: int | None = None
+    rows_size: int | None = None
     if not path.exists():
         run_ids = set()
     else:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            payload = {}
         run_ids = set(payload.get("run_ids", []))
+        mtime_candidate = payload.get("rows_mtime_ns")
+        size_candidate = payload.get("rows_size")
+        if isinstance(mtime_candidate, int) and isinstance(size_candidate, int):
+            rows_mtime_ns = mtime_candidate
+            rows_size = size_candidate
 
     # Reconcile with existing rows to preserve idempotency if a prior run crashed
-    # after appending rows but before writing index.json.
-    rows_path = _rows_path(store_dir)
+    # after appending rows but before writing index.json. Skip full scan when index
+    # is newer than rows.
     if rows_path.exists():
-        for line in rows_path.read_text(encoding="utf-8").splitlines():
+        should_reconcile = True
+        if rows_mtime_ns is not None and rows_size is not None:
+            try:
+                current = rows_path.stat()
+                should_reconcile = not (
+                    current.st_mtime_ns == rows_mtime_ns and current.st_size == rows_size
+                )
+            except OSError:
+                should_reconcile = True
+        elif path.exists():
+            try:
+                should_reconcile = rows_path.stat().st_mtime > path.stat().st_mtime
+            except OSError:
+                should_reconcile = True
+        if should_reconcile:
+            run_ids.update(_scan_row_run_ids(rows_path))
+    return run_ids
+
+
+def _scan_row_run_ids(rows_path: Path) -> set[str]:
+    run_ids: set[str] = set()
+    with rows_path.open("r", encoding="utf-8") as fh:
+        for line in fh:
             if not line.strip():
                 continue
             try:
@@ -209,7 +242,12 @@ def _load_index(store_dir: Path) -> set[str]:
 def _save_index(store_dir: Path, run_ids: set[str]) -> None:
     path = _index_path(store_dir)
     store_dir.mkdir(parents=True, exist_ok=True)
-    data = {"schema_version": STORE_SCHEMA_VERSION, "run_ids": sorted(run_ids)}
+    data: dict[str, Any] = {"schema_version": STORE_SCHEMA_VERSION, "run_ids": sorted(run_ids)}
+    rows_path = _rows_path(store_dir)
+    if rows_path.exists():
+        rows_stat = rows_path.stat()
+        data["rows_mtime_ns"] = rows_stat.st_mtime_ns
+        data["rows_size"] = rows_stat.st_size
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     temp.replace(path)

@@ -27,8 +27,8 @@ def generate_trend_reports(
     if not (0.0 < significance_alpha <= 1.0):
         raise ValueError("significance_alpha must be in (0, 1]")
 
-    rows, invalid_rows = _load_rows(Path(store_dir))
-    if not rows:
+    grouped, invalid_rows = _load_grouped_rows(Path(store_dir))
+    if not grouped:
         markdown = "# Longitudinal Benchmark Summary\n\nNo longitudinal rows found.\n"
         html_report = _empty_html()
         _write(markdown_path, markdown)
@@ -39,20 +39,6 @@ def generate_trend_reports(
             "significant_regressions": 0,
             "invalid_rows": invalid_rows,
         }
-
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    for row in rows:
-        if not row.get("success"):
-            continue
-        median = row.get("median_ms")
-        if median is None:
-            continue
-        key = (
-            str(row.get("suite", "unknown")),
-            str(row.get("scale", "unknown")),
-            str(row.get("case", "unknown")),
-        )
-        grouped.setdefault(key, []).append(row)
 
     series_stats: list[dict[str, Any]] = []
     regressions: list[dict[str, Any]] = []
@@ -213,19 +199,34 @@ def _mann_whitney_one_sided_p_value(
     return p_value
 
 
-def _load_rows(store_dir: Path) -> tuple[list[dict[str, Any]], int]:
+def _load_grouped_rows(
+    store_dir: Path,
+) -> tuple[dict[tuple[str, str, str], list[dict[str, Any]]], int]:
     rows_path = store_dir / "rows.jsonl"
     if not rows_path.exists():
-        return [], 0
-    rows: list[dict[str, Any]] = []
+        return {}, 0
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
     invalid_rows = 0
-    for line in rows_path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
+    with rows_path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
             try:
-                rows.append(json.loads(line))
+                row = json.loads(line)
             except json.JSONDecodeError:
                 invalid_rows += 1
-    return rows, invalid_rows
+                continue
+            if not row.get("success"):
+                continue
+            if row.get("median_ms") is None:
+                continue
+            key = (
+                str(row.get("suite", "unknown")),
+                str(row.get("scale", "unknown")),
+                str(row.get("case", "unknown")),
+            )
+            grouped.setdefault(key, []).append(row)
+    return grouped, invalid_rows
 
 
 def _markdown_summary(

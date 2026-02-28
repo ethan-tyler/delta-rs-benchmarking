@@ -80,20 +80,10 @@ def prune_store(
                 "applied": apply,
             }
 
-        rows, invalid_rows = _read_rows(rows_path)
-        runs: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            run_id = str(row.get("run_id", ""))
-            if not run_id:
-                continue
-            ts = _row_timestamp(row)
-            bucket = runs.setdefault(run_id, {"timestamp": ts, "rows": []})
-            if ts > bucket["timestamp"]:
-                bucket["timestamp"] = ts
-            bucket["rows"].append(row)
+        run_timestamps, invalid_rows = _scan_run_timestamps(rows_path)
 
         ordered = sorted(
-            [(run_id, info["timestamp"]) for run_id, info in runs.items()],
+            list(run_timestamps.items()),
             key=lambda item: item[1],
             reverse=True,
         )
@@ -104,18 +94,16 @@ def prune_store(
             now=reference,
         )
         candidate_set = set(candidate_runs)
-        kept_rows = [row for row in rows if row.get("run_id") not in candidate_set]
 
         if apply:
-            _write_rows(rows_path, kept_rows)
-            kept_runs = sorted({str(row.get("run_id")) for row in kept_rows if row.get("run_id")})
-            _write_index(index_path, kept_runs)
+            kept_runs = _rewrite_rows_without_candidates(rows_path, candidate_set)
+            _write_index(index_path, sorted(kept_runs))
 
         return {
-            "total_runs": len(runs),
+            "total_runs": len(run_timestamps),
             "candidate_runs": candidate_runs,
             "removed_runs": len(candidate_runs) if apply else 0,
-            "remaining_runs": len(runs) - len(candidate_runs) if apply else len(runs),
+            "remaining_runs": len(run_timestamps) - len(candidate_runs) if apply else len(run_timestamps),
             "invalid_rows_skipped": invalid_rows,
             "applied": apply,
         }
@@ -167,28 +155,53 @@ def _artifact_timestamp(path: Path) -> datetime:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
 
-def _read_rows(path: Path) -> tuple[list[dict[str, Any]], int]:
-    rows: list[dict[str, Any]] = []
+def _scan_run_timestamps(path: Path) -> tuple[dict[str, datetime], int]:
+    runs: dict[str, datetime] = {}
     skipped = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.strip():
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
             try:
-                rows.append(json.loads(line))
+                row = json.loads(line)
             except json.JSONDecodeError:
                 skipped += 1
-    return rows, skipped
+                continue
+            run_id = str(row.get("run_id", ""))
+            if not run_id:
+                continue
+            ts = _row_timestamp(row)
+            previous = runs.get(run_id)
+            if previous is None or ts > previous:
+                runs[run_id] = ts
+    return runs, skipped
 
 
-def _write_rows(path: Path, rows: list[dict[str, Any]]) -> None:
+def _rewrite_rows_without_candidates(path: Path, candidate_runs: set[str]) -> set[str]:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f".{path.name}.tmp")
+    kept_runs: set[str] = set()
     with temp.open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row, sort_keys=True))
-            fh.write("\n")
+        with path.open("r", encoding="utf-8") as src:
+            for line in src:
+                if not line.strip():
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                run_id = str(row.get("run_id", ""))
+                if run_id and run_id in candidate_runs:
+                    continue
+                if run_id:
+                    kept_runs.add(run_id)
+                # Normalize line format during retention rewrite.
+                fh.write(json.dumps(row, sort_keys=True))
+                fh.write("\n")
         fh.flush()
         os.fsync(fh.fileno())
     temp.replace(path)
+    return kept_runs
 
 
 def _write_index(path: Path, run_ids: list[str]) -> None:

@@ -37,8 +37,8 @@ pub async fn run(
     storage: &StorageConfig,
 ) -> BenchResult<Vec<CaseResult>> {
     if storage.is_local() {
-        let optimize_source = optimize_small_files_table_path(fixtures_dir, scale);
-        let vacuum_source = vacuum_ready_table_path(fixtures_dir, scale);
+        let optimize_source = optimize_small_files_table_path(fixtures_dir, scale)?;
+        let vacuum_source = vacuum_ready_table_path(fixtures_dir, scale)?;
 
         if !optimize_source.exists() || !vacuum_source.exists() {
             return Ok(fixture_error_cases(
@@ -228,6 +228,11 @@ async fn run_optimize_case(table_url: Url, storage: &StorageConfig) -> BenchResu
         bytes_processed: None,
         operations: Some(metrics.num_files_added + metrics.num_files_removed),
         table_version: table.version().map(|v| v as u64),
+        files_scanned: Some(metrics.total_considered_files as u64),
+        files_pruned: Some(metrics.total_files_skipped as u64),
+        bytes_scanned: None,
+        scan_time_ms: None,
+        rewrite_time_ms: None,
     })
 }
 
@@ -248,6 +253,11 @@ async fn run_vacuum_case(
         bytes_processed: None,
         operations: Some(1),
         table_version: table.version().map(|v| v as u64),
+        files_scanned: None,
+        files_pruned: None,
+        bytes_scanned: None,
+        scan_time_ms: None,
+        rewrite_time_ms: None,
     })
 }
 

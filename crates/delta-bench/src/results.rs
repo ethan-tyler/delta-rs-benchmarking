@@ -44,6 +44,16 @@ pub struct SampleMetrics {
     pub bytes_processed: Option<u64>,
     pub operations: Option<u64>,
     pub table_version: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_scanned: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_pruned: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_scanned: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scan_time_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewrite_time_ms: Option<u64>,
 }
 
 impl From<u64> for SampleMetrics {
@@ -53,6 +63,11 @@ impl From<u64> for SampleMetrics {
             bytes_processed: None,
             operations: None,
             table_version: None,
+            files_scanned: None,
+            files_pruned: None,
+            bytes_scanned: None,
+            scan_time_ms: None,
+            rewrite_time_ms: None,
         }
     }
 }

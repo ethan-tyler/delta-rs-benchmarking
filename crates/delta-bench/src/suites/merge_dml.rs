@@ -89,7 +89,7 @@ pub async fn run(
         Err(e) => return Ok(fixture_error_cases(&e.to_string())),
     };
     if storage.is_local() {
-        let fixture_table_dir = merge_target_table_path(fixtures_dir, scale);
+        let fixture_table_dir = merge_target_table_path(fixtures_dir, scale)?;
         let mut out = Vec::new();
         for case in MERGE_CASES {
             let c = run_case_async_with_setup(
@@ -101,7 +101,9 @@ pub async fn run(
                     let rows = Arc::clone(&rows);
                     let storage = storage.clone();
                     async move {
-                        run_merge_case(rows.as_slice(), setup.table_url, case, &storage)
+                        let table_url = setup.table_url.clone();
+                        let _keep_temp = setup;
+                        run_merge_case(rows.as_slice(), table_url, case, &storage)
                             .await
                             .map_err(|e| e.to_string())
                     }
@@ -177,7 +179,7 @@ async fn run_merge_case(
 
     let predicate = col("target.id").eq(col("source.id"));
 
-    let (table, _metrics) = match case.mode {
+    let (table, merge_metrics) = match case.mode {
         MergeMode::Delete => {
             table
                 .merge(source, predicate)
@@ -213,6 +215,11 @@ async fn run_merge_case(
         bytes_processed: None,
         operations: Some(1),
         table_version: table.version().map(|v| v as u64),
+        files_scanned: Some(merge_metrics.num_target_files_scanned as u64),
+        files_pruned: Some(merge_metrics.num_target_files_skipped_during_scan as u64),
+        bytes_scanned: None,
+        scan_time_ms: Some(merge_metrics.scan_time_ms),
+        rewrite_time_ms: Some(merge_metrics.rewrite_time_ms),
     })
 }
 

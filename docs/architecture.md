@@ -39,7 +39,16 @@
   - `run_mode`
   - `maintenance_window_id`
 - Cases: success/failure, sample timings, failure payload when applicable
-- Samples: `elapsed_ms` plus normalized `metrics` (`rows_processed`, `bytes_processed`, `operations`, `table_version`)
+- Samples: `elapsed_ms` plus normalized `metrics`:
+  - `rows_processed`
+  - `bytes_processed`
+  - `operations`
+  - `table_version`
+  - `files_scanned` (read/merge/optimize)
+  - `files_pruned` (read/merge/optimize)
+  - `bytes_scanned` (read scans when available)
+  - `scan_time_ms` (read/merge)
+  - `rewrite_time_ms` (merge)
 
 ## Reproducibility controls
 

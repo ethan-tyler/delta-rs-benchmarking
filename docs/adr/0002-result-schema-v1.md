@@ -25,6 +25,9 @@ Use JSON result schema v1 with explicit case-level samples and failure payloads.
   - `case`
   - `success`
   - `samples[]` (`elapsed_ms`, optional rows/bytes)
+  - `samples[].metrics` normalized benchmark metrics:
+    - Existing: `rows_processed`, `bytes_processed`, `operations`, `table_version`
+    - Backward-compatible optional additions: `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`, `rewrite_time_ms`
   - `failure` message when unsuccessful
 
 ## Rationale

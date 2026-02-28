@@ -98,6 +98,11 @@ async fn run_append_case(
         bytes_processed: None,
         operations: Some(operations),
         table_version: table.version().map(|v| v as u64),
+        files_scanned: None,
+        files_pruned: None,
+        bytes_scanned: None,
+        scan_time_ms: None,
+        rewrite_time_ms: None,
     })
 }
 
@@ -130,6 +135,11 @@ async fn run_overwrite_case(
         bytes_processed: None,
         operations: Some(2),
         table_version: table.version().map(|v| v as u64),
+        files_scanned: None,
+        files_pruned: None,
+        bytes_scanned: None,
+        scan_time_ms: None,
+        rewrite_time_ms: None,
     })
 }
 

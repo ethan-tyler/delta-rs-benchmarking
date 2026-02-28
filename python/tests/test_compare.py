@@ -66,6 +66,101 @@ def test_render_markdown_includes_summary_table() -> None:
     assert "| metric | value |" in out
 
 
+def test_render_text_default_output_does_not_include_metric_columns() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {"files_scanned": 10, "files_pruned": 2},
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {"files_scanned": 9, "files_pruned": 1},
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison)
+    assert "Case | baseline | candidate | change" in out
+    assert "files_scanned" not in out
+    assert "files_pruned" not in out
+
+
+def test_render_text_include_metrics_outputs_metric_columns() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "files_scanned": 10,
+                            "files_pruned": 2,
+                            "bytes_scanned": 1024,
+                            "scan_time_ms": 7,
+                            "rewrite_time_ms": 11,
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "files_scanned": 9,
+                            "files_pruned": 1,
+                            "bytes_scanned": 768,
+                            "scan_time_ms": 5,
+                            "rewrite_time_ms": 8,
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison, include_metrics=True)
+    assert "baseline_files_scanned" in out
+    assert "candidate_files_scanned" in out
+    assert "baseline_files_pruned" in out
+    assert "candidate_files_pruned" in out
+    assert "baseline_bytes_scanned" in out
+    assert "candidate_bytes_scanned" in out
+    assert "baseline_scan_time_ms" in out
+    assert "candidate_scan_time_ms" in out
+    assert "baseline_rewrite_time_ms" in out
+    assert "candidate_rewrite_time_ms" in out
+
+
 def test_ci_policy_fails_when_slower_cases_exceed_allowed() -> None:
     base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
     cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])

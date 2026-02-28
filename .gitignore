@@ -1,4 +1,5 @@
 target/
+.worktrees/
 .delta-rs-under-test/
 fixtures/
 results/

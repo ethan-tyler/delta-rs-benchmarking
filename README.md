@@ -31,6 +31,24 @@ Tuning options:
 - `BENCH_RETRY_ATTEMPTS` (default `2`) for transient failures.
 - `BENCH_RETRY_DELAY_SECONDS` (default `5`) between retry attempts.
 - `--noise-threshold`, `--ci`, and `--max-allowed-regressions` to enable compare-gating policy.
+- `--storage-backend` and repeatable `--storage-option KEY=VALUE` to run fixture generation + suite execution against object storage.
+
+To include scan/rewrite metric columns in compare output:
+
+```bash
+PYTHONPATH=python python3 -m delta_bench_compare.compare \
+  results/base/read_scan.json \
+  results/candidate/read_scan.json \
+  --format markdown \
+  --include-metrics
+```
+
+New optional sample metric fields emitted by benchmark suites:
+- `files_scanned`
+- `files_pruned`
+- `bytes_scanned`
+- `scan_time_ms`
+- `rewrite_time_ms`
 
 ## Cloud/object-store mode
 
@@ -79,11 +97,23 @@ Example:
   main feature/merge-opt all
 
 ./scripts/compare_branch.sh \
+  --remote-runner bench-runner-01 \
+  --remote-root /opt/delta-rs-benchmarking \
+  --storage-backend s3 \
+  --storage-option table_root=s3://bench-bucket/delta-bench \
+  --storage-option AWS_REGION=us-east-1 \
+  main feature/merge-opt optimize_vacuum
+
+./scripts/compare_branch.sh \
   --ci \
   --max-allowed-regressions 0 \
   --noise-threshold 0.05 \
   main feature/merge-opt all
 ```
+
+Workflow mode storage configuration:
+- Optional repository variable `BENCH_STORAGE_BACKEND` (`s3`, `gcs`, or `azure`)
+- Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line; for example `table_root=...`, `AWS_REGION=...`)
 
 ## Security operations
 

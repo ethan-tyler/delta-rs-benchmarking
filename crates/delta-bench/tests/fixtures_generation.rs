@@ -1,4 +1,4 @@
-use delta_bench::data::fixtures::{generate_fixtures, load_manifest};
+use delta_bench::data::fixtures::{fixture_root, generate_fixtures, load_manifest};
 use delta_bench::storage::StorageConfig;
 
 #[tokio::test]
@@ -30,4 +30,12 @@ async fn rejects_unknown_scale() {
         err.to_string().contains("unknown scale"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn fixture_root_rejects_path_traversal_scale() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let err = fixture_root(temp.path(), "../../escape")
+        .expect_err("path traversal scale must be rejected at fixture boundary");
+    assert!(err.to_string().contains("scale"), "unexpected error: {err}");
 }

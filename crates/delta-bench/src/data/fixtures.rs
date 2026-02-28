@@ -28,24 +28,48 @@ pub fn scale_to_row_count(scale: &str) -> BenchResult<usize> {
     }
 }
 
-pub fn fixture_root(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixtures_dir.join(scale)
+pub fn validate_scale(scale: &str) -> BenchResult<()> {
+    if scale.is_empty() {
+        return Err(BenchError::InvalidArgument(
+            "scale must not be empty".to_string(),
+        ));
+    }
+    if matches!(scale, "." | "..") {
+        return Err(BenchError::InvalidArgument(format!(
+            "scale '{scale}' is not allowed"
+        )));
+    }
+    if !scale
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+    {
+        return Err(BenchError::InvalidArgument(
+            "scale contains invalid characters; allowed: [A-Za-z0-9._-]".to_string(),
+        ));
+    }
+    let _ = scale_to_row_count(scale)?;
+    Ok(())
 }
 
-pub fn narrow_sales_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(NARROW_SALES_TABLE_DIR)
+pub fn fixture_root(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    validate_scale(scale)?;
+    Ok(fixtures_dir.join(scale))
 }
 
-pub fn merge_target_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(MERGE_TARGET_TABLE_DIR)
+pub fn narrow_sales_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    Ok(fixture_root(fixtures_dir, scale)?.join(NARROW_SALES_TABLE_DIR))
 }
 
-pub fn optimize_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(OPTIMIZE_SMALL_FILES_TABLE_DIR)
+pub fn merge_target_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    Ok(fixture_root(fixtures_dir, scale)?.join(MERGE_TARGET_TABLE_DIR))
 }
 
-pub fn vacuum_ready_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(VACUUM_READY_TABLE_DIR)
+pub fn optimize_small_files_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    Ok(fixture_root(fixtures_dir, scale)?.join(OPTIMIZE_SMALL_FILES_TABLE_DIR))
+}
+
+pub fn vacuum_ready_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    Ok(fixture_root(fixtures_dir, scale)?.join(VACUUM_READY_TABLE_DIR))
 }
 
 pub fn narrow_sales_table_url(
@@ -54,7 +78,7 @@ pub fn narrow_sales_table_url(
     storage: &StorageConfig,
 ) -> BenchResult<Url> {
     storage.table_url_for(
-        &narrow_sales_table_path(fixtures_dir, scale),
+        &narrow_sales_table_path(fixtures_dir, scale)?,
         scale,
         NARROW_SALES_TABLE_DIR,
     )
@@ -66,7 +90,7 @@ pub fn merge_target_table_url(
     storage: &StorageConfig,
 ) -> BenchResult<Url> {
     storage.table_url_for(
-        &merge_target_table_path(fixtures_dir, scale),
+        &merge_target_table_path(fixtures_dir, scale)?,
         scale,
         MERGE_TARGET_TABLE_DIR,
     )
@@ -78,7 +102,7 @@ pub fn optimize_small_files_table_url(
     storage: &StorageConfig,
 ) -> BenchResult<Url> {
     storage.table_url_for(
-        &optimize_small_files_table_path(fixtures_dir, scale),
+        &optimize_small_files_table_path(fixtures_dir, scale)?,
         scale,
         OPTIMIZE_SMALL_FILES_TABLE_DIR,
     )
@@ -90,7 +114,7 @@ pub fn vacuum_ready_table_url(
     storage: &StorageConfig,
 ) -> BenchResult<Url> {
     storage.table_url_for(
-        &vacuum_ready_table_path(fixtures_dir, scale),
+        &vacuum_ready_table_path(fixtures_dir, scale)?,
         scale,
         VACUUM_READY_TABLE_DIR,
     )
@@ -103,7 +127,7 @@ pub async fn generate_fixtures(
     force: bool,
     storage: &StorageConfig,
 ) -> BenchResult<()> {
-    let root = fixture_root(fixtures_dir, scale);
+    let root = fixture_root(fixtures_dir, scale)?;
     let dataset_dir = root.join("narrow_sales");
     let data_path = dataset_dir.join("rows.jsonl");
     let manifest_path = root.join("manifest.json");
@@ -297,7 +321,7 @@ fn rows_to_batch(rows: &[NarrowSaleRow]) -> BenchResult<arrow::record_batch::Rec
 }
 
 pub fn load_rows(fixtures_dir: &Path, scale: &str) -> BenchResult<Vec<NarrowSaleRow>> {
-    let data_path = fixture_root(fixtures_dir, scale)
+    let data_path = fixture_root(fixtures_dir, scale)?
         .join("narrow_sales")
         .join("rows.jsonl");
 
@@ -314,7 +338,7 @@ pub fn load_rows(fixtures_dir: &Path, scale: &str) -> BenchResult<Vec<NarrowSale
 }
 
 pub fn load_manifest(fixtures_dir: &Path, scale: &str) -> BenchResult<FixtureManifest> {
-    let path = fixture_root(fixtures_dir, scale).join("manifest.json");
+    let path = fixture_root(fixtures_dir, scale)?.join("manifest.json");
     let manifest: FixtureManifest = serde_json::from_slice(&fs::read(path)?)?;
     Ok(manifest)
 }

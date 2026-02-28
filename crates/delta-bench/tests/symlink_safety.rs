@@ -14,7 +14,7 @@ async fn metadata_suite_rejects_symlink_entries_in_fixture_tree() {
         .await
         .expect("generate fixtures");
 
-    let table_path = narrow_sales_table_path(temp.path(), "sf1");
+    let table_path = narrow_sales_table_path(temp.path(), "sf1").expect("table path");
     let link_path = table_path.join("symlink_escape");
     symlink(temp.path(), &link_path).expect("create symlink");
 

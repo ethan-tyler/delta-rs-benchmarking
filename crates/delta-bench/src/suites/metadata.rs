@@ -29,7 +29,7 @@ pub async fn run(
     storage: &StorageConfig,
 ) -> BenchResult<Vec<CaseResult>> {
     if storage.is_local() {
-        let table_path = narrow_sales_table_path(fixtures_dir, scale);
+        let table_path = narrow_sales_table_path(fixtures_dir, scale)?;
         let mut out = Vec::new();
 
         let c1 = run_case_async_with_setup(

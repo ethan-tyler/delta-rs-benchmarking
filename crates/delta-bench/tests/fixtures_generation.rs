@@ -1,4 +1,4 @@
-use delta_bench::data::fixtures::{generate_fixtures, load_manifest};
+use delta_bench::data::fixtures::{fixture_root, generate_fixtures, load_manifest};
 use delta_bench::storage::StorageConfig;
 
 #[tokio::test]

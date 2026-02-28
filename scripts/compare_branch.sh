@@ -96,6 +96,14 @@ while [[ $# -gt 0 ]]; do
       STORAGE_OPTIONS+=("$2")
       shift 2
       ;;
+    --storage-backend)
+      STORAGE_BACKEND="$2"
+      shift 2
+      ;;
+    --storage-option)
+      STORAGE_OPTIONS+=("$2")
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0

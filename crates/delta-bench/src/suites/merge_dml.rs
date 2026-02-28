@@ -123,6 +123,14 @@ pub async fn run(
         Err(e) => return Ok(fixture_error_cases(&e.to_string())),
     };
     if storage.is_local() {
+        let standard_fixture = merge_target_table_path(fixtures_dir, scale);
+        let partitioned_fixture = merge_partitioned_target_table_path(fixtures_dir, scale);
+        if !standard_fixture.exists() || !partitioned_fixture.exists() {
+            return Ok(fixture_error_cases(
+                "missing merge fixture tables; run bench data first",
+            ));
+        }
+
         let mut out = Vec::new();
         for case in MERGE_CASES {
             let fixture_table_dir =

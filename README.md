@@ -65,6 +65,9 @@ Wave 1 fixture generation now also materializes:
 - `merge_partitioned_target_delta`
 - `optimize_compacted_delta`
 
+Fixture manifests now use schema version `2`; running `delta-bench data` without `--force`
+automatically regenerates stale or partially-missing local fixture tables.
+
 ## Cloud/object-store mode
 
 Local remains the default backend. To run fixture-backed suites against object storage:

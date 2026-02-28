@@ -6,8 +6,9 @@ use chrono::Duration as ChronoDuration;
 use url::Url;
 
 use crate::data::fixtures::{
-    load_rows, optimize_small_files_table_path, vacuum_ready_table_path,
-    write_delta_table_small_files, write_vacuum_ready_table,
+    load_rows, optimize_compacted_table_path, optimize_small_files_table_path,
+    vacuum_ready_table_path, write_delta_table, write_delta_table_small_files,
+    write_vacuum_ready_table,
 };
 use crate::error::{BenchError, BenchResult};
 use crate::results::{CaseFailure, CaseResult, SampleMetrics};
@@ -24,6 +25,8 @@ struct IterationSetup {
 pub fn case_names() -> Vec<String> {
     vec![
         "optimize_compact_small_files".to_string(),
+        "optimize_noop_already_compact".to_string(),
+        "optimize_heavy_compaction".to_string(),
         "vacuum_dry_run_lite".to_string(),
         "vacuum_execute_lite".to_string(),
     ]
@@ -38,9 +41,13 @@ pub async fn run(
 ) -> BenchResult<Vec<CaseResult>> {
     if storage.is_local() {
         let optimize_source = optimize_small_files_table_path(fixtures_dir, scale);
+        let optimize_compacted_source = optimize_compacted_table_path(fixtures_dir, scale);
         let vacuum_source = vacuum_ready_table_path(fixtures_dir, scale);
 
-        if !optimize_source.exists() || !vacuum_source.exists() {
+        if !optimize_source.exists()
+            || !optimize_compacted_source.exists()
+            || !vacuum_source.exists()
+        {
             return Ok(fixture_error_cases(
                 "missing optimize/vacuum fixture tables; run bench data first",
             ));
@@ -66,6 +73,44 @@ pub async fn run(
         )
         .await;
         out.push(into_case_result(optimize));
+
+        let noop = run_case_async_with_setup(
+            "optimize_noop_already_compact",
+            warmup,
+            iterations,
+            || prepare_iteration(&optimize_compacted_source).map_err(|e| e.to_string()),
+            |setup| {
+                let storage = storage.clone();
+                async move {
+                    let table_url = setup.table_url.clone();
+                    let _keep_temp = setup;
+                    run_optimize_case(table_url, &storage)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
+            },
+        )
+        .await;
+        out.push(into_case_result(noop));
+
+        let heavy = run_case_async_with_setup(
+            "optimize_heavy_compaction",
+            warmup,
+            iterations,
+            || prepare_iteration(&optimize_source).map_err(|e| e.to_string()),
+            |setup| {
+                let storage = storage.clone();
+                async move {
+                    let table_url = setup.table_url.clone();
+                    let _keep_temp = setup;
+                    run_optimize_case(table_url, &storage)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
+            },
+        )
+        .await;
+        out.push(into_case_result(heavy));
 
         let dry_run = run_case_async_with_setup(
             "vacuum_dry_run_lite",
@@ -159,6 +204,72 @@ pub async fn run(
     .await;
     out.push(into_case_result(optimize));
 
+    let noop = run_case_async_with_async_setup(
+        "optimize_noop_already_compact",
+        warmup,
+        iterations,
+        || {
+            let storage = storage.clone();
+            let rows = Arc::clone(&optimize_seed_rows);
+            async move {
+                let table_url = storage
+                    .isolated_table_url(
+                        scale,
+                        "optimize_compacted_delta",
+                        "optimize_noop_already_compact",
+                    )
+                    .map_err(|e| e.to_string())?;
+                write_delta_table(table_url.clone(), rows.as_slice(), &storage)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<Url, String>(table_url)
+            }
+        },
+        |table_url| {
+            let storage = storage.clone();
+            async move {
+                run_optimize_case(table_url, &storage)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        },
+    )
+    .await;
+    out.push(into_case_result(noop));
+
+    let heavy = run_case_async_with_async_setup(
+        "optimize_heavy_compaction",
+        warmup,
+        iterations,
+        || {
+            let storage = storage.clone();
+            let rows = Arc::clone(&optimize_seed_rows);
+            async move {
+                let table_url = storage
+                    .isolated_table_url(
+                        scale,
+                        "optimize_small_files_delta",
+                        "optimize_heavy_compaction",
+                    )
+                    .map_err(|e| e.to_string())?;
+                write_delta_table_small_files(table_url.clone(), rows.as_slice(), 128, &storage)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<Url, String>(table_url)
+            }
+        },
+        |table_url| {
+            let storage = storage.clone();
+            async move {
+                run_optimize_case(table_url, &storage)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        },
+    )
+    .await;
+    out.push(into_case_result(heavy));
+
     let dry_run = run_case_async_with_async_setup(
         "vacuum_dry_run_lite",
         warmup,
@@ -223,17 +334,19 @@ pub async fn run(
 async fn run_optimize_case(table_url: Url, storage: &StorageConfig) -> BenchResult<SampleMetrics> {
     let table = storage.open_table(table_url).await?;
     let (table, metrics) = table.optimize().with_target_size(1_000_000).await?;
-    Ok(SampleMetrics {
-        rows_processed: Some(metrics.total_considered_files as u64),
-        bytes_processed: None,
-        operations: Some(metrics.num_files_added + metrics.num_files_removed),
-        table_version: table.version().map(|v| v as u64),
-        files_scanned: Some(metrics.total_considered_files as u64),
-        files_pruned: Some(metrics.total_files_skipped as u64),
-        bytes_scanned: None,
-        scan_time_ms: None,
-        rewrite_time_ms: None,
-    })
+    Ok(SampleMetrics::base(
+        Some(metrics.total_considered_files as u64),
+        None,
+        Some(metrics.num_files_added + metrics.num_files_removed),
+        table.version().map(|v| v as u64),
+    )
+    .with_scan_rewrite_metrics(
+        Some(metrics.total_considered_files as u64),
+        Some(metrics.total_files_skipped as u64),
+        None,
+        None,
+        None,
+    ))
 }
 
 async fn run_vacuum_case(
@@ -248,17 +361,12 @@ async fn run_vacuum_case(
         .with_retention_period(ChronoDuration::seconds(0))
         .with_enforce_retention_duration(false)
         .await?;
-    Ok(SampleMetrics {
-        rows_processed: Some(metrics.files_deleted.len() as u64),
-        bytes_processed: None,
-        operations: Some(1),
-        table_version: table.version().map(|v| v as u64),
-        files_scanned: None,
-        files_pruned: None,
-        bytes_scanned: None,
-        scan_time_ms: None,
-        rewrite_time_ms: None,
-    })
+    Ok(SampleMetrics::base(
+        Some(metrics.files_deleted.len() as u64),
+        None,
+        Some(1),
+        table.version().map(|v| v as u64),
+    ))
 }
 
 fn prepare_iteration(source_table_path: &Path) -> BenchResult<IterationSetup> {

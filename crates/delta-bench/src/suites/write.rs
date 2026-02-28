@@ -93,17 +93,12 @@ async fn run_append_case(
         table = table.write(vec![batch]).with_save_mode(mode).await?;
     }
 
-    Ok(SampleMetrics {
-        rows_processed: Some(rows.len() as u64),
-        bytes_processed: None,
-        operations: Some(operations),
-        table_version: table.version().map(|v| v as u64),
-        files_scanned: None,
-        files_pruned: None,
-        bytes_scanned: None,
-        scan_time_ms: None,
-        rewrite_time_ms: None,
-    })
+    Ok(SampleMetrics::base(
+        Some(rows.len() as u64),
+        None,
+        Some(operations),
+        table.version().map(|v| v as u64),
+    ))
 }
 
 async fn run_overwrite_case(
@@ -130,17 +125,12 @@ async fn run_overwrite_case(
         .with_save_mode(SaveMode::Overwrite)
         .await?;
 
-    Ok(SampleMetrics {
-        rows_processed: Some((rows.len() as u64) * 2),
-        bytes_processed: None,
-        operations: Some(2),
-        table_version: table.version().map(|v| v as u64),
-        files_scanned: None,
-        files_pruned: None,
-        bytes_scanned: None,
-        scan_time_ms: None,
-        rewrite_time_ms: None,
-    })
+    Ok(SampleMetrics::base(
+        Some((rows.len() as u64) * 2),
+        None,
+        Some(2),
+        table.version().map(|v| v as u64),
+    ))
 }
 
 fn rows_to_batch(

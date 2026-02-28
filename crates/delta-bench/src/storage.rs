@@ -109,10 +109,15 @@ impl StorageConfig {
         table_name: &str,
     ) -> BenchResult<Url> {
         if self.is_local() {
-            Url::from_directory_path(local_table_path).map_err(|()| {
+            let absolute_path = if local_table_path.is_absolute() {
+                local_table_path.to_path_buf()
+            } else {
+                std::env::current_dir()?.join(local_table_path)
+            };
+            Url::from_directory_path(&absolute_path).map_err(|()| {
                 BenchError::InvalidArgument(format!(
                     "failed to create table URL for {}",
-                    local_table_path.display()
+                    absolute_path.display()
                 ))
             })
         } else {

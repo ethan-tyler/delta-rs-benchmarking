@@ -57,6 +57,13 @@ async fn merge_samples_include_merge_scan_and_rewrite_metrics() {
     let cases = merge_dml::run(temp.path(), "sf1", 0, 1, &storage)
         .await
         .expect("run merge suite");
+    assert!(
+        cases
+            .iter()
+            .any(|case| case.case == "merge_partition_localized_1pct"),
+        "expected merge_partition_localized_1pct case; cases={:?}",
+        cases.iter().map(|case| &case.case).collect::<Vec<_>>()
+    );
     let sample_metrics = cases
         .iter()
         .filter(|case| case.success)

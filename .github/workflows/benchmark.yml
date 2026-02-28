@@ -151,13 +151,26 @@ jobs:
           BASE_REF: ${{ steps.pr.outputs.base_ref }}
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           SUITE: ${{ steps.parse.outputs.suite }}
+          BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
+          BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
         run: |
           set -euo pipefail
           status=0
+          storage_args=()
+          if [[ -n "${BENCH_STORAGE_BACKEND:-}" ]]; then
+            storage_args+=(--storage-backend "${BENCH_STORAGE_BACKEND}")
+          fi
+          if [[ -n "${BENCH_STORAGE_OPTIONS:-}" ]]; then
+            while IFS= read -r opt; do
+              [[ -z "${opt}" ]] && continue
+              storage_args+=(--storage-option "${opt}")
+            done <<< "${BENCH_STORAGE_OPTIONS}"
+          fi
           set +e
           ./scripts/compare_branch.sh \
             --ci \
             --max-allowed-regressions 0 \
+            "${storage_args[@]}" \
             "$BASE_REF" \
             "$HEAD_REF" \
             "$SUITE" > benchmark_output.md 2>&1

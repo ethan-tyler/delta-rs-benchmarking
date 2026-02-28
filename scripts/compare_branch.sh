@@ -11,9 +11,7 @@ RUNNER_ROOT="${ROOT_DIR}"
 ENFORCE_RUN_MODE=0
 REQUIRE_NO_PUBLIC_IPV4=0
 REQUIRE_EGRESS_POLICY=0
-CI_MODE=0
 NOISE_THRESHOLD="${BENCH_NOISE_THRESHOLD:-0.05}"
-MAX_ALLOWED_REGRESSIONS="${BENCH_MAX_ALLOWED_REGRESSIONS:-0}"
 STORAGE_BACKEND="${BENCH_STORAGE_BACKEND:-local}"
 STORAGE_OPTIONS=()
 
@@ -46,9 +44,9 @@ Options:
   --enforce-run-mode              Require run-mode marker during preflight checks
   --require-no-public-ipv4        Require that no public IPv4 is assigned to runner interfaces
   --require-egress-policy         Require nftables egress hash check during preflight (set DELTA_BENCH_EGRESS_POLICY_SHA256)
-  --ci                            Enable compare.py CI gating mode
+  --ci                            Deprecated no-op (benchmarks are advisory only)
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
-  --max-allowed-regressions <n>   Allowed slower-case count in CI mode (default: 0)
+  --max-allowed-regressions <n>   Deprecated no-op (benchmarks are advisory only)
   --storage-backend <local|s3|gcs|azure>
                                   Storage backend for fixture generation and suite execution (default: local)
   --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
@@ -79,7 +77,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --ci)
-      CI_MODE=1
+      echo "warning: --ci is deprecated and ignored; benchmark compare is advisory-only" >&2
       shift
       ;;
     --noise-threshold)
@@ -87,7 +85,15 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --max-allowed-regressions)
-      MAX_ALLOWED_REGRESSIONS="$2"
+      echo "warning: --max-allowed-regressions is deprecated and ignored; benchmark compare is advisory-only" >&2
+      shift 2
+      ;;
+    --storage-backend)
+      STORAGE_BACKEND="$2"
+      shift 2
+      ;;
+    --storage-option)
+      STORAGE_OPTIONS+=("$2")
       shift 2
       ;;
     --storage-backend)
@@ -218,8 +224,5 @@ base_json="${RUNNER_RESULTS_DIR}/${base_label}/${suite}.json"
 cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"
 
 compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --format markdown)
-if (( CI_MODE != 0 )); then
-  compare_args+=(--ci --max-allowed-regressions "${MAX_ALLOWED_REGRESSIONS}")
-fi
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use delta_bench::cli::StorageBackend;
 use delta_bench::storage::StorageConfig;
@@ -99,4 +100,30 @@ fn non_local_storage_can_produce_unique_isolated_table_urls() {
         .starts_with("s3://bench-bucket/delta-bench/sf1/"));
     assert!(!first.as_str().contains(" "));
     assert!(!first.as_str().contains("/case/with spaces"));
+}
+
+#[test]
+fn local_storage_resolves_relative_paths_for_file_urls() {
+    let config = StorageConfig::local();
+    let relative = Path::new("fixtures/sf1/narrow_sales_delta");
+
+    let url = config
+        .table_url_for(relative, "sf1", "narrow_sales_delta")
+        .expect("relative local paths should convert to file URLs");
+    assert_eq!(url.scheme(), "file");
+
+    let url_path = url.to_file_path().expect("file URL should convert to path");
+    let cwd = std::env::current_dir().expect("cwd");
+    assert!(
+        url_path.starts_with(&cwd),
+        "expected URL path '{:?}' to be under cwd '{:?}'",
+        url_path,
+        cwd
+    );
+    assert!(
+        url_path.ends_with(relative),
+        "expected URL path '{:?}' to end with '{:?}'",
+        url_path,
+        relative
+    );
 }

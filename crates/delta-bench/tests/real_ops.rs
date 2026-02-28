@@ -131,7 +131,7 @@ async fn generated_fixtures_support_optimize_vacuum_suite() {
     let cases = optimize_vacuum::run(temp.path(), "sf1", 0, 1, &storage)
         .await
         .expect("optimize_vacuum suite run");
-    assert_eq!(cases.len(), 3);
+    assert_eq!(cases.len(), 5);
     assert!(
         cases.iter().all(|c| c.success),
         "optimize_vacuum failures: {:?}",
@@ -162,6 +162,43 @@ async fn generated_fixtures_support_optimize_vacuum_suite() {
     assert!(
         files_scanned >= files_pruned,
         "files_scanned should be >= files_pruned"
+    );
+
+    let noop_case = cases
+        .iter()
+        .find(|c| c.case == "optimize_noop_already_compact")
+        .expect("noop optimize case should exist");
+    let noop_metrics = noop_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("noop optimize metrics should exist");
+    assert_eq!(
+        noop_metrics.operations,
+        Some(0),
+        "noop optimize should not rewrite files"
+    );
+    assert_eq!(
+        noop_metrics.files_scanned, noop_metrics.files_pruned,
+        "noop optimize should skip all scanned files"
+    );
+
+    let heavy_case = cases
+        .iter()
+        .find(|c| c.case == "optimize_heavy_compaction")
+        .expect("heavy optimize case should exist");
+    let heavy_metrics = heavy_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("heavy optimize metrics should exist");
+    assert!(
+        heavy_metrics.operations.unwrap_or(0) > 0,
+        "heavy optimize should rewrite files"
+    );
+    assert!(
+        heavy_metrics.files_scanned.unwrap_or(0) >= heavy_metrics.files_pruned.unwrap_or(0),
+        "heavy optimize should not prune more files than it scanned"
     );
 }
 

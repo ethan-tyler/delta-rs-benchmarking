@@ -15,6 +15,8 @@ fn optimize_vacuum_case_list_is_exact() {
         cases,
         vec![
             "optimize_compact_small_files".to_string(),
+            "optimize_noop_already_compact".to_string(),
+            "optimize_heavy_compaction".to_string(),
             "vacuum_dry_run_lite".to_string(),
             "vacuum_execute_lite".to_string(),
         ]

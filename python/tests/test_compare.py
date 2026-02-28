@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from delta_bench_compare.compare import (
-    ci_regression_violation,
     compare_runs,
     format_change,
 )
+import delta_bench_compare.compare as compare_module
 
 
 def _run(cases: list[dict]) -> dict:

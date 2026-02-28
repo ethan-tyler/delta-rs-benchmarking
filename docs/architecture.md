@@ -15,7 +15,7 @@
 ## Data flow
 
 1. `delta-bench data` generates deterministic fixtures under `fixtures/<scale>/`.
-2. Fixture generation writes both JSON row snapshots and concrete Delta tables (`narrow_sales_delta`, `merge_target_delta`).
+2. Fixture generation writes both JSON row snapshots and concrete Delta tables (`narrow_sales_delta`, `merge_target_delta`, `read_partitioned_delta`, `merge_partitioned_target_delta`, `optimize_small_files_delta`, `optimize_compacted_delta`, `vacuum_ready_delta`).
 3. `delta-bench run` executes suite cases using real `deltalake-core` read/write/merge/metadata operations and writes `results/<label>/<suite>.json`.
 4. `compare.py` reads baseline/candidate result JSON and classifies per-case changes.
 5. `security_check.sh` runs before benchmark execution to validate security/fidelity invariants.
@@ -45,7 +45,13 @@
   - Source mapping:
     - `read_scan`: DataFusion/Delta physical-plan metrics (`files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`)
     - `merge_dml`: `MergeMetrics` (`files_scanned`, `files_pruned`, `scan_time_ms`, `rewrite_time_ms`)
-    - `optimize_vacuum` optimize case: considered/skipped counts (`files_scanned`, `files_pruned`)
+    - `optimize_vacuum` optimize cases: considered/skipped counts (`files_scanned`, `files_pruned`)
+
+## Wave 1 benchmark additions
+
+- `read_scan` includes partition-pruning contrast cases (`read_partition_pruning_hit`, `read_partition_pruning_miss`).
+- `merge_dml` includes localized partition-aware case (`merge_partition_localized_1pct`) using target/source region alignment and partition predicate.
+- `optimize_vacuum` includes explicit noop-vs-heavy compaction cases (`optimize_noop_already_compact`, `optimize_heavy_compaction`).
 
 ## Reproducibility controls
 

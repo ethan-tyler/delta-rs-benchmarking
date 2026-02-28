@@ -46,12 +46,12 @@ pub async fn run(
                         .open_table(table_url)
                         .await
                         .map_err(|e| e.to_string())?;
-                    Ok::<SampleMetrics, String>(SampleMetrics {
-                        rows_processed: None,
-                        bytes_processed: None,
-                        operations: Some(1),
-                        table_version: table.version().map(|v| v as u64),
-                    })
+                    Ok::<SampleMetrics, String>(SampleMetrics::base(
+                        None,
+                        None,
+                        Some(1),
+                        table.version().map(|v| v as u64),
+                    ))
                 }
             },
         )
@@ -73,12 +73,12 @@ pub async fn run(
                         .await
                         .map_err(|e| e.to_string())?;
                     table.load_version(0).await.map_err(|e| e.to_string())?;
-                    Ok::<SampleMetrics, String>(SampleMetrics {
-                        rows_processed: None,
-                        bytes_processed: None,
-                        operations: Some(1),
-                        table_version: table.version().map(|v| v as u64),
-                    })
+                    Ok::<SampleMetrics, String>(SampleMetrics::base(
+                        None,
+                        None,
+                        Some(1),
+                        table.version().map(|v| v as u64),
+                    ))
                 }
             },
         )
@@ -99,12 +99,12 @@ pub async fn run(
                 .open_table(table_url)
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok::<SampleMetrics, String>(SampleMetrics {
-                rows_processed: None,
-                bytes_processed: None,
-                operations: Some(1),
-                table_version: table.version().map(|v| v as u64),
-            })
+            Ok::<SampleMetrics, String>(SampleMetrics::base(
+                None,
+                None,
+                Some(1),
+                table.version().map(|v| v as u64),
+            ))
         }
     })
     .await;
@@ -119,12 +119,12 @@ pub async fn run(
                 .await
                 .map_err(|e| e.to_string())?;
             table.load_version(0).await.map_err(|e| e.to_string())?;
-            Ok::<SampleMetrics, String>(SampleMetrics {
-                rows_processed: None,
-                bytes_processed: None,
-                operations: Some(1),
-                table_version: table.version().map(|v| v as u64),
-            })
+            Ok::<SampleMetrics, String>(SampleMetrics::base(
+                None,
+                None,
+                Some(1),
+                table.version().map(|v| v as u64),
+            ))
         }
     })
     .await;

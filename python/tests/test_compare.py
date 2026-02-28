@@ -53,6 +53,44 @@ def test_compare_runs_handles_failures_and_missing_cases() -> None:
     assert comparison.summary.removed == 1
     assert comparison.summary.new == 1
 
+
+def test_compare_rows_use_metrics_from_fastest_sample() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 100.0, "metrics": {"files_scanned": 10}},
+                    {"elapsed_ms": 80.0, "metrics": {"files_scanned": 7}},
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 120.0, "metrics": {"files_scanned": 12}},
+                    {"elapsed_ms": 90.0, "metrics": {"files_scanned": 9}},
+                ],
+            }
+        ]
+    )
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    row = comparison.rows[0]
+
+    assert row.baseline_ms == 80.0
+    assert row.candidate_ms == 90.0
+    assert row.baseline_metrics is not None
+    assert row.candidate_metrics is not None
+    assert row.baseline_metrics.files_scanned == 7
+    assert row.candidate_metrics.files_scanned == 9
+
+
 def test_format_change_handles_zero_baseline() -> None:
     assert format_change(0.0, 0.0, 0.05) == "no change"
     assert format_change(0.0, 1.0, 0.05) == "incomparable"
@@ -68,8 +106,180 @@ def test_render_markdown_includes_summary_table() -> None:
     assert "| metric | value |" in out
 
 
-def test_compare_cli_has_no_ci_gating_flags() -> None:
-    source = Path(compare_module.__file__).read_text(encoding="utf-8")
-    assert "--ci" not in source
-    assert "--max-allowed-regressions" not in source
-    assert "CI policy violated" not in source
+def test_render_text_default_output_does_not_include_metric_columns() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {"files_scanned": 10, "files_pruned": 2},
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {"files_scanned": 9, "files_pruned": 1},
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison)
+    assert "Case | baseline | candidate | change" in out
+    assert "files_scanned" not in out
+    assert "files_pruned" not in out
+
+
+def test_render_text_include_metrics_outputs_metric_columns() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "files_scanned": 10,
+                            "files_pruned": 2,
+                            "bytes_scanned": 1024,
+                            "scan_time_ms": 7,
+                            "rewrite_time_ms": 11,
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "files_scanned": 9,
+                            "files_pruned": 1,
+                            "bytes_scanned": 768,
+                            "scan_time_ms": 5,
+                            "rewrite_time_ms": 8,
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison, include_metrics=True)
+    assert "baseline_files_scanned" in out
+    assert "candidate_files_scanned" in out
+    assert "baseline_files_pruned" in out
+    assert "candidate_files_pruned" in out
+    assert "baseline_bytes_scanned" in out
+    assert "candidate_bytes_scanned" in out
+    assert "baseline_scan_time_ms" in out
+    assert "candidate_scan_time_ms" in out
+    assert "baseline_rewrite_time_ms" in out
+    assert "candidate_rewrite_time_ms" in out
+
+
+def test_render_markdown_include_metrics_outputs_metric_columns() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "files_scanned": 10,
+                            "files_pruned": 2,
+                            "bytes_scanned": 1024,
+                            "scan_time_ms": 7,
+                            "rewrite_time_ms": 11,
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "files_scanned": 9,
+                            "files_pruned": 1,
+                            "bytes_scanned": 768,
+                            "scan_time_ms": 5,
+                            "rewrite_time_ms": 8,
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import render_markdown
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_markdown(comparison, include_metrics=True)
+    assert "baseline_files_scanned" in out
+    assert "candidate_rewrite_time_ms" in out
+
+
+def test_ci_policy_fails_when_slower_cases_exceed_allowed() -> None:
+    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
+    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
+    comparison = compare_runs(base, cand, threshold=0.05)
+
+    violates, message = ci_regression_violation(
+        comparison, ci_enabled=True, max_allowed_regressions=0
+    )
+    assert violates is True
+    assert "slower cases" in message
+
+
+def test_ci_policy_passes_when_within_allowed_regressions() -> None:
+    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
+    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
+    comparison = compare_runs(base, cand, threshold=0.05)
+
+    violates, _ = ci_regression_violation(
+        comparison, ci_enabled=True, max_allowed_regressions=1
+    )
+    assert violates is False
+
+
+def test_advisory_mode_never_violates_ci_policy() -> None:
+    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
+    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
+    comparison = compare_runs(base, cand, threshold=0.05)
+
+    violates, message = ci_regression_violation(
+        comparison, ci_enabled=False, max_allowed_regressions=0
+    )
+    assert violates is False
+    assert message == ""

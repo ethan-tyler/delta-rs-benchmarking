@@ -44,7 +44,9 @@ Options:
   --enforce-run-mode              Require run-mode marker during preflight checks
   --require-no-public-ipv4        Require that no public IPv4 is assigned to runner interfaces
   --require-egress-policy         Require nftables egress hash check during preflight (set DELTA_BENCH_EGRESS_POLICY_SHA256)
+  --ci                            Deprecated no-op (benchmarks are advisory only)
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
+  --max-allowed-regressions <n>   Deprecated no-op (benchmarks are advisory only)
   --storage-backend <local|s3|gcs|azure>
                                   Storage backend for fixture generation and suite execution (default: local)
   --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
@@ -74,8 +76,16 @@ while [[ $# -gt 0 ]]; do
       REQUIRE_EGRESS_POLICY=1
       shift
       ;;
+    --ci)
+      echo "warning: --ci is deprecated and ignored; benchmark compare is advisory-only" >&2
+      shift
+      ;;
     --noise-threshold)
       NOISE_THRESHOLD="$2"
+      shift 2
+      ;;
+    --max-allowed-regressions)
+      echo "warning: --max-allowed-regressions is deprecated and ignored; benchmark compare is advisory-only" >&2
       shift 2
       ;;
     --storage-backend)

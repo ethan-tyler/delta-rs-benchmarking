@@ -1,0 +1,150 @@
+name: Longitudinal Nightly Benchmark
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "How many days back to select revisions for one-per-day sampling"
+        required: false
+        default: "30"
+      baseline_window:
+        description: "Baseline window size for regression reporting"
+        required: false
+        default: "7"
+
+permissions:
+  contents: read
+
+jobs:
+  longitudinal:
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 360
+    concurrency:
+      group: delta-bench-longitudinal-nightly
+      cancel-in-progress: false
+    env:
+      MANIFEST_PATH: longitudinal/manifests/nightly-manifest.json
+      ARTIFACTS_DIR: longitudinal/artifacts
+      MATRIX_STATE_PATH: longitudinal/state/matrix-state.json
+      STORE_DIR: longitudinal/store
+      REPORT_MD: longitudinal/reports/summary.md
+      REPORT_HTML: longitudinal/reports/trends.html
+      RESULTS_DIR: results
+      LABEL_PREFIX: longitudinal
+      LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days || '30' }}
+      BASELINE_WINDOW: ${{ github.event.inputs.baseline_window || '7' }}
+      LONGITUDINAL_MAX_PARALLEL: ${{ vars.LONGITUDINAL_MAX_PARALLEL || '2' }}
+      LONGITUDINAL_MAX_LOAD_PER_CPU: ${{ vars.LONGITUDINAL_MAX_LOAD_PER_CPU || '0.75' }}
+      LONGITUDINAL_LOAD_CHECK_INTERVAL_SECONDS: ${{ vars.LONGITUDINAL_LOAD_CHECK_INTERVAL_SECONDS || '10' }}
+      LONGITUDINAL_SIGNIFICANCE_METHOD: ${{ vars.LONGITUDINAL_SIGNIFICANCE_METHOD || 'none' }}
+      LONGITUDINAL_SIGNIFICANCE_ALPHA: ${{ vars.LONGITUDINAL_SIGNIFICANCE_ALPHA || '0.05' }}
+      LONGITUDINAL_RETENTION_ARTIFACT_DAYS: ${{ vars.LONGITUDINAL_RETENTION_ARTIFACT_DAYS || '30' }}
+      LONGITUDINAL_RETENTION_MAX_ARTIFACTS: ${{ vars.LONGITUDINAL_RETENTION_MAX_ARTIFACTS || '120' }}
+      LONGITUDINAL_RETENTION_RUN_DAYS: ${{ vars.LONGITUDINAL_RETENTION_RUN_DAYS || '60' }}
+      LONGITUDINAL_RETENTION_MAX_RUNS: ${{ vars.LONGITUDINAL_RETENTION_MAX_RUNS || '200' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare delta-rs checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/prepare_delta_rs.sh
+
+      - name: Select revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "${MANIFEST_PATH}")"
+          start_date="$(date -u -d "${LOOKBACK_DAYS} days ago" +%F)"
+          end_date="$(date -u +%F)"
+          ./scripts/longitudinal_bench.sh select-revisions \
+            --repository .delta-rs-under-test \
+            --strategy one-per-day \
+            --start-date "${start_date}" \
+            --end-date "${end_date}" \
+            --output "${MANIFEST_PATH}"
+
+      - name: Build missing artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh build-artifacts \
+            --manifest "${MANIFEST_PATH}" \
+            --artifacts-dir "${ARTIFACTS_DIR}"
+
+      - name: Run nightly matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh run-matrix \
+            --manifest "${MANIFEST_PATH}" \
+            --artifacts-dir "${ARTIFACTS_DIR}" \
+            --state-path "${MATRIX_STATE_PATH}" \
+            --results-dir "${RESULTS_DIR}" \
+            --label-prefix "${LABEL_PREFIX}" \
+            --timeout-seconds 3600 \
+            --max-retries 2 \
+            --max-parallel "${LONGITUDINAL_MAX_PARALLEL}" \
+            --max-load-per-cpu "${LONGITUDINAL_MAX_LOAD_PER_CPU}" \
+            --load-check-interval-seconds "${LONGITUDINAL_LOAD_CHECK_INTERVAL_SECONDS}" \
+            --suite read_scan \
+            --suite write \
+            --suite merge_dml \
+            --suite metadata \
+            --suite optimize_vacuum \
+            --scale sf1
+
+      - name: Ingest normalized rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh ingest-results \
+            --manifest "${MANIFEST_PATH}" \
+            --state-path "${MATRIX_STATE_PATH}" \
+            --results-dir "${RESULTS_DIR}" \
+            --store-dir "${STORE_DIR}" \
+            --label-prefix "${LABEL_PREFIX}"
+
+      - name: Generate trend reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh report \
+            --store-dir "${STORE_DIR}" \
+            --markdown-path "${REPORT_MD}" \
+            --html-path "${REPORT_HTML}" \
+            --baseline-window "${BASELINE_WINDOW}" \
+            --regression-threshold 0.05 \
+            --significance-method "${LONGITUDINAL_SIGNIFICANCE_METHOD}" \
+            --significance-alpha "${LONGITUDINAL_SIGNIFICANCE_ALPHA}"
+
+      - name: Prune retention targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh prune \
+            --artifacts-dir "${ARTIFACTS_DIR}" \
+            --store-dir "${STORE_DIR}" \
+            --max-artifact-age-days "${LONGITUDINAL_RETENTION_ARTIFACT_DAYS}" \
+            --max-artifacts "${LONGITUDINAL_RETENTION_MAX_ARTIFACTS}" \
+            --max-run-age-days "${LONGITUDINAL_RETENTION_RUN_DAYS}" \
+            --max-runs "${LONGITUDINAL_RETENTION_MAX_RUNS}" \
+            --apply
+
+      - name: Upload longitudinal artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: longitudinal-nightly
+          path: |
+            longitudinal/manifests/
+            longitudinal/artifacts/
+            longitudinal/state/
+            longitudinal/store/
+            longitudinal/reports/

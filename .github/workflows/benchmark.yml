@@ -200,7 +200,7 @@ jobs:
           if [[ "${status}" -eq 0 ]]; then
             echo "status_label=PASS" >> "$GITHUB_OUTPUT"
           else
-            echo "status_label=FAIL" >> "$GITHUB_OUTPUT"
+            echo "status_label=ADVISORY-ERROR" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Post benchmark result
@@ -222,7 +222,7 @@ jobs:
             }
 
             const body = [
-              `### Benchmark ${status}: ${suite}`,
+              `### Benchmark Advisory ${status}: ${suite}`,
               `Exit code: ${exitCode}`,
               "",
               "<details><summary>compare_branch.sh output</summary>",

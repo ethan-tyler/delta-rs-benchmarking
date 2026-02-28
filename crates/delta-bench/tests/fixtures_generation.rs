@@ -31,3 +31,32 @@ async fn rejects_unknown_scale() {
         "unexpected error: {err}"
     );
 }
+
+#[tokio::test]
+async fn generates_wave1_specialized_fixture_tables() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let root = temp.path().join("sf1");
+    for table_name in [
+        "read_partitioned_delta",
+        "merge_partitioned_target_delta",
+        "optimize_compacted_delta",
+    ] {
+        let table_path = root.join(table_name);
+        assert!(
+            table_path.exists(),
+            "expected table dir: {}",
+            table_path.display()
+        );
+        assert!(
+            table_path.join("_delta_log").exists(),
+            "expected delta log dir: {}",
+            table_path.join("_delta_log").display()
+        );
+    }
+}

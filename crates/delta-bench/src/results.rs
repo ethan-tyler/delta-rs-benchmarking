@@ -56,19 +56,46 @@ pub struct SampleMetrics {
     pub rewrite_time_ms: Option<u64>,
 }
 
-impl From<u64> for SampleMetrics {
-    fn from(rows: u64) -> Self {
+impl SampleMetrics {
+    pub fn base(
+        rows_processed: Option<u64>,
+        bytes_processed: Option<u64>,
+        operations: Option<u64>,
+        table_version: Option<u64>,
+    ) -> Self {
         Self {
-            rows_processed: Some(rows),
-            bytes_processed: None,
-            operations: None,
-            table_version: None,
+            rows_processed,
+            bytes_processed,
+            operations,
+            table_version,
             files_scanned: None,
             files_pruned: None,
             bytes_scanned: None,
             scan_time_ms: None,
             rewrite_time_ms: None,
         }
+    }
+
+    pub fn with_scan_rewrite_metrics(
+        mut self,
+        files_scanned: Option<u64>,
+        files_pruned: Option<u64>,
+        bytes_scanned: Option<u64>,
+        scan_time_ms: Option<u64>,
+        rewrite_time_ms: Option<u64>,
+    ) -> Self {
+        self.files_scanned = files_scanned;
+        self.files_pruned = files_pruned;
+        self.bytes_scanned = bytes_scanned;
+        self.scan_time_ms = scan_time_ms;
+        self.rewrite_time_ms = rewrite_time_ms;
+        self
+    }
+}
+
+impl From<u64> for SampleMetrics {
+    fn from(rows: u64) -> Self {
+        Self::base(Some(rows), None, None, None)
     }
 }
 

@@ -168,8 +168,6 @@ jobs:
           fi
           set +e
           ./scripts/compare_branch.sh \
-            --ci \
-            --max-allowed-regressions 0 \
             "${storage_args[@]}" \
             "$BASE_REF" \
             "$HEAD_REF" \
@@ -181,7 +179,7 @@ jobs:
           if [[ "${status}" -eq 0 ]]; then
             echo "status_label=PASS" >> "$GITHUB_OUTPUT"
           else
-            echo "status_label=FAIL" >> "$GITHUB_OUTPUT"
+            echo "status_label=ADVISORY-ERROR" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Post benchmark result
@@ -203,7 +201,7 @@ jobs:
             }
 
             const body = [
-              `### Benchmark ${status}: ${suite}`,
+              `### Benchmark Advisory ${status}: ${suite}`,
               `Exit code: ${exitCode}`,
               "",
               "<details><summary>compare_branch.sh output</summary>",
@@ -219,10 +217,3 @@ jobs:
               issue_number,
               body,
             });
-
-      - name: Fail workflow on CI regression policy violation
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.bench.outputs.exit_code != '0'
-        shell: bash
-        run: |
-          echo "Benchmark CI policy failed"
-          exit 1

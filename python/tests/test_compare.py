@@ -51,6 +51,44 @@ def test_compare_runs_handles_failures_and_missing_cases() -> None:
     assert comparison.summary.removed == 1
     assert comparison.summary.new == 1
 
+
+def test_compare_rows_use_metrics_from_fastest_sample() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 100.0, "metrics": {"files_scanned": 10}},
+                    {"elapsed_ms": 80.0, "metrics": {"files_scanned": 7}},
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 120.0, "metrics": {"files_scanned": 12}},
+                    {"elapsed_ms": 90.0, "metrics": {"files_scanned": 9}},
+                ],
+            }
+        ]
+    )
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    row = comparison.rows[0]
+
+    assert row.baseline_ms == 80.0
+    assert row.candidate_ms == 90.0
+    assert row.baseline_metrics is not None
+    assert row.candidate_metrics is not None
+    assert row.baseline_metrics.files_scanned == 7
+    assert row.candidate_metrics.files_scanned == 9
+
+
 def test_format_change_handles_zero_baseline() -> None:
     assert format_change(0.0, 0.0, 0.05) == "no change"
     assert format_change(0.0, 1.0, 0.05) == "incomparable"

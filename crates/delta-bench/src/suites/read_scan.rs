@@ -93,17 +93,15 @@ async fn run_sql_query(
     let rows_processed = batches.iter().map(|b| b.num_rows() as u64).sum::<u64>();
     let scan_metrics = extract_scan_metrics(&plan);
 
-    Ok(SampleMetrics {
-        rows_processed: Some(rows_processed),
-        bytes_processed: None,
-        operations: None,
-        table_version: None,
-        files_scanned: scan_metrics.files_scanned,
-        files_pruned: scan_metrics.files_pruned,
-        bytes_scanned: scan_metrics.bytes_scanned,
-        scan_time_ms: scan_metrics.scan_time_ms,
-        rewrite_time_ms: None,
-    })
+    Ok(
+        SampleMetrics::base(Some(rows_processed), None, None, None).with_scan_rewrite_metrics(
+            scan_metrics.files_scanned,
+            scan_metrics.files_pruned,
+            scan_metrics.bytes_scanned,
+            scan_metrics.scan_time_ms,
+            None,
+        ),
+    )
 }
 
 fn into_case_result(result: CaseExecutionResult) -> CaseResult {
@@ -172,11 +170,7 @@ fn collect_scan_metrics(
             *files_scanned_total = files_scanned_total.saturating_add(v);
             *files_scanned_seen = true;
         }
-        if let Some(v) = sum_count_metrics(&metrics, &["files_pruned", "count_files_pruned"]) {
-            *files_pruned_total = files_pruned_total.saturating_add(v);
-            *files_pruned_seen = true;
-        }
-        if let Some(v) = sum_pruned_metrics(&metrics, &["files_ranges_pruned_statistics"]) {
+        if let Some(v) = sum_file_pruned_metrics(&metrics) {
             *files_pruned_total = files_pruned_total.saturating_add(v);
             *files_pruned_seen = true;
         }
@@ -235,20 +229,27 @@ fn sum_count_metrics(metrics: &MetricsSet, names: &[&str]) -> Option<u64> {
     seen.then_some(total)
 }
 
-fn sum_pruned_metrics(metrics: &MetricsSet, names: &[&str]) -> Option<u64> {
-    let mut total = 0_u64;
-    let mut seen = false;
-    for metric in metrics.iter() {
-        if let MetricValue::PruningMetrics {
-            name,
-            pruning_metrics,
-        } = metric.value()
-        {
-            if names.iter().any(|candidate| *candidate == name.as_ref()) {
-                total = total.saturating_add(pruning_metrics.pruned() as u64);
-                seen = true;
-            }
-        }
+fn sum_file_pruned_metrics(metrics: &MetricsSet) -> Option<u64> {
+    sum_count_metrics(metrics, &["files_pruned", "count_files_pruned"])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use deltalake_core::datafusion::physical_plan::metrics::ExecutionPlanMetricsSet;
+    use deltalake_core::datafusion::physical_plan::metrics::MetricBuilder;
+
+    #[test]
+    fn files_pruned_uses_file_counts_not_range_pruning_stats() {
+        let metrics_set = ExecutionPlanMetricsSet::new();
+        MetricBuilder::new(&metrics_set)
+            .counter("count_files_pruned", 0)
+            .add(2);
+        MetricBuilder::new(&metrics_set)
+            .pruning_metrics("files_ranges_pruned_statistics", 0)
+            .add_pruned(9);
+        let metrics = metrics_set.clone_inner();
+
+        assert_eq!(sum_file_pruned_metrics(&metrics), Some(2));
     }
-    seen.then_some(total)
 }

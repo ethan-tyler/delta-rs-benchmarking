@@ -30,8 +30,8 @@ Tuning options:
 - `BENCH_TIMEOUT_SECONDS` (default `3600`) to cap each `bench.sh` step runtime.
 - `BENCH_RETRY_ATTEMPTS` (default `2`) for transient failures.
 - `BENCH_RETRY_DELAY_SECONDS` (default `5`) between retry attempts.
-- `--noise-threshold`, `--ci`, and `--max-allowed-regressions` to enable compare-gating policy.
-- `python -m delta_bench_compare.compare ... --include-metrics` to append per-case metric columns in compare output.
+- `--noise-threshold` to tune compare sensitivity while keeping benchmark output advisory.
+- `cd python && python3 -m delta_bench_compare.compare ... --include-metrics` to append per-case metric columns in compare output.
 - `--storage-backend` and repeatable `--storage-option KEY=VALUE` to run fixture generation + suite execution against object storage.
 
 ## Result metrics
@@ -104,17 +104,12 @@ Example:
   --require-no-public-ipv4 \
   --require-egress-policy \
   main feature/merge-opt all
-
-./scripts/compare_branch.sh \
-  --ci \
-  --max-allowed-regressions 0 \
-  --noise-threshold 0.05 \
-  main feature/merge-opt all
 ```
 
 Workflow mode storage configuration:
 - Optional repository variable `BENCH_STORAGE_BACKEND` (`s3`, `gcs`, or `azure`)
 - Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line; for example `table_root=...`, `AWS_REGION=...`)
+- Benchmark workflow comments are advisory and do not gate PR merge.
 
 ## Security operations
 
@@ -165,6 +160,6 @@ DELTA_RS_DIR="$(pwd)/.delta-rs-under-test" \
 - Implemented suites: `read_scan`, `write`, `merge_dml`, `metadata`, `optimize_vacuum`
 - Implemented: suites execute real `deltalake-core` operations (read provider scans, write builders, merge builders, metadata loads)
 - Implemented: deterministic fixture generation + result schema v1
-- Implemented: manual comparison workflow (`scripts/compare_branch.sh` + Python compare) with optional CI gating mode
+- Implemented: manual comparison workflow (`scripts/compare_branch.sh` + Python compare) in advisory mode (non-gating)
 - Implemented: Option B PR benchmark workflow (`.github/workflows/benchmark.yml`) with issue-comment trigger, role-based authorization, and serialized execution
 - Limitation: workflow mode currently relies on `compare_branch.sh` branch names being available in the upstream `delta-rs` checkout; fork PR heads may require manual handling

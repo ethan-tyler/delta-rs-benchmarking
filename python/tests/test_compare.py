@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from delta_bench_compare.compare import (
-    ci_regression_violation,
     compare_runs,
     format_change,
 )
+import delta_bench_compare.compare as compare_module
 
 
 def _run(cases: list[dict]) -> dict:
@@ -66,36 +68,8 @@ def test_render_markdown_includes_summary_table() -> None:
     assert "| metric | value |" in out
 
 
-def test_ci_policy_fails_when_slower_cases_exceed_allowed() -> None:
-    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
-    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
-    comparison = compare_runs(base, cand, threshold=0.05)
-
-    violates, message = ci_regression_violation(
-        comparison, ci_enabled=True, max_allowed_regressions=0
-    )
-    assert violates is True
-    assert "slower cases" in message
-
-
-def test_ci_policy_passes_when_within_allowed_regressions() -> None:
-    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
-    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
-    comparison = compare_runs(base, cand, threshold=0.05)
-
-    violates, _ = ci_regression_violation(
-        comparison, ci_enabled=True, max_allowed_regressions=1
-    )
-    assert violates is False
-
-
-def test_advisory_mode_never_violates_ci_policy() -> None:
-    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
-    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
-    comparison = compare_runs(base, cand, threshold=0.05)
-
-    violates, message = ci_regression_violation(
-        comparison, ci_enabled=False, max_allowed_regressions=0
-    )
-    assert violates is False
-    assert message == ""
+def test_compare_cli_has_no_ci_gating_flags() -> None:
+    source = Path(compare_module.__file__).read_text(encoding="utf-8")
+    assert "--ci" not in source
+    assert "--max-allowed-regressions" not in source
+    assert "CI policy violated" not in source

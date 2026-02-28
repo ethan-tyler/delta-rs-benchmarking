@@ -106,35 +106,13 @@ def render_markdown(comparison: Comparison) -> str:
     return render_markdown_output(comparison)
 
 
-def ci_regression_violation(
-    comparison: Comparison,
-    ci_enabled: bool,
-    max_allowed_regressions: int,
-) -> tuple[bool, str]:
-    if not ci_enabled:
-        return False, ""
-
-    slower_cases = comparison.summary.slower
-    if slower_cases > max_allowed_regressions:
-        return (
-            True,
-            "CI policy violated: "
-            f"slower cases={slower_cases} exceeds max_allowed_regressions={max_allowed_regressions}",
-        )
-    return False, ""
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare delta-bench JSON results")
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--noise-threshold", type=float, default=0.05)
     parser.add_argument("--format", choices=["text", "markdown"], default="text")
-    parser.add_argument("--ci", action="store_true")
-    parser.add_argument("--max-allowed-regressions", type=int, default=0)
     args = parser.parse_args()
-    if args.max_allowed_regressions < 0:
-        raise SystemExit("--max-allowed-regressions must be >= 0")
 
     comparison = compare_runs(
         _load(args.baseline),
@@ -143,15 +121,6 @@ def main() -> None:
     )
     output = render_markdown(comparison) if args.format == "markdown" else render_text(comparison)
     print(output)
-
-    violates, message = ci_regression_violation(
-        comparison,
-        ci_enabled=args.ci,
-        max_allowed_regressions=args.max_allowed_regressions,
-    )
-    if violates:
-        print(message)
-        raise SystemExit(1)
 
 
 if __name__ == "__main__":

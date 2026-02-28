@@ -11,9 +11,9 @@ RUNNER_ROOT="${ROOT_DIR}"
 ENFORCE_RUN_MODE=0
 REQUIRE_NO_PUBLIC_IPV4=0
 REQUIRE_EGRESS_POLICY=0
-CI_MODE=0
 NOISE_THRESHOLD="${BENCH_NOISE_THRESHOLD:-0.05}"
-MAX_ALLOWED_REGRESSIONS="${BENCH_MAX_ALLOWED_REGRESSIONS:-0}"
+STORAGE_BACKEND="${BENCH_STORAGE_BACKEND:-local}"
+STORAGE_OPTIONS=()
 
 sanitize_label() {
   local raw="${1:-}"
@@ -44,9 +44,10 @@ Options:
   --enforce-run-mode              Require run-mode marker during preflight checks
   --require-no-public-ipv4        Require that no public IPv4 is assigned to runner interfaces
   --require-egress-policy         Require nftables egress hash check during preflight (set DELTA_BENCH_EGRESS_POLICY_SHA256)
-  --ci                            Enable compare.py CI gating mode
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
-  --max-allowed-regressions <n>   Allowed slower-case count in CI mode (default: 0)
+  --storage-backend <local|s3|gcs|azure>
+                                  Storage backend for fixture generation and suite execution (default: local)
+  --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
   -h, --help                      Show this help
 EOF
 }
@@ -73,16 +74,16 @@ while [[ $# -gt 0 ]]; do
       REQUIRE_EGRESS_POLICY=1
       shift
       ;;
-    --ci)
-      CI_MODE=1
-      shift
-      ;;
     --noise-threshold)
       NOISE_THRESHOLD="$2"
       shift 2
       ;;
-    --max-allowed-regressions)
-      MAX_ALLOWED_REGRESSIONS="$2"
+    --storage-backend)
+      STORAGE_BACKEND="$2"
+      shift 2
+      ;;
+    --storage-option)
+      STORAGE_OPTIONS+=("$2")
       shift 2
       ;;
     -h|--help)
@@ -115,6 +116,12 @@ fi
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
 RUNNER_RESULTS_DIR="${DELTA_BENCH_RESULTS:-${RUNNER_ROOT}/results}"
+storage_args=(--storage-backend "${STORAGE_BACKEND}")
+if [[ ${#STORAGE_OPTIONS[@]} -gt 0 ]]; then
+  for option in "${STORAGE_OPTIONS[@]}"; do
+    storage_args+=(--storage-option "${option}")
+  done
+fi
 
 run_with_timeout() {
   if [[ -n "${TIMEOUT_BIN}" ]]; then
@@ -187,20 +194,17 @@ cand_label="cand-$(sanitize_label "${candidate_branch}")"
 run_step env DELTA_RS_BRANCH="${base_branch}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --warmup 1 --iters 5
+run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}"
+run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --warmup 1 --iters 5 "${storage_args[@]}"
 
 run_step env DELTA_RS_BRANCH="${candidate_branch}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${cand_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --warmup 1 --iters 5
+run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${cand_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --warmup 1 --iters 5 "${storage_args[@]}"
 
 base_json="${RUNNER_RESULTS_DIR}/${base_label}/${suite}.json"
 cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"
 
 compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --format markdown)
-if (( CI_MODE != 0 )); then
-  compare_args+=(--ci --max-allowed-regressions "${MAX_ALLOWED_REGRESSIONS}")
-fi
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"

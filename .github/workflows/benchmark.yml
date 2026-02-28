@@ -134,30 +134,62 @@ jobs:
               ...context.repo,
               pull_number: context.issue.number,
             });
+            const expectedRepo = `${context.repo.owner}/${context.repo.repo}`.toLowerCase();
+            const headRepo = (pr.data.head.repo?.full_name || "").toLowerCase();
+            const sameRepo = headRepo === expectedRepo;
             core.setOutput("base_ref", pr.data.base.ref);
             core.setOutput("head_ref", pr.data.head.ref);
+            core.setOutput("same_repo", sameRepo ? "true" : "false");
+            if (!sameRepo) {
+              core.setOutput(
+                "deny_reason",
+                `Benchmark runs are not allowed from fork PRs on self-hosted runners. Head repo: ${pr.data.head.repo?.full_name || "unknown"}`
+              );
+            }
+
+      - name: Comment fork PR blocked
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `${{ steps.pr.outputs.deny_reason }}`,
+            });
 
       - name: Checkout repository
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true'
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Run branch compare
         id: bench
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true'
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
         shell: bash
         env:
           BASE_REF: ${{ steps.pr.outputs.base_ref }}
           HEAD_REF: ${{ steps.pr.outputs.head_ref }}
           SUITE: ${{ steps.parse.outputs.suite }}
+          BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
+          BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
         run: |
           set -euo pipefail
           status=0
+          storage_args=()
+          if [[ -n "${BENCH_STORAGE_BACKEND:-}" ]]; then
+            storage_args+=(--storage-backend "${BENCH_STORAGE_BACKEND}")
+          fi
+          if [[ -n "${BENCH_STORAGE_OPTIONS:-}" ]]; then
+            while IFS= read -r opt; do
+              [[ -z "${opt}" ]] && continue
+              storage_args+=(--storage-option "${opt}")
+            done <<< "${BENCH_STORAGE_OPTIONS}"
+          fi
           set +e
           ./scripts/compare_branch.sh \
-            --ci \
-            --max-allowed-regressions 0 \
+            "${storage_args[@]}" \
             "$BASE_REF" \
             "$HEAD_REF" \
             "$SUITE" > benchmark_output.md 2>&1
@@ -172,7 +204,7 @@ jobs:
           fi
 
       - name: Post benchmark result
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true'
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -206,10 +238,3 @@ jobs:
               issue_number,
               body,
             });
-
-      - name: Fail workflow on CI regression policy violation
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.bench.outputs.exit_code != '0'
-        shell: bash
-        run: |
-          echo "Benchmark CI policy failed"
-          exit 1

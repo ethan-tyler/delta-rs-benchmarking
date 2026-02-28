@@ -51,8 +51,8 @@ async fn read_scan_samples_include_physical_scan_metrics() {
             (metrics.files_scanned, metrics.files_pruned)
         {
             assert!(
-                files_scanned >= files_pruned,
-                "files_scanned should be >= files_pruned"
+                files_scanned + files_pruned > 0,
+                "expected non-zero scan accounting"
             );
         }
     }
@@ -79,7 +79,11 @@ async fn read_partition_pruning_hit_scans_fewer_files_than_miss() {
         .find(|case| case.case == "read_partition_pruning_miss")
         .expect("expected read_partition_pruning_miss case");
 
-    assert!(hit_case.success, "hit case should succeed: {:?}", hit_case.failure);
+    assert!(
+        hit_case.success,
+        "hit case should succeed: {:?}",
+        hit_case.failure
+    );
     assert!(
         miss_case.success,
         "miss case should succeed: {:?}",

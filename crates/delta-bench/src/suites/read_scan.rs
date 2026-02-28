@@ -214,11 +214,7 @@ fn collect_scan_metrics(
             *files_scanned_total = files_scanned_total.saturating_add(v);
             *files_scanned_seen = true;
         }
-        if let Some(v) = sum_count_metrics(&metrics, &["files_pruned", "count_files_pruned"]) {
-            *files_pruned_total = files_pruned_total.saturating_add(v);
-            *files_pruned_seen = true;
-        }
-        if let Some(v) = sum_pruned_metrics(&metrics, &["files_ranges_pruned_statistics"]) {
+        if let Some(v) = sum_file_pruned_metrics(&metrics) {
             *files_pruned_total = files_pruned_total.saturating_add(v);
             *files_pruned_seen = true;
         }
@@ -275,6 +271,11 @@ fn sum_count_metrics(metrics: &MetricsSet, names: &[&str]) -> Option<u64> {
         }
     }
     seen.then_some(total)
+}
+
+fn sum_file_pruned_metrics(metrics: &MetricsSet) -> Option<u64> {
+    sum_count_metrics(metrics, &["files_pruned", "count_files_pruned"])
+        .or_else(|| sum_pruned_metrics(metrics, &["files_ranges_pruned_statistics"]))
 }
 
 fn sum_pruned_metrics(metrics: &MetricsSet, names: &[&str]) -> Option<u64> {

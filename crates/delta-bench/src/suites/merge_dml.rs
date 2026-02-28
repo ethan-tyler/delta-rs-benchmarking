@@ -125,7 +125,8 @@ pub async fn run(
     if storage.is_local() {
         let mut out = Vec::new();
         for case in MERGE_CASES {
-            let fixture_table_dir = merge_fixture_table_path(fixtures_dir, scale, case.target_profile);
+            let fixture_table_dir =
+                merge_fixture_table_path(fixtures_dir, scale, case.target_profile);
             let c = run_case_async_with_setup(
                 case.name,
                 warmup,
@@ -189,7 +190,11 @@ pub async fn run(
     Ok(out)
 }
 
-fn merge_fixture_table_path(fixtures_dir: &Path, scale: &str, profile: MergeTargetProfile) -> std::path::PathBuf {
+fn merge_fixture_table_path(
+    fixtures_dir: &Path,
+    scale: &str,
+    profile: MergeTargetProfile,
+) -> std::path::PathBuf {
     match profile {
         MergeTargetProfile::Standard => merge_target_table_path(fixtures_dir, scale),
         MergeTargetProfile::Partitioned => merge_partitioned_target_table_path(fixtures_dir, scale),
@@ -220,7 +225,8 @@ async fn run_merge_case(
     storage: &StorageConfig,
 ) -> BenchResult<SampleMetrics> {
     let table = storage.open_table(table_url).await?;
-    let (source, source_rows) = build_source_df(rows, case.match_ratio, case.mode, case.source_region)?;
+    let (source, source_rows) =
+        build_source_df(rows, case.match_ratio, case.mode, case.source_region)?;
 
     let mut predicate = col("target.id").eq(col("source.id"));
     if case.include_partition_predicate {

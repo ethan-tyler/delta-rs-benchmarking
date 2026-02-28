@@ -44,7 +44,10 @@ pub async fn run(
         let optimize_compacted_source = optimize_compacted_table_path(fixtures_dir, scale);
         let vacuum_source = vacuum_ready_table_path(fixtures_dir, scale);
 
-        if !optimize_source.exists() || !optimize_compacted_source.exists() || !vacuum_source.exists() {
+        if !optimize_source.exists()
+            || !optimize_compacted_source.exists()
+            || !vacuum_source.exists()
+        {
             return Ok(fixture_error_cases(
                 "missing optimize/vacuum fixture tables; run bench data first",
             ));

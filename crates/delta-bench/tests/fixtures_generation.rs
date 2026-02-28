@@ -48,7 +48,11 @@ async fn generates_wave1_specialized_fixture_tables() {
         "optimize_compacted_delta",
     ] {
         let table_path = root.join(table_name);
-        assert!(table_path.exists(), "expected table dir: {}", table_path.display());
+        assert!(
+            table_path.exists(),
+            "expected table dir: {}",
+            table_path.display()
+        );
         assert!(
             table_path.join("_delta_log").exists(),
             "expected delta log dir: {}",

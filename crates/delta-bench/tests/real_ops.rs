@@ -59,6 +59,68 @@ async fn read_scan_samples_include_physical_scan_metrics() {
 }
 
 #[tokio::test]
+async fn read_partition_pruning_hit_scans_fewer_files_than_miss() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let cases = read_scan::run(temp.path(), "sf1", 0, 1, &storage)
+        .await
+        .expect("read suite run");
+
+    let hit_case = cases
+        .iter()
+        .find(|case| case.case == "read_partition_pruning_hit")
+        .expect("expected read_partition_pruning_hit case");
+    let miss_case = cases
+        .iter()
+        .find(|case| case.case == "read_partition_pruning_miss")
+        .expect("expected read_partition_pruning_miss case");
+
+    assert!(hit_case.success, "hit case should succeed: {:?}", hit_case.failure);
+    assert!(
+        miss_case.success,
+        "miss case should succeed: {:?}",
+        miss_case.failure
+    );
+
+    let hit_metrics = hit_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("expected metrics for hit case");
+    let miss_metrics = miss_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("expected metrics for miss case");
+
+    let hit_scanned = hit_metrics
+        .files_scanned
+        .expect("hit files_scanned should be present");
+    let miss_scanned = miss_metrics
+        .files_scanned
+        .expect("miss files_scanned should be present");
+    let hit_pruned = hit_metrics
+        .files_pruned
+        .expect("hit files_pruned should be present");
+    let miss_pruned = miss_metrics
+        .files_pruned
+        .expect("miss files_pruned should be present");
+
+    assert!(
+        hit_scanned < miss_scanned,
+        "expected hit files_scanned < miss files_scanned, got {hit_scanned} vs {miss_scanned}"
+    );
+    assert!(
+        hit_pruned > miss_pruned,
+        "expected hit files_pruned > miss files_pruned, got {hit_pruned} vs {miss_pruned}"
+    );
+}
+
+#[tokio::test]
 async fn generated_fixtures_support_optimize_vacuum_suite() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();

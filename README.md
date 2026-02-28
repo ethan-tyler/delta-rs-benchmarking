@@ -51,6 +51,20 @@ Optional scan/rewrite fields (suite-dependent):
 - `scan_time_ms`
 - `rewrite_time_ms`
 
+## Wave 1 cases
+
+New pruning/compaction cases now included in existing suites:
+- `read_partition_pruning_hit`
+- `read_partition_pruning_miss`
+- `merge_partition_localized_1pct`
+- `optimize_noop_already_compact`
+- `optimize_heavy_compaction`
+
+Wave 1 fixture generation now also materializes:
+- `read_partitioned_delta`
+- `merge_partitioned_target_delta`
+- `optimize_compacted_delta`
+
 ## Cloud/object-store mode
 
 Local remains the default backend. To run fixture-backed suites against object storage:
@@ -158,6 +172,7 @@ DELTA_RS_DIR="$(pwd)/.delta-rs-under-test" \
 ## Current scope
 
 - Implemented suites: `read_scan`, `write`, `merge_dml`, `metadata`, `optimize_vacuum`
+- Implemented: Wave 1 pruning/compaction benchmark expansion across read, merge, and optimize suites
 - Implemented: suites execute real `deltalake-core` operations (read provider scans, write builders, merge builders, metadata loads)
 - Implemented: deterministic fixture generation + result schema v1
 - Implemented: manual comparison workflow (`scripts/compare_branch.sh` + Python compare) in advisory mode (non-gating)

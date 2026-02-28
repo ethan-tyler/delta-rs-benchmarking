@@ -14,7 +14,10 @@ use crate::storage::StorageConfig;
 
 const NARROW_SALES_TABLE_DIR: &str = "narrow_sales_delta";
 const MERGE_TARGET_TABLE_DIR: &str = "merge_target_delta";
+const READ_PARTITIONED_TABLE_DIR: &str = "read_partitioned_delta";
+const MERGE_PARTITIONED_TARGET_TABLE_DIR: &str = "merge_partitioned_target_delta";
 const OPTIMIZE_SMALL_FILES_TABLE_DIR: &str = "optimize_small_files_delta";
+const OPTIMIZE_COMPACTED_TABLE_DIR: &str = "optimize_compacted_delta";
 const VACUUM_READY_TABLE_DIR: &str = "vacuum_ready_delta";
 
 pub fn scale_to_row_count(scale: &str) -> BenchResult<usize> {
@@ -40,8 +43,20 @@ pub fn merge_target_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
     fixture_root(fixtures_dir, scale).join(MERGE_TARGET_TABLE_DIR)
 }
 
+pub fn read_partitioned_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixture_root(fixtures_dir, scale).join(READ_PARTITIONED_TABLE_DIR)
+}
+
+pub fn merge_partitioned_target_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixture_root(fixtures_dir, scale).join(MERGE_PARTITIONED_TARGET_TABLE_DIR)
+}
+
 pub fn optimize_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
     fixture_root(fixtures_dir, scale).join(OPTIMIZE_SMALL_FILES_TABLE_DIR)
+}
+
+pub fn optimize_compacted_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixture_root(fixtures_dir, scale).join(OPTIMIZE_COMPACTED_TABLE_DIR)
 }
 
 pub fn vacuum_ready_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
@@ -72,6 +87,30 @@ pub fn merge_target_table_url(
     )
 }
 
+pub fn read_partitioned_table_url(
+    fixtures_dir: &Path,
+    scale: &str,
+    storage: &StorageConfig,
+) -> BenchResult<Url> {
+    storage.table_url_for(
+        &read_partitioned_table_path(fixtures_dir, scale),
+        scale,
+        READ_PARTITIONED_TABLE_DIR,
+    )
+}
+
+pub fn merge_partitioned_target_table_url(
+    fixtures_dir: &Path,
+    scale: &str,
+    storage: &StorageConfig,
+) -> BenchResult<Url> {
+    storage.table_url_for(
+        &merge_partitioned_target_table_path(fixtures_dir, scale),
+        scale,
+        MERGE_PARTITIONED_TARGET_TABLE_DIR,
+    )
+}
+
 pub fn optimize_small_files_table_url(
     fixtures_dir: &Path,
     scale: &str,
@@ -81,6 +120,18 @@ pub fn optimize_small_files_table_url(
         &optimize_small_files_table_path(fixtures_dir, scale),
         scale,
         OPTIMIZE_SMALL_FILES_TABLE_DIR,
+    )
+}
+
+pub fn optimize_compacted_table_url(
+    fixtures_dir: &Path,
+    scale: &str,
+    storage: &StorageConfig,
+) -> BenchResult<Url> {
+    storage.table_url_for(
+        &optimize_compacted_table_path(fixtures_dir, scale),
+        scale,
+        OPTIMIZE_COMPACTED_TABLE_DIR,
     )
 }
 
@@ -135,6 +186,15 @@ pub async fn generate_fixtures(
     )
     .await?;
 
+    write_delta_table_partitioned_small_files(
+        read_partitioned_table_url(fixtures_dir, scale, storage)?,
+        &data,
+        128,
+        &["region"],
+        storage,
+    )
+    .await?;
+
     let merge_rows = data
         .iter()
         .take((data.len() / 4).max(1024))
@@ -143,6 +203,15 @@ pub async fn generate_fixtures(
     write_delta_table(
         merge_target_table_url(fixtures_dir, scale, storage)?,
         &merge_rows,
+        storage,
+    )
+    .await?;
+
+    write_delta_table_partitioned_small_files(
+        merge_partitioned_target_table_url(fixtures_dir, scale, storage)?,
+        &merge_rows,
+        64,
+        &["region"],
         storage,
     )
     .await?;
@@ -156,6 +225,13 @@ pub async fn generate_fixtures(
         optimize_small_files_table_url(fixtures_dir, scale, storage)?,
         &optimize_rows,
         128,
+        storage,
+    )
+    .await?;
+
+    write_delta_table(
+        optimize_compacted_table_url(fixtures_dir, scale, storage)?,
+        &optimize_rows,
         storage,
     )
     .await?;
@@ -229,6 +305,32 @@ pub(crate) async fn write_delta_table_small_files(
         table = table
             .write(vec![rows_to_batch(chunk)?])
             .with_save_mode(mode)
+            .await?;
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn write_delta_table_partitioned_small_files(
+    table_url: Url,
+    rows: &[NarrowSaleRow],
+    chunk_size: usize,
+    partition_columns: &[&str],
+    storage: &StorageConfig,
+) -> BenchResult<()> {
+    prepare_local_table_dir(&table_url)?;
+
+    let mut table = storage.try_from_url_for_write(table_url).await?;
+    for (idx, chunk) in rows.chunks(chunk_size).enumerate() {
+        let mode = if idx == 0 {
+            SaveMode::Overwrite
+        } else {
+            SaveMode::Append
+        };
+        table = table
+            .write(vec![rows_to_batch(chunk)?])
+            .with_save_mode(mode)
+            .with_partition_columns(partition_columns.iter().copied())
             .await?;
     }
 

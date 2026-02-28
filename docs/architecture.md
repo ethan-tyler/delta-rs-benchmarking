@@ -39,7 +39,13 @@
   - `run_mode`
   - `maintenance_window_id`
 - Cases: success/failure, sample timings, failure payload when applicable
-- Samples: `elapsed_ms` plus normalized `metrics` (`rows_processed`, `bytes_processed`, `operations`, `table_version`)
+- Samples: `elapsed_ms` plus normalized `metrics`:
+  - Base fields: `rows_processed`, `bytes_processed`, `operations`, `table_version`
+  - Optional scan/rewrite fields: `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`, `rewrite_time_ms`
+  - Source mapping:
+    - `read_scan`: DataFusion/Delta physical-plan metrics (`files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`)
+    - `merge_dml`: `MergeMetrics` (`files_scanned`, `files_pruned`, `scan_time_ms`, `rewrite_time_ms`)
+    - `optimize_vacuum` optimize case: considered/skipped counts (`files_scanned`, `files_pruned`)
 
 ## Reproducibility controls
 

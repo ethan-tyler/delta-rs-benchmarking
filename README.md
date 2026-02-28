@@ -31,7 +31,25 @@ Tuning options:
 - `BENCH_RETRY_ATTEMPTS` (default `2`) for transient failures.
 - `BENCH_RETRY_DELAY_SECONDS` (default `5`) between retry attempts.
 - `--noise-threshold`, `--ci`, and `--max-allowed-regressions` to enable compare-gating policy.
+- `python -m delta_bench_compare.compare ... --include-metrics` to append per-case metric columns in compare output.
 - `--storage-backend` and repeatable `--storage-option KEY=VALUE` to run fixture generation + suite execution against object storage.
+
+## Result metrics
+
+Each sample writes normalized metrics under `cases[].samples[].metrics`.
+
+Always-present fields:
+- `rows_processed`
+- `bytes_processed`
+- `operations`
+- `table_version`
+
+Optional scan/rewrite fields (suite-dependent):
+- `files_scanned`
+- `files_pruned`
+- `bytes_scanned`
+- `scan_time_ms`
+- `rewrite_time_ms`
 
 ## Cloud/object-store mode
 

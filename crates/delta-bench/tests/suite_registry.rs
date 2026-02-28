@@ -9,6 +9,14 @@ fn list_targets_includes_optimize_vacuum() {
 }
 
 #[test]
+fn list_targets_includes_tpcds() {
+    assert!(
+        list_targets().contains(&"tpcds"),
+        "tpcds target missing from list_targets"
+    );
+}
+
+#[test]
 fn optimize_vacuum_case_list_is_exact() {
     let cases = list_cases_for_target("optimize_vacuum").expect("known target should work");
     assert_eq!(
@@ -17,6 +25,20 @@ fn optimize_vacuum_case_list_is_exact() {
             "optimize_compact_small_files".to_string(),
             "vacuum_dry_run_lite".to_string(),
             "vacuum_execute_lite".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn tpcds_case_list_is_exact() {
+    let cases = list_cases_for_target("tpcds").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "tpcds_q03".to_string(),
+            "tpcds_q07".to_string(),
+            "tpcds_q64".to_string(),
+            "tpcds_q72".to_string(),
         ]
     );
 }

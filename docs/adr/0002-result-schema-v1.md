@@ -30,6 +30,14 @@ Use JSON result schema v1 with explicit case-level samples and failure payloads.
       - optional (backward-compatible): `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`, `rewrite_time_ms`
   - `failure` message when unsuccessful
 
+## Clarifications
+
+- Suite-level skip policies (for example, TPC-DS `q72`) are represented without schema changes:
+  - `success=false`
+  - `samples=[]`
+  - `failure.message` prefixed with `skipped: ...`
+- This keeps schema v1 compatible while preserving deterministic per-case output for compare tooling.
+
 ## Rationale
 
 - Supports rich comparisons without rerunning benchmarks.

@@ -31,7 +31,7 @@ usage() {
   cat <<EOF
 Usage:
   ./scripts/bench.sh data [--scale sf1|sf10|sf100] [--seed N] [--force] [--storage-backend local|s3|gcs|azure] [--storage-option KEY=VALUE ...]
-  ./scripts/bench.sh run [--scale sf1] [--suite read_scan|write|merge_dml|metadata|optimize_vacuum|all] [--warmup N] [--iters N] [--label L] [--storage-backend local|s3|gcs|azure] [--storage-option KEY=VALUE ...]
+  ./scripts/bench.sh run [--scale sf1] [--suite read_scan|write|merge_dml|metadata|optimize_vacuum|tpcds|all] [--warmup N] [--iters N] [--label L] [--storage-backend local|s3|gcs|azure] [--storage-option KEY=VALUE ...]
   ./scripts/bench.sh list [target]
   ./scripts/bench.sh doctor
 

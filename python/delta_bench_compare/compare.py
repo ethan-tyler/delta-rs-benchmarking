@@ -2,22 +2,36 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+import sys
 from pathlib import Path
 
 from .formatting import render_markdown as render_markdown_output, render_text_table
 from .model import Comparison, ComparisonRow, SampleMetricSnapshot, Summary
 
 VALID_CLASSIFICATIONS = {"supported", "expected_failure"}
+VALID_AGGREGATIONS = {"min", "median", "p95"}
 
 
-def best_sample(case: dict) -> dict | None:
+def representative_sample(case: dict, aggregation: str = "median") -> dict | None:
+    if aggregation not in VALID_AGGREGATIONS:
+        raise ValueError(
+            f"unknown aggregation '{aggregation}'; expected one of: min, median, p95"
+        )
     if not case.get("success", True):
         return None
     samples = case.get("samples") or []
     elapsed_samples = [sample for sample in samples if "elapsed_ms" in sample]
     if not elapsed_samples:
         return None
-    return min(elapsed_samples, key=lambda sample: float(sample["elapsed_ms"]))
+    sorted_samples = sorted(elapsed_samples, key=lambda sample: float(sample["elapsed_ms"]))
+    if aggregation == "min":
+        return sorted_samples[0]
+    if aggregation == "median":
+        return sorted_samples[len(sorted_samples) // 2]
+    # Nearest-rank p95
+    idx = max(0, min(len(sorted_samples) - 1, math.ceil(0.95 * len(sorted_samples)) - 1))
+    return sorted_samples[idx]
 
 
 def case_classification(case: dict | None) -> str | None:
@@ -37,8 +51,8 @@ def case_classification(case: dict | None) -> str | None:
     return value
 
 
-def best_ms(case: dict) -> float | None:
-    sample = best_sample(case)
+def representative_ms(case: dict, aggregation: str = "median") -> float | None:
+    sample = representative_sample(case, aggregation=aggregation)
     if sample is None:
         return None
     return float(sample["elapsed_ms"])
@@ -51,8 +65,10 @@ def _metric_as_int(metrics: dict, key: str) -> int | None:
     return int(value)
 
 
-def best_sample_metrics(case: dict) -> SampleMetricSnapshot | None:
-    sample = best_sample(case)
+def best_sample_metrics(
+    case: dict, aggregation: str = "median"
+) -> SampleMetricSnapshot | None:
+    sample = representative_sample(case, aggregation=aggregation)
     if sample is None:
         return None
 
@@ -79,11 +95,21 @@ def format_change(baseline_ms: float, candidate_ms: float, threshold: float) -> 
         return "no change"
     ratio = baseline_ms / candidate_ms
     if candidate_ms < baseline_ms:
-        return f"+{ratio:.2f}x faster"
+        return f"{ratio:.2f}x faster"
     return f"{1 / ratio:.2f}x slower"
 
 
-def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Comparison:
+def compare_runs(
+    baseline: dict,
+    candidate: dict,
+    threshold: float = 0.05,
+    aggregation: str = "median",
+) -> Comparison:
+    if aggregation not in VALID_AGGREGATIONS:
+        raise ValueError(
+            f"unknown aggregation '{aggregation}'; expected one of: min, median, p95"
+        )
+
     baseline_cases = {c["case"]: c for c in baseline.get("cases", [])}
     candidate_cases = {c["case"]: c for c in candidate.get("cases", [])}
     names = sorted(set(baseline_cases) | set(candidate_cases))
@@ -103,12 +129,12 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
                 ComparisonRow(
                     name,
                     None,
-                    best_ms(c),
+                    representative_ms(c, aggregation=aggregation),
                     "new",
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
                     baseline_metrics=None,
-                    candidate_metrics=best_sample_metrics(c),
+                    candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
                 )
             )
             continue
@@ -117,12 +143,12 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
             rows.append(
                 ComparisonRow(
                     name,
-                    best_ms(b),
+                    representative_ms(b, aggregation=aggregation),
                     None,
                     "removed",
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
-                    baseline_metrics=best_sample_metrics(b),
+                    baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
                     candidate_metrics=None,
                 )
             )
@@ -138,18 +164,18 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
             rows.append(
                 ComparisonRow(
                     name,
-                    best_ms(b),
-                    best_ms(c),
+                    representative_ms(b, aggregation=aggregation),
+                    representative_ms(c, aggregation=aggregation),
                     "expected_failure",
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
-                    baseline_metrics=best_sample_metrics(b),
-                    candidate_metrics=best_sample_metrics(c),
+                    baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
+                    candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
                 )
             )
             continue
-        base_ms = best_ms(b)
-        cand_ms = best_ms(c)
+        base_ms = representative_ms(b, aggregation=aggregation)
+        cand_ms = representative_ms(c, aggregation=aggregation)
 
         if base_ms is None or cand_ms is None:
             incomparable += 1
@@ -161,8 +187,8 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
                     "incomparable",
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
-                    baseline_metrics=best_sample_metrics(b),
-                    candidate_metrics=best_sample_metrics(c),
+                    baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
+                    candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
                 )
             )
             continue
@@ -182,8 +208,8 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
                 change,
                 baseline_classification=baseline_classification,
                 candidate_classification=candidate_classification,
-                baseline_metrics=best_sample_metrics(b),
-                candidate_metrics=best_sample_metrics(c),
+                baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
+                candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
             )
         )
 
@@ -258,16 +284,25 @@ def main() -> None:
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--noise-threshold", type=float, default=0.05)
+    parser.add_argument("--aggregation", choices=["min", "median", "p95"], default="median")
     parser.add_argument("--format", choices=["text", "markdown"], default="text")
     parser.add_argument("--include-metrics", action="store_true")
     parser.add_argument("--ci", action="store_true")
-    parser.add_argument("--max-allowed-regressions", type=int, default=0)
+    parser.add_argument("--max-allowed-regressions", type=int, default=None)
     args = parser.parse_args()
+
+    if args.ci or args.max_allowed_regressions is not None:
+        print(
+            "warning: --ci and --max-allowed-regressions are deprecated and ignored; "
+            "benchmark compare is advisory-only",
+            file=sys.stderr,
+        )
 
     comparison = compare_runs(
         _load(args.baseline),
         _load(args.candidate),
         threshold=args.noise_threshold,
+        aggregation=args.aggregation,
     )
     output = (
         render_markdown(comparison, include_metrics=args.include_metrics)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -28,7 +31,7 @@ def _run(cases: list[dict]) -> dict:
 
 
 def test_format_change_thresholds() -> None:
-    assert format_change(100.0, 90.0, 0.05) == "+1.11x faster"
+    assert format_change(100.0, 90.0, 0.05) == "1.11x faster"
     assert format_change(100.0, 110.0, 0.05) == "1.10x slower"
     assert format_change(100.0, 103.0, 0.05) == "no change"
 
@@ -53,7 +56,7 @@ def test_compare_runs_handles_failures_and_missing_cases() -> None:
 
     by_case = {row.case: row for row in comparison.rows}
 
-    assert by_case["a"].change == "+1.11x faster"
+    assert by_case["a"].change == "1.11x faster"
     assert by_case["b"].change == "incomparable"
     assert by_case["only_base"].change == "removed"
     assert by_case["only_cand"].change == "new"
@@ -91,7 +94,7 @@ def test_compare_runs_marks_expected_failure_classification_explicitly() -> None
     assert row.change == "expected_failure"
 
 
-def test_compare_rows_use_metrics_from_fastest_sample() -> None:
+def test_compare_rows_use_metrics_from_median_sample() -> None:
     base = _run(
         [
             {
@@ -100,6 +103,7 @@ def test_compare_rows_use_metrics_from_fastest_sample() -> None:
                 "samples": [
                     {"elapsed_ms": 100.0, "metrics": {"files_scanned": 10}},
                     {"elapsed_ms": 80.0, "metrics": {"files_scanned": 7}},
+                    {"elapsed_ms": 95.0, "metrics": {"files_scanned": 8}},
                 ],
             }
         ]
@@ -112,6 +116,7 @@ def test_compare_rows_use_metrics_from_fastest_sample() -> None:
                 "samples": [
                     {"elapsed_ms": 120.0, "metrics": {"files_scanned": 12}},
                     {"elapsed_ms": 90.0, "metrics": {"files_scanned": 9}},
+                    {"elapsed_ms": 115.0, "metrics": {"files_scanned": 11}},
                 ],
             }
         ]
@@ -120,12 +125,138 @@ def test_compare_rows_use_metrics_from_fastest_sample() -> None:
     comparison = compare_runs(base, cand, threshold=0.05)
     row = comparison.rows[0]
 
+    assert row.baseline_ms == 95.0
+    assert row.candidate_ms == 115.0
+    assert row.baseline_metrics is not None
+    assert row.candidate_metrics is not None
+    assert row.baseline_metrics.files_scanned == 8
+    assert row.candidate_metrics.files_scanned == 11
+
+
+def test_compare_rows_even_count_median_uses_same_sample_for_time_and_metrics() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 80.0, "metrics": {"files_scanned": 7}},
+                    {"elapsed_ms": 100.0, "metrics": {"files_scanned": 10}},
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 90.0, "metrics": {"files_scanned": 9}},
+                    {"elapsed_ms": 120.0, "metrics": {"files_scanned": 12}},
+                ],
+            }
+        ]
+    )
+
+    comparison = compare_runs(base, cand, threshold=0.05, aggregation="median")
+    row = comparison.rows[0]
+
+    assert row.baseline_ms == 100.0
+    assert row.candidate_ms == 120.0
+    assert row.baseline_metrics is not None
+    assert row.candidate_metrics is not None
+    assert row.baseline_metrics.files_scanned == 10
+    assert row.candidate_metrics.files_scanned == 12
+
+
+def test_compare_rows_use_metrics_from_min_sample_when_requested() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 100.0, "metrics": {"files_scanned": 10}},
+                    {"elapsed_ms": 80.0, "metrics": {"files_scanned": 7}},
+                    {"elapsed_ms": 95.0, "metrics": {"files_scanned": 8}},
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 120.0, "metrics": {"files_scanned": 12}},
+                    {"elapsed_ms": 90.0, "metrics": {"files_scanned": 9}},
+                    {"elapsed_ms": 115.0, "metrics": {"files_scanned": 11}},
+                ],
+            }
+        ]
+    )
+
+    comparison = compare_runs(base, cand, threshold=0.05, aggregation="min")
+    row = comparison.rows[0]
+
     assert row.baseline_ms == 80.0
     assert row.candidate_ms == 90.0
     assert row.baseline_metrics is not None
     assert row.candidate_metrics is not None
     assert row.baseline_metrics.files_scanned == 7
     assert row.candidate_metrics.files_scanned == 9
+
+
+def test_compare_rows_use_metrics_from_p95_sample_when_requested() -> None:
+    base = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 10.0, "metrics": {"files_scanned": 1}},
+                    {"elapsed_ms": 20.0, "metrics": {"files_scanned": 2}},
+                    {"elapsed_ms": 30.0, "metrics": {"files_scanned": 3}},
+                    {"elapsed_ms": 40.0, "metrics": {"files_scanned": 4}},
+                    {"elapsed_ms": 100.0, "metrics": {"files_scanned": 5}},
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "a",
+                "success": True,
+                "samples": [
+                    {"elapsed_ms": 15.0, "metrics": {"files_scanned": 6}},
+                    {"elapsed_ms": 25.0, "metrics": {"files_scanned": 7}},
+                    {"elapsed_ms": 35.0, "metrics": {"files_scanned": 8}},
+                    {"elapsed_ms": 45.0, "metrics": {"files_scanned": 9}},
+                    {"elapsed_ms": 55.0, "metrics": {"files_scanned": 10}},
+                ],
+            }
+        ]
+    )
+
+    comparison = compare_runs(base, cand, threshold=0.05, aggregation="p95")
+    row = comparison.rows[0]
+
+    assert row.baseline_ms == 100.0
+    assert row.candidate_ms == 55.0
+    assert row.baseline_metrics is not None
+    assert row.candidate_metrics is not None
+    assert row.baseline_metrics.files_scanned == 5
+    assert row.candidate_metrics.files_scanned == 10
+
+
+def test_compare_runs_rejects_unknown_aggregation() -> None:
+    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
+    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 90.0}]}])
+    with pytest.raises(ValueError, match="aggregation"):
+        compare_runs(base, cand, threshold=0.05, aggregation="not-a-mode")
 
 
 def test_format_change_handles_zero_baseline() -> None:
@@ -320,6 +451,37 @@ def test_advisory_mode_never_violates_ci_policy() -> None:
     )
     assert violates is False
     assert message == ""
+
+
+def test_compare_cli_warns_when_deprecated_ci_flags_are_used(tmp_path: Path) -> None:
+    baseline = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
+    candidate = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "delta_bench_compare.compare",
+            str(baseline_path),
+            str(candidate_path),
+            "--ci",
+            "--max-allowed-regressions",
+            "0",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0
+    assert "deprecated and ignored" in result.stderr.lower()
 
 
 def test_load_rejects_schema_v1_payload(tmp_path: Path) -> None:

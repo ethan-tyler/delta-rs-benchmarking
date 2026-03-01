@@ -1,4 +1,7 @@
-use delta_bench::data::fixtures::{fixture_root, generate_fixtures, load_manifest};
+use delta_bench::data::fixtures::{
+    generate_fixtures, generate_fixtures_with_profile, narrow_sales_table_url, load_manifest,
+    FixtureProfile,
+};
 use delta_bench::storage::StorageConfig;
 
 #[tokio::test]
@@ -97,4 +100,55 @@ async fn regenerates_when_wave1_fixture_tables_are_missing_without_force() {
             table_path.display()
         );
     }
+}
+
+#[tokio::test]
+async fn generates_tpcds_store_sales_fixture_table() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let table_path = temp.path().join("sf1").join("tpcds").join("store_sales");
+    assert!(
+        table_path.exists(),
+        "expected TPC-DS store_sales table dir: {}",
+        table_path.display()
+    );
+    assert!(
+        table_path.join("_delta_log").exists(),
+        "expected TPC-DS store_sales delta log dir: {}",
+        table_path.join("_delta_log").display()
+    );
+}
+
+#[tokio::test]
+async fn many_versions_profile_writes_multiple_narrow_sales_table_versions() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures_with_profile(
+        temp.path(),
+        "sf1",
+        42,
+        true,
+        FixtureProfile::ManyVersions,
+        &storage,
+    )
+    .await
+    .expect("generate many-versions fixtures");
+
+    let table_url =
+        narrow_sales_table_url(temp.path(), "sf1", &storage).expect("narrow_sales table url");
+    let table = storage
+        .open_table(table_url)
+        .await
+        .expect("open many-versions table");
+    let version = table.version().map(|v| v as u64).unwrap_or(0);
+    assert!(
+        version == 12,
+        "expected many-versions profile to append 12 commits after initial write, got version={version}"
+    );
 }

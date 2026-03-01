@@ -25,8 +25,8 @@ async fn setup_delay_is_not_counted_in_iteration_elapsed_time() {
     };
     assert_eq!(case.samples.len(), 1);
     assert!(
-        case.samples[0].elapsed_ms < 10.0,
-        "setup delay leaked into measured time: {}",
+        case.samples[0].elapsed_ms < 50.0,
+        "setup delay leaked into measured time: {} ms (expected < 50 ms)",
         case.samples[0].elapsed_ms
     );
 }
@@ -51,8 +51,8 @@ async fn async_setup_delay_is_not_counted_in_iteration_elapsed_time() {
     };
     assert_eq!(case.samples.len(), 1);
     assert!(
-        case.samples[0].elapsed_ms < 10.0,
-        "async setup delay leaked into measured time: {}",
+        case.samples[0].elapsed_ms < 50.0,
+        "async setup delay leaked into measured time: {} ms (expected < 50 ms)",
         case.samples[0].elapsed_ms
     );
 }

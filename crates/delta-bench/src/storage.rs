@@ -192,3 +192,58 @@ fn next_isolation_suffix() -> String {
         .as_nanos();
     format!("{nanos}-{counter}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_alphanumeric_unchanged() {
+        assert_eq!(
+            sanitize_path_component("hello-world_v2.0"),
+            "hello-world_v2.0"
+        );
+    }
+
+    #[test]
+    fn sanitize_special_chars_replaced() {
+        assert_eq!(sanitize_path_component("a/b\\c:d"), "a_b_c_d");
+    }
+
+    #[test]
+    fn sanitize_empty_returns_table() {
+        assert_eq!(sanitize_path_component(""), "table");
+    }
+
+    #[test]
+    fn sanitize_all_special_returns_table() {
+        assert_eq!(sanitize_path_component("///"), "table");
+    }
+
+    #[test]
+    fn sanitize_unicode_replaced() {
+        // Trailing non-ASCII char becomes underscore, then gets trimmed
+        assert_eq!(sanitize_path_component("caf\u{00e9}"), "caf");
+        // Non-ASCII in the middle stays as underscore
+        assert_eq!(sanitize_path_component("a\u{00e9}b"), "a_b");
+    }
+
+    #[test]
+    fn sanitize_leading_trailing_underscores_trimmed() {
+        assert_eq!(sanitize_path_component("__name__"), "name");
+    }
+
+    #[test]
+    fn validate_mismatched_scheme_rejected() {
+        let url = Url::parse("gs://bucket/path").unwrap();
+        let result = validate_table_root_scheme(StorageBackend::S3, &url);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("incompatible"));
+    }
+
+    #[test]
+    fn validate_matching_scheme_accepted() {
+        let url = Url::parse("s3://bucket/path").unwrap();
+        assert!(validate_table_root_scheme(StorageBackend::S3, &url).is_ok());
+    }
+}

@@ -366,3 +366,40 @@ def test_load_rejects_unknown_case_classification(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="classification"):
         _load(path)
+
+
+def test_compare_runs_handles_deterministic_tpcds_case_names() -> None:
+    base = _run(
+        [
+            {"case": "tpcds_q03", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {
+                "case": "tpcds_q72",
+                "success": False,
+                "failure": {"message": "skipped"},
+                "samples": [],
+            },
+        ]
+    )
+    cand = _run(
+        [
+            {"case": "tpcds_q07", "success": True, "samples": [{"elapsed_ms": 95.0}]},
+            {"case": "tpcds_q03", "success": True, "samples": [{"elapsed_ms": 90.0}]},
+            {
+                "case": "tpcds_q72",
+                "success": False,
+                "failure": {"message": "skipped"},
+                "samples": [],
+            },
+        ]
+    )
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+
+    assert [row.case for row in comparison.rows] == [
+        "tpcds_q03",
+        "tpcds_q07",
+        "tpcds_q72",
+    ]
+    by_case = {row.case: row for row in comparison.rows}
+    assert by_case["tpcds_q07"].change == "new"
+    assert by_case["tpcds_q72"].change == "incomparable"

@@ -16,7 +16,7 @@ pub fn generate_narrow_sales_rows(seed: u64, rows: usize) -> Vec<NarrowSaleRow> 
         let value_i64 = rng.gen_range(-5_000..50_000) + skew;
         let flag = rng.gen_bool(0.35);
         out.push(NarrowSaleRow {
-            id: id as u64,
+            id: id as i64,
             ts_ms: start_ts + (id as i64 * 60_000),
             region: REGIONS[region_idx].to_string(),
             value_i64,

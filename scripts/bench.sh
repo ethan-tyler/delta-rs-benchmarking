@@ -32,7 +32,7 @@ usage() {
   cat <<EOF
 Usage:
   ./scripts/bench.sh data [--scale sf1|sf10|sf100] [--dataset-id tiny_smoke|medium_selective|small_files|many_versions] [--seed N] [--force] [--storage-backend local|s3] [--storage-option KEY=VALUE ...] [--backend-profile NAME]
-  ./scripts/bench.sh run [--scale sf1] [--dataset-id tiny_smoke|medium_selective|small_files|many_versions] [--suite read_scan|write|merge_dml|metadata|optimize_vacuum|interop_py|all] [--case-filter SUBSTR] [--runner rust|python|all] [--warmup N] [--iters N] [--label L] [--storage-backend local|s3] [--storage-option KEY=VALUE ...] [--backend-profile NAME]
+  ./scripts/bench.sh run [--scale sf1] [--dataset-id tiny_smoke|medium_selective|small_files|many_versions] [--suite read_scan|write|delete_update_dml|merge_dml|metadata|optimize_vacuum|tpcds|interop_py|all] [--case-filter SUBSTR] [--runner rust|python|all] [--warmup N] [--iters N] [--label L] [--storage-backend local|s3] [--storage-option KEY=VALUE ...] [--backend-profile NAME]
   ./scripts/bench.sh list [target]
   ./scripts/bench.sh doctor
 

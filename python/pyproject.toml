@@ -7,6 +7,7 @@ dependencies = []
 [project.scripts]
 delta-bench-compare = "delta_bench_compare.compare:main"
 delta-bench-interop-run = "delta_bench_interop.run_case:main"
+delta-bench-longitudinal = "delta_bench_longitudinal.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

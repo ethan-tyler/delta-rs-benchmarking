@@ -1,12 +1,12 @@
-use std::fs;
 use std::path::Path;
 
 use url::Url;
 
+use super::{copy_dir_all, into_case_result};
 use crate::data::fixtures::{narrow_sales_table_path, narrow_sales_table_url};
 use crate::error::{BenchError, BenchResult};
 use crate::results::{CaseResult, SampleMetrics};
-use crate::runner::{run_case_async, run_case_async_with_setup, CaseExecutionResult};
+use crate::runner::{run_case_async, run_case_async_with_setup};
 use crate::storage::StorageConfig;
 
 struct MetadataIterationSetup {
@@ -29,7 +29,7 @@ pub async fn run(
     storage: &StorageConfig,
 ) -> BenchResult<Vec<CaseResult>> {
     if storage.is_local() {
-        let table_path = narrow_sales_table_path(fixtures_dir, scale);
+        let table_path = narrow_sales_table_path(fixtures_dir, scale)?;
         let mut out = Vec::new();
 
         let c1 = run_case_async_with_setup(
@@ -147,31 +147,4 @@ fn prepare_metadata_iteration(source_table_path: &Path) -> BenchResult<MetadataI
         _temp: temp,
         table_url,
     })
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> BenchResult<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
-            return Err(BenchError::InvalidArgument(format!(
-                "symlinks are not allowed in fixture tree: {}",
-                entry.path().display()
-            )));
-        }
-        let to = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_all(&entry.path(), &to)?;
-        } else {
-            fs::copy(entry.path(), to)?;
-        }
-    }
-    Ok(())
-}
-
-fn into_case_result(result: CaseExecutionResult) -> CaseResult {
-    match result {
-        CaseExecutionResult::Success(c) | CaseExecutionResult::Failure(c) => c,
-    }
 }

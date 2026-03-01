@@ -15,10 +15,12 @@ use crate::storage::StorageConfig;
 const NARROW_SALES_TABLE_DIR: &str = "narrow_sales_delta";
 const MERGE_TARGET_TABLE_DIR: &str = "merge_target_delta";
 const READ_PARTITIONED_TABLE_DIR: &str = "read_partitioned_delta";
+const DELETE_UPDATE_SMALL_FILES_TABLE_DIR: &str = "delete_update_small_files_delta";
 const MERGE_PARTITIONED_TARGET_TABLE_DIR: &str = "merge_partitioned_target_delta";
 const OPTIMIZE_SMALL_FILES_TABLE_DIR: &str = "optimize_small_files_delta";
 const OPTIMIZE_COMPACTED_TABLE_DIR: &str = "optimize_compacted_delta";
 const VACUUM_READY_TABLE_DIR: &str = "vacuum_ready_delta";
+const FIXTURE_SCHEMA_VERSION: u32 = 2;
 
 pub fn scale_to_row_count(scale: &str) -> BenchResult<usize> {
     match scale {
@@ -31,36 +33,89 @@ pub fn scale_to_row_count(scale: &str) -> BenchResult<usize> {
     }
 }
 
-pub fn fixture_root(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixtures_dir.join(scale)
+pub fn validate_scale(scale: &str) -> BenchResult<()> {
+    if scale.is_empty() {
+        return Err(BenchError::InvalidArgument(
+            "scale must not be empty".to_string(),
+        ));
+    }
+    if matches!(scale, "." | "..") {
+        return Err(BenchError::InvalidArgument(format!(
+            "scale '{scale}' is not allowed"
+        )));
+    }
+    if !scale
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+    {
+        return Err(BenchError::InvalidArgument(
+            "scale contains invalid characters; allowed: [A-Za-z0-9._-]".to_string(),
+        ));
+    }
+    let _ = scale_to_row_count(scale)?;
+    Ok(())
 }
 
-pub fn narrow_sales_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(NARROW_SALES_TABLE_DIR)
+pub fn fixture_root(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    Ok(fixtures_dir.join(scale))
 }
 
-pub fn merge_target_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(MERGE_TARGET_TABLE_DIR)
+pub fn narrow_sales_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    Ok(fixture_root(fixtures_dir, scale)?.join(NARROW_SALES_TABLE_DIR))
+}
+
+pub fn merge_target_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    Ok(fixture_root(fixtures_dir, scale)?.join(MERGE_TARGET_TABLE_DIR))
 }
 
 pub fn read_partitioned_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(READ_PARTITIONED_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(READ_PARTITIONED_TABLE_DIR)
 }
 
 pub fn merge_partitioned_target_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(MERGE_PARTITIONED_TARGET_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(MERGE_PARTITIONED_TARGET_TABLE_DIR)
+}
+
+pub fn delete_update_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(DELETE_UPDATE_SMALL_FILES_TABLE_DIR)
 }
 
 pub fn optimize_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(OPTIMIZE_SMALL_FILES_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(OPTIMIZE_SMALL_FILES_TABLE_DIR)
 }
 
 pub fn optimize_compacted_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(OPTIMIZE_COMPACTED_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(OPTIMIZE_COMPACTED_TABLE_DIR)
 }
 
 pub fn vacuum_ready_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(VACUUM_READY_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(VACUUM_READY_TABLE_DIR)
+}
+
+fn required_local_fixture_tables_exist(root: &Path) -> bool {
+    [
+        NARROW_SALES_TABLE_DIR,
+        MERGE_TARGET_TABLE_DIR,
+        READ_PARTITIONED_TABLE_DIR,
+        MERGE_PARTITIONED_TARGET_TABLE_DIR,
+        OPTIMIZE_SMALL_FILES_TABLE_DIR,
+        OPTIMIZE_COMPACTED_TABLE_DIR,
+        VACUUM_READY_TABLE_DIR,
+    ]
+    .iter()
+    .all(|table| root.join(table).join("_delta_log").exists())
 }
 
 pub fn narrow_sales_table_url(
@@ -69,7 +124,7 @@ pub fn narrow_sales_table_url(
     storage: &StorageConfig,
 ) -> BenchResult<Url> {
     storage.table_url_for(
-        &narrow_sales_table_path(fixtures_dir, scale),
+        &narrow_sales_table_path(fixtures_dir, scale)?,
         scale,
         NARROW_SALES_TABLE_DIR,
     )
@@ -81,7 +136,7 @@ pub fn merge_target_table_url(
     storage: &StorageConfig,
 ) -> BenchResult<Url> {
     storage.table_url_for(
-        &merge_target_table_path(fixtures_dir, scale),
+        &merge_target_table_path(fixtures_dir, scale)?,
         scale,
         MERGE_TARGET_TABLE_DIR,
     )
@@ -108,6 +163,18 @@ pub fn merge_partitioned_target_table_url(
         &merge_partitioned_target_table_path(fixtures_dir, scale),
         scale,
         MERGE_PARTITIONED_TARGET_TABLE_DIR,
+    )
+}
+
+pub fn delete_update_small_files_table_url(
+    fixtures_dir: &Path,
+    scale: &str,
+    storage: &StorageConfig,
+) -> BenchResult<Url> {
+    storage.table_url_for(
+        &delete_update_small_files_table_path(fixtures_dir, scale),
+        scale,
+        DELETE_UPDATE_SMALL_FILES_TABLE_DIR,
     )
 }
 
@@ -154,7 +221,7 @@ pub async fn generate_fixtures(
     force: bool,
     storage: &StorageConfig,
 ) -> BenchResult<()> {
-    let root = fixture_root(fixtures_dir, scale);
+    let root = fixture_root(fixtures_dir, scale)?;
     let dataset_dir = root.join("narrow_sales");
     let data_path = dataset_dir.join("rows.jsonl");
     let manifest_path = root.join("manifest.json");
@@ -162,10 +229,13 @@ pub async fn generate_fixtures(
 
     if root.exists() && !force {
         if let Ok(existing) = load_manifest(fixtures_dir, scale) {
-            let matches_request = existing.schema_version == 1
+            let local_tables_ready =
+                !storage.is_local() || required_local_fixture_tables_exist(&root);
+            let matches_request = existing.schema_version == FIXTURE_SCHEMA_VERSION
                 && existing.seed == seed
                 && existing.scale == scale
-                && existing.rows == rows;
+                && existing.rows == rows
+                && local_tables_ready;
             if matches_request {
                 return Ok(());
             }
@@ -216,6 +286,15 @@ pub async fn generate_fixtures(
     )
     .await?;
 
+    write_delta_table_partitioned_small_files(
+        delete_update_small_files_table_url(fixtures_dir, scale, storage)?,
+        &data,
+        64,
+        &["region"],
+        storage,
+    )
+    .await?;
+
     let optimize_rows = data
         .iter()
         .take((data.len() / 2).max(2048))
@@ -249,7 +328,7 @@ pub async fn generate_fixtures(
     .await?;
 
     let manifest = FixtureManifest {
-        schema_version: 1,
+        schema_version: FIXTURE_SCHEMA_VERSION,
         seed,
         scale: scale.to_string(),
         rows,
@@ -371,7 +450,9 @@ fn prepare_local_table_dir(table_url: &Url) -> BenchResult<()> {
     Ok(())
 }
 
-fn rows_to_batch(rows: &[NarrowSaleRow]) -> BenchResult<arrow::record_batch::RecordBatch> {
+pub(crate) fn rows_to_batch(
+    rows: &[NarrowSaleRow],
+) -> BenchResult<arrow::record_batch::RecordBatch> {
     let schema = Arc::new(arrow::datatypes::Schema::new(vec![
         arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Int64, false),
         arrow::datatypes::Field::new("ts_ms", arrow::datatypes::DataType::Int64, false),
@@ -380,7 +461,7 @@ fn rows_to_batch(rows: &[NarrowSaleRow]) -> BenchResult<arrow::record_batch::Rec
         arrow::datatypes::Field::new("flag", arrow::datatypes::DataType::Boolean, false),
     ]));
 
-    let ids: Vec<i64> = rows.iter().map(|r| r.id as i64).collect();
+    let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
     let ts_ms: Vec<i64> = rows.iter().map(|r| r.ts_ms).collect();
     let regions: Vec<String> = rows.iter().map(|r| r.region.clone()).collect();
     let values: Vec<i64> = rows.iter().map(|r| r.value_i64).collect();
@@ -400,6 +481,7 @@ fn rows_to_batch(rows: &[NarrowSaleRow]) -> BenchResult<arrow::record_batch::Rec
 
 pub fn load_rows(fixtures_dir: &Path, scale: &str) -> BenchResult<Vec<NarrowSaleRow>> {
     let data_path = fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
         .join("narrow_sales")
         .join("rows.jsonl");
 
@@ -416,7 +498,9 @@ pub fn load_rows(fixtures_dir: &Path, scale: &str) -> BenchResult<Vec<NarrowSale
 }
 
 pub fn load_manifest(fixtures_dir: &Path, scale: &str) -> BenchResult<FixtureManifest> {
-    let path = fixture_root(fixtures_dir, scale).join("manifest.json");
+    let path = fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join("manifest.json");
     let manifest: FixtureManifest = serde_json::from_slice(&fs::read(path)?)?;
     Ok(manifest)
 }

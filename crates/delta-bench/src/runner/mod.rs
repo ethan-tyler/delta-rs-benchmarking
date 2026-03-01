@@ -4,6 +4,7 @@ use std::{future::Future, time::Duration};
 use crate::results::{CaseFailure, CaseResult, IterationSample, SampleMetrics};
 
 #[derive(Clone, Debug)]
+#[must_use]
 pub enum CaseExecutionResult {
     Success(CaseResult),
     Failure(CaseResult),

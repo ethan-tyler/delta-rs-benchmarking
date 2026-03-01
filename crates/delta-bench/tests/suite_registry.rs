@@ -9,6 +9,22 @@ fn list_targets_includes_optimize_vacuum() {
 }
 
 #[test]
+fn list_targets_includes_delete_update_dml() {
+    assert!(
+        list_targets().contains(&"delete_update_dml"),
+        "delete_update_dml target missing from list_targets"
+    );
+}
+
+#[test]
+fn list_targets_includes_tpcds() {
+    assert!(
+        list_targets().contains(&"tpcds"),
+        "tpcds target missing from list_targets"
+    );
+}
+
+#[test]
 fn list_targets_includes_interop_py() {
     assert!(
         list_targets().contains(&"interop_py"),
@@ -27,6 +43,52 @@ fn optimize_vacuum_case_list_is_exact() {
             "optimize_heavy_compaction".to_string(),
             "vacuum_dry_run_lite".to_string(),
             "vacuum_execute_lite".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn read_scan_case_list_is_exact() {
+    let cases = list_cases_for_target("read_scan").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "read_full_scan_narrow".to_string(),
+            "read_projection_region".to_string(),
+            "read_filter_flag_true".to_string(),
+            "read_partition_pruning_hit".to_string(),
+            "read_partition_pruning_miss".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn delete_update_dml_case_list_is_exact() {
+    let cases = list_cases_for_target("delete_update_dml").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "delete_rowsMatchedFraction_0.01_partition_localized".to_string(),
+            "delete_rowsMatchedFraction_0.05_scattered".to_string(),
+            "delete_rowsMatchedFraction_0.50_broad".to_string(),
+            "update_literal_rowsMatchedFraction_0.01_partition_localized".to_string(),
+            "update_literal_rowsMatchedFraction_0.05_scattered".to_string(),
+            "update_expression_rowsMatchedFraction_0.50_broad".to_string(),
+            "update_all_rows_expression".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn tpcds_case_list_is_exact() {
+    let cases = list_cases_for_target("tpcds").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "tpcds_q03".to_string(),
+            "tpcds_q07".to_string(),
+            "tpcds_q64".to_string(),
+            "tpcds_q72".to_string(),
         ]
     );
 }

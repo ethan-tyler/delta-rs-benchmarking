@@ -44,7 +44,7 @@
 - Modify: `scripts/security_check.sh`
 - Modify: `scripts/security_mode.sh`
 - Modify: `README.md`
-- Modify: `docs/security-vultr-wave1.md` (wording accuracy around approvals)
+- Modify: `docs/security-runner.md` (wording accuracy around approvals)
 
 **Step 1: Implement minimal code**
 - Remove fallback behavior that derives expected hash from policy file bytes in `security_check.sh`.

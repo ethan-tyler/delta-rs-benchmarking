@@ -1,0 +1,87 @@
+id: p0-rust
+description: P0 rust benchmark manifest for deterministic case ordering
+cases:
+  - id: read_full_scan_narrow
+    target: read_scan
+    runner: rust
+    enabled: true
+  - id: read_projection_region
+    target: read_scan
+    runner: rust
+    enabled: true
+  - id: read_filter_flag_true
+    target: read_scan
+    runner: rust
+    enabled: true
+  - id: read_partition_pruning_hit
+    target: read_scan
+    runner: rust
+    enabled: true
+  - id: read_partition_pruning_miss
+    target: read_scan
+    runner: rust
+    enabled: true
+  - id: write_append_small_batches
+    target: write
+    runner: rust
+    enabled: true
+  - id: write_append_large_batches
+    target: write
+    runner: rust
+    enabled: true
+  - id: write_overwrite
+    target: write
+    runner: rust
+    enabled: true
+  - id: delete_only_filesMatchedFraction_0.05_rowsMatchedFraction_0.05
+    target: merge_dml
+    runner: rust
+    enabled: true
+  - id: upsert_filesMatchedFraction_0.05_rowsMatchedFraction_0.1_rowsNotMatchedFraction_0.1
+    target: merge_dml
+    runner: rust
+    enabled: true
+  - id: merge_upsert_10pct
+    target: merge_dml
+    runner: rust
+    enabled: true
+  - id: merge_upsert_50pct
+    target: merge_dml
+    runner: rust
+    enabled: true
+  - id: merge_upsert_90pct
+    target: merge_dml
+    runner: rust
+    enabled: true
+  - id: merge_partition_localized_1pct
+    target: merge_dml
+    runner: rust
+    enabled: true
+  - id: metadata_table_load
+    target: metadata
+    runner: rust
+    enabled: true
+  - id: metadata_time_travel_v0
+    target: metadata
+    runner: rust
+    enabled: true
+  - id: optimize_compact_small_files
+    target: optimize_vacuum
+    runner: rust
+    enabled: true
+  - id: optimize_noop_already_compact
+    target: optimize_vacuum
+    runner: rust
+    enabled: true
+  - id: optimize_heavy_compaction
+    target: optimize_vacuum
+    runner: rust
+    enabled: true
+  - id: vacuum_dry_run_lite
+    target: optimize_vacuum
+    runner: rust
+    enabled: true
+  - id: vacuum_execute_lite
+    target: optimize_vacuum
+    runner: rust
+    enabled: true

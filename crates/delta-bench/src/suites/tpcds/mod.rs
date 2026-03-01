@@ -65,6 +65,7 @@ pub(crate) async fn run_with_specs_and_sql_dir(
                 out.push(CaseResult {
                     case: case_name,
                     success: false,
+                    classification: "supported".to_string(),
                     samples: Vec::new(),
                     failure: Some(CaseFailure {
                         message: format!(
@@ -126,23 +127,22 @@ async fn execute_query(
     let rows_processed = batches.iter().map(|batch| batch.num_rows() as u64).sum();
     let scan = extract_scan_metrics(&plan);
 
-    Ok(SampleMetrics {
-        rows_processed: Some(rows_processed),
-        bytes_processed: None,
-        operations: None,
-        table_version: None,
-        files_scanned: scan.files_scanned,
-        files_pruned: scan.files_pruned,
-        bytes_scanned: scan.bytes_scanned,
-        scan_time_ms: scan.scan_time_ms,
-        rewrite_time_ms: None,
-    })
+    Ok(
+        SampleMetrics::base(Some(rows_processed), None, None, None).with_scan_rewrite_metrics(
+            scan.files_scanned,
+            scan.files_pruned,
+            scan.bytes_scanned,
+            scan.scan_time_ms,
+            None,
+        ),
+    )
 }
 
 fn skipped_case_result(case: String, skip_reason: Option<&str>) -> CaseResult {
     CaseResult {
         case,
         success: false,
+        classification: "supported".to_string(),
         samples: Vec::new(),
         failure: Some(CaseFailure {
             message: format!(

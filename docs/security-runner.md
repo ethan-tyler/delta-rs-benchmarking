@@ -36,8 +36,14 @@ Use maintenance mode for patching, scans, snapshots, and key rotation.
   --enforce-run-mode \
   --require-no-public-ipv4 \
   --require-egress-policy \
+  --backend-profile s3_locking_vultr \
+  --runner all \
   main candidate-branch all
 ```
+
+Backend profile guidance:
+- Store repeatable object-store and lock-table defaults in `backends/s3_locking_vultr.env`.
+- Override sensitive/ephemeral values with `--storage-option KEY=VALUE` at execution time.
 
 ## Provisioning controls
 

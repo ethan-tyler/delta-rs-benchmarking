@@ -34,3 +34,25 @@ fn parse_storage_options_rejects_invalid_entries() {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn cli_rejects_removed_gcs_storage_backend() {
+    let err = Args::try_parse_from(["delta-bench", "--storage-backend", "gcs", "doctor"])
+        .expect_err("gcs backend should be rejected at parse time");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("possible values"),
+        "unexpected clap error: {rendered}"
+    );
+}
+
+#[test]
+fn cli_rejects_removed_azure_storage_backend() {
+    let err = Args::try_parse_from(["delta-bench", "--storage-backend", "azure", "doctor"])
+        .expect_err("azure backend should be rejected at parse time");
+    let rendered = err.to_string();
+    assert!(
+        rendered.contains("possible values"),
+        "unexpected clap error: {rendered}"
+    );
+}

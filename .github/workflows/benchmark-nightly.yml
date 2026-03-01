@@ -1,0 +1,68 @@
+name: Benchmark Nightly (Advisory)
+
+on:
+  schedule:
+    - cron: '15 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nightly:
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 240
+    concurrency:
+      group: delta-bench-nightly
+      cancel-in-progress: false
+    env:
+      BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
+      BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
+      BENCH_BACKEND_PROFILE: ${{ vars.BENCH_BACKEND_PROFILE }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare benchmark workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/prepare_delta_rs.sh
+          ./scripts/sync_harness_to_delta_rs.sh
+
+      - name: Run nightly local advisory benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/bench.sh data --dataset-id medium_selective --seed 42
+          ./scripts/bench.sh run --dataset-id medium_selective --suite all --runner all --warmup 1 --iters 3 --label nightly-local
+
+      - name: Run nightly object-store advisory benchmark
+        if: env.BENCH_STORAGE_BACKEND != '' && env.BENCH_STORAGE_BACKEND != 'local'
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage_args=(--storage-backend "${BENCH_STORAGE_BACKEND}")
+          if [[ -n "${BENCH_STORAGE_OPTIONS:-}" ]]; then
+            while IFS= read -r opt; do
+              [[ -z "${opt}" ]] && continue
+              storage_args+=(--storage-option "${opt}")
+            done <<< "${BENCH_STORAGE_OPTIONS}"
+          fi
+          profile_args=()
+          if [[ -n "${BENCH_BACKEND_PROFILE:-}" ]]; then
+            profile_args+=(--backend-profile "${BENCH_BACKEND_PROFILE}")
+          fi
+          ./scripts/bench.sh data --dataset-id medium_selective --seed 42 "${storage_args[@]}" "${profile_args[@]}"
+          ./scripts/bench.sh run --dataset-id medium_selective --suite all --runner all --warmup 1 --iters 3 --label nightly-object-store "${storage_args[@]}" "${profile_args[@]}"
+
+      - name: Upload nightly benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-benchmark-results
+          path: results/
+          if-no-files-found: warn

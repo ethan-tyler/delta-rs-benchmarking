@@ -1,13 +1,18 @@
-# ADR 0002: Result Schema v1
+# ADR 0002: Result Schema v2 (strict)
 
 ## Decision
 
-Use JSON result schema v1 with explicit case-level samples and failure payloads.
+Use JSON result schema v2 with explicit case-level samples/classification and strict v2 ingestion.
 
 ## Structure
 
-- `schema_version`: integer
+- `schema_version`: integer (`2`)
 - `context`: run metadata (host, suite, scale, git SHA, timestamp)
+  - Optional run-shaping metadata:
+    - `dataset_id`
+    - `dataset_fingerprint`
+    - `runner`
+    - `backend_profile`
   - Optional fidelity/security metadata:
     - `image_version`
     - `hardening_profile_id`
@@ -24,10 +29,12 @@ Use JSON result schema v1 with explicit case-level samples and failure payloads.
 - `cases[]`:
   - `case`
   - `success`
+  - required `classification` (`supported` or `expected_failure`)
   - `samples[]` (`elapsed_ms`, optional rows/bytes)
     - `metrics` normalized fields:
       - base: `rows_processed`, `bytes_processed`, `operations`, `table_version`
-      - optional (backward-compatible): `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`, `rewrite_time_ms`
+      - optional scan/rewrite: `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`, `rewrite_time_ms`
+      - optional runtime/io/result: `peak_rss_mb`, `cpu_time_ms`, `bytes_read`, `bytes_written`, `files_touched`, `files_skipped`, `spill_bytes`, `result_hash`
   - `failure` message when unsuccessful
 
 ## Clarifications
@@ -41,6 +48,6 @@ Use JSON result schema v1 with explicit case-level samples and failure payloads.
 ## Rationale
 
 - Supports rich comparisons without rerunning benchmarks.
-- Handles partial failures without invalidating whole runs.
+- Handles partial failures and expected-failure compatibility lanes without invalidating whole runs.
 - Keeps schema easy to consume from Python and future bot services.
-- Optional metric additions keep schema version `1` while allowing legacy JSON (without new keys) to deserialize safely.
+- Python compare tooling enforces schema v2 for both baseline and candidate payloads.

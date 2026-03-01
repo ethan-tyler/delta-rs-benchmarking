@@ -120,10 +120,11 @@ pub async fn run(
         Err(e) => return Ok(fixture_error_cases(case_names(), &e.to_string())),
     };
     if storage.is_local() {
-        let standard_fixture = merge_target_table_path(fixtures_dir, scale);
+        let standard_fixture = merge_target_table_path(fixtures_dir, scale)?;
         let partitioned_fixture = merge_partitioned_target_table_path(fixtures_dir, scale);
         if !standard_fixture.exists() || !partitioned_fixture.exists() {
             return Ok(fixture_error_cases(
+                case_names(),
                 "missing merge fixture tables; run bench data first",
             ));
         }
@@ -131,7 +132,7 @@ pub async fn run(
         let mut out = Vec::new();
         for case in MERGE_CASES {
             let fixture_table_dir =
-                merge_fixture_table_path(fixtures_dir, scale, case.target_profile);
+                merge_fixture_table_path(fixtures_dir, scale, case.target_profile)?;
             let c = run_case_async_with_setup(
                 case.name,
                 warmup,
@@ -199,10 +200,12 @@ fn merge_fixture_table_path(
     fixtures_dir: &Path,
     scale: &str,
     profile: MergeTargetProfile,
-) -> std::path::PathBuf {
+) -> BenchResult<std::path::PathBuf> {
     match profile {
         MergeTargetProfile::Standard => merge_target_table_path(fixtures_dir, scale),
-        MergeTargetProfile::Partitioned => merge_partitioned_target_table_path(fixtures_dir, scale),
+        MergeTargetProfile::Partitioned => {
+            Ok(merge_partitioned_target_table_path(fixtures_dir, scale))
+        }
     }
 }
 

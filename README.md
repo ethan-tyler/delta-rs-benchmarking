@@ -7,22 +7,11 @@ Repo-first benchmark harness for `delta-rs` with manual branch comparison.
 ```bash
 ./scripts/prepare_delta_rs.sh
 ./scripts/sync_harness_to_delta_rs.sh
-./scripts/bench.sh data --scale sf1 --seed 42
-./scripts/bench.sh run --suite all --scale sf1 --warmup 1 --iters 5 --label local
-./scripts/bench.sh run --suite tpcds --scale sf1 --warmup 1 --iters 1 --label local
+./scripts/bench.sh data --dataset-id tiny_smoke --seed 42
+./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
 Results are written to `results/<label>/<suite>.json`.
-
-## TPC-DS suite (phase 1)
-
-- Target name: `tpcds`
-- Query cases: `tpcds_q03`, `tpcds_q07`, `tpcds_q64`, `tpcds_q72`
-- Skip policy: `q72` is intentionally included but emitted as `skipped` until DataFusion issue-tracker parity is resolved for that query.
-- Local fixture contract: `fixtures/<scale>/tpcds/<table>/` (Delta tables)
-- Non-local fixture contract: `<table_root>/<scale>/tpcds/<table>/`
-
-`bench.sh` and `delta-bench run --target tpcds` consume pre-generated TPC-DS table fixtures; they do not generate TPC-DS data in this repository.
 
 ## Compare two branches
 
@@ -44,6 +33,17 @@ Tuning options:
 - `--noise-threshold` to tune compare sensitivity while keeping benchmark output advisory.
 - `cd python && python3 -m delta_bench_compare.compare ... --include-metrics` to append per-case metric columns in compare output.
 - `--storage-backend` and repeatable `--storage-option KEY=VALUE` to run fixture generation + suite execution against object storage.
+- `--backend-profile <name>` to load backend defaults from `backends/<name>.env`.
+- `--runner rust|python|all` to control Rust-only, Python-only, or mixed execution.
+- `--case-filter <substring>` to pre-select cases by ID (command fails if no case IDs match).
+- `DELTA_BENCH_INTEROP_TIMEOUT_MS` to cap each python interop case subprocess runtime (default `120000`).
+- `DELTA_BENCH_INTEROP_RETRIES` to retry transient python interop case failures (default `1`).
+- `DELTA_BENCH_INTEROP_PYTHON` to override python executable used by interop runner (default `python3`).
+
+Manifest assertions:
+- `bench/manifests/*.yaml` case entries may include optional `assertions` lists.
+- Supported assertion types: `exact_result_hash`, `schema_hash`, `expected_error_contains`, `version_monotonicity`.
+- Assertions are applied during `run` after suite execution and can classify expected-failure lanes.
 
 ## Result metrics
 
@@ -76,30 +76,28 @@ Wave 1 fixture generation now also materializes:
 - `merge_partitioned_target_delta`
 - `optimize_compacted_delta`
 
-Fixture manifests now use schema version `2`; running `delta-bench data` without `--force`
-automatically regenerates stale or partially-missing local fixture tables.
-
 ## Cloud/object-store mode
 
 Local remains the default backend. To run fixture-backed suites against object storage:
 
 ```bash
 ./scripts/bench.sh data \
-  --scale sf1 \
+  --dataset-id medium_selective \
   --seed 42 \
   --storage-backend s3 \
-  --storage-option table_root=s3://bench-bucket/delta-bench \
-  --storage-option AWS_REGION=us-east-1
+  --backend-profile s3_locking_vultr \
+  --storage-option table_root=s3://bench-bucket/delta-bench
 
 ./scripts/bench.sh run \
-  --suite optimize_vacuum \
-  --scale sf1 \
+  --suite all \
+  --runner all \
+  --dataset-id medium_selective \
   --warmup 1 \
   --iters 2 \
   --label wave2-s3 \
   --storage-backend s3 \
-  --storage-option table_root=s3://bench-bucket/delta-bench \
-  --storage-option AWS_REGION=us-east-1
+  --backend-profile s3_locking_vultr \
+  --storage-option table_root=s3://bench-bucket/delta-bench
 ```
 
 Notes:
@@ -121,8 +119,9 @@ Example:
   --remote-runner bench-runner-01 \
   --remote-root /opt/delta-rs-benchmarking \
   --storage-backend s3 \
+  --backend-profile s3_locking_vultr \
+  --runner all \
   --storage-option table_root=s3://bench-bucket/delta-bench \
-  --storage-option AWS_REGION=us-east-1 \
   main feature/merge-opt optimize_vacuum
 
 ./scripts/compare_branch.sh \
@@ -135,9 +134,11 @@ Example:
 ```
 
 Workflow mode storage configuration:
-- Optional repository variable `BENCH_STORAGE_BACKEND` (`s3`, `gcs`, or `azure`)
+- Optional repository variable `BENCH_STORAGE_BACKEND` (`local` or `s3`)
 - Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line; for example `table_root=...`, `AWS_REGION=...`)
-- Benchmark workflow comments are advisory and do not gate PR merge; CI gating remains opt-in via `--ci`.
+- Optional repository variable `BENCH_BACKEND_PROFILE` (`local`, `s3_locking_vultr`, or custom profile name in `backends/*.env`)
+- Optional repository variable `BENCH_RUNNER_MODE` (`rust`, `python`, or `all`)
+- Benchmark workflow comments are advisory and do not gate PR merge.
 
 ## Security operations
 
@@ -165,139 +166,13 @@ Provisioning helper entrypoint for Terraform:
 
 Destructive provisioning commands (`rotate-runner`, `destroy`) require CI context by default, two distinct approver IDs, and an immutable approval evidence file.
 
-## Longitudinal Benchmarking
-
-This repo now supports DataFusion-style over-time benchmarking for `delta-rs` revisions while keeping execution logic local to benchmark infrastructure.
-
-### Pipeline stages
-
-1. Revision selection manifest
-2. Per-revision artifact builds
-3. Resumable suite/scale matrix execution
-4. Append-safe normalized longitudinal store
-5. Markdown + HTML trend reports
-6. Optional retention pruning for artifact/store growth
-
-### CLI usage
-
-Use the shell wrapper:
-
-```bash
-./scripts/longitudinal_bench.sh select-revisions \
-  --repository .delta-rs-under-test \
-  --strategy one-per-day \
-  --start-date 2026-01-01 \
-  --end-date 2026-01-31 \
-  --output longitudinal/manifests/jan.json
-
-./scripts/longitudinal_bench.sh build-artifacts \
-  --manifest longitudinal/manifests/jan.json \
-  --artifacts-dir longitudinal/artifacts
-
-./scripts/longitudinal_bench.sh run-matrix \
-  --manifest longitudinal/manifests/jan.json \
-  --artifacts-dir longitudinal/artifacts \
-  --state-path longitudinal/state/matrix.json \
-  --results-dir results \
-  --max-parallel 2 \
-  --max-load-per-cpu 0.75 \
-  --load-check-interval-seconds 10 \
-  --suite read_scan \
-  --suite metadata \
-  --scale sf1 \
-  --timeout-seconds 3600 \
-  --max-retries 2
-
-./scripts/longitudinal_bench.sh ingest-results \
-  --manifest longitudinal/manifests/jan.json \
-  --state-path longitudinal/state/matrix.json \
-  --results-dir results \
-  --store-dir longitudinal/store
-
-./scripts/longitudinal_bench.sh report \
-  --store-dir longitudinal/store \
-  --markdown-path longitudinal/reports/summary.md \
-  --html-path longitudinal/reports/trends.html \
-  --baseline-window 7 \
-  --regression-threshold 0.05 \
-  --significance-method mann-whitney \
-  --significance-alpha 0.05
-
-./scripts/longitudinal_bench.sh prune \
-  --artifacts-dir longitudinal/artifacts \
-  --store-dir longitudinal/store \
-  --max-artifact-age-days 30 \
-  --max-artifacts 120 \
-  --max-run-age-days 60 \
-  --max-runs 200
-```
-
-Or execute end-to-end:
-
-```bash
-./scripts/longitudinal_bench.sh orchestrate \
-  --manifest longitudinal/manifests/jan.json \
-  --artifacts-dir longitudinal/artifacts \
-  --results-dir results \
-  --state-path longitudinal/state/matrix.json \
-  --store-dir longitudinal/store \
-  --markdown-path longitudinal/reports/summary.md \
-  --html-path longitudinal/reports/trends.html \
-  --suite read_scan \
-  --suite write \
-  --suite merge_dml \
-  --suite metadata \
-  --suite optimize_vacuum \
-  --scale sf1
-```
-
-### Revision selection strategies
-
-- `release-tags`: selects semantic version tags (`vX.Y.Z` by default)
-- `date-window`: selects all commits in an inclusive date range
-- `one-per-day`: selects one (latest) commit per day in an inclusive date range
-
-### Parallel and load guard controls
-
-- `run-matrix --max-parallel N`: cap concurrent suite/scale cells (default `1`)
-- `run-matrix --max-load-per-cpu X`: pause scheduling when `loadavg_1m / cpu_count > X`
-- `run-matrix --load-check-interval-seconds N`: poll interval while waiting for load guard
-
-### Statistical significance controls
-
-- `report --significance-method none|mann-whitney` (default `none`)
-- `report --significance-alpha 0.05` controls p-value cutoff for significance labeling
-- Threshold deltas still apply; significance adds an extra confidence signal to regression highlights
-
-### Retention pruning controls
-
-- `prune` is safe by default (dry-run)
-- pass `--apply` to perform deletion/rewrite actions
-- artifacts can be pruned by age (`--max-artifact-age-days`) and/or count (`--max-artifacts`)
-- store can be pruned by run age (`--max-run-age-days`) and/or count (`--max-runs`)
-
-### Directory layout
-
-```text
-longitudinal/
-  manifests/           # revision manifests
-  artifacts/<sha>/     # built delta-bench binary + metadata.json per revision
-  state/matrix.json    # resumable matrix state (attempts/status/reasons)
-  store/rows.jsonl     # normalized append-safe time-series rows
-  store/index.json     # ingested run-id dedupe index
-  reports/summary.md   # CI-friendly markdown summary
-  reports/trends.html  # HTML trend report with inline charts
-```
-
-Operational details and failure recovery are documented in [`docs/longitudinal-runbook.md`](docs/longitudinal-runbook.md).
-
 ## CLI reference
 
 ```bash
 cargo run -p delta-bench -- --help
 cargo run -p delta-bench -- list all
-cargo run -p delta-bench -- data --scale sf1 --seed 42
-cargo run -p delta-bench -- run --target all --scale sf1 --warmup 1 --iterations 5 --storage-backend local
+cargo run -p delta-bench -- data --dataset-id tiny_smoke --seed 42
+cargo run -p delta-bench -- run --target all --runner all --dataset-id tiny_smoke --warmup 1 --iterations 5 --storage-backend local
 cargo run -p delta-bench -- doctor
 ```
 
@@ -311,10 +186,12 @@ DELTA_RS_DIR="$(pwd)/.delta-rs-under-test" \
 
 ## Current scope
 
-- Implemented suites: `read_scan`, `write`, `merge_dml`, `metadata`, `optimize_vacuum`, `tpcds` (phase 1; `q72` skipped)
+- Implemented suites: `read_scan`, `write`, `merge_dml`, `metadata`, `optimize_vacuum`, `interop_py`
 - Implemented: Wave 1 pruning/compaction benchmark expansion across read, merge, and optimize suites
 - Implemented: suites execute real `deltalake-core` operations (read provider scans, write builders, merge builders, metadata loads)
-- Implemented: deterministic fixture generation + result schema v1
-- Implemented: manual comparison workflow (`scripts/compare_branch.sh` + Python compare) in advisory mode (non-gating), with optional CI gating mode
+- Implemented: deterministic fixture generation + manifest-driven deterministic case ordering (`bench/manifests/p0-rust.yaml`, `bench/manifests/p0-python.yaml`)
+- Implemented: strict result schema v2 production + ingestion
+- Implemented: manual comparison workflow (`scripts/compare_branch.sh` + Python compare) in advisory mode (non-gating)
 - Implemented: Option B PR benchmark workflow (`.github/workflows/benchmark.yml`) with issue-comment trigger, role-based authorization, and serialized execution
+- Implemented: advisory nightly and pre-release workflows (`benchmark-nightly.yml`, `benchmark-prerelease.yml`)
 - Limitation: workflow mode currently relies on `compare_branch.sh` branch names being available in the upstream `delta-rs` checkout; fork PR heads may require manual handling

@@ -200,3 +200,11 @@ git commit -m "docs: document benchmark metric plumbing and compare metric flag"
 **Step 2: Final commit for smoke artifacts only if intentionally tracked**
 - If no artifacts are tracked in git, skip commit.
 - If test fixtures/snapshots are intentionally added, commit with a focused message.
+
+## P0 Follow-On Integration (Implemented)
+
+- Result schema advanced to v2 while retaining backward-compatible ingestion for legacy v1 JSON in compare tooling.
+- Added runtime/io metric placeholders in `SampleMetrics` (`peak_rss_mb`, `cpu_time_ms`, `bytes_read`, `bytes_written`, `files_touched`, `files_skipped`, `spill_bytes`, `result_hash`).
+- Added case-level `classification` to make expected-failure compatibility lanes explicit.
+- Added targeted Python interop suite (`interop_py`) with deterministic case IDs and normalized metric output.
+- Added backend profile loading (`backends/*.env`) for repeatable object-store configuration (`s3_locking_vultr`).

@@ -14,6 +14,8 @@ REQUIRE_EGRESS_POLICY=0
 NOISE_THRESHOLD="${BENCH_NOISE_THRESHOLD:-0.05}"
 STORAGE_BACKEND="${BENCH_STORAGE_BACKEND:-local}"
 STORAGE_OPTIONS=()
+BACKEND_PROFILE="${BENCH_BACKEND_PROFILE:-}"
+RUNNER_MODE="${BENCH_RUNNER_MODE:-all}"
 
 sanitize_label() {
   local raw="${1:-}"
@@ -47,9 +49,11 @@ Options:
   --ci                            Deprecated no-op (benchmarks are advisory only)
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
   --max-allowed-regressions <n>   Deprecated no-op (benchmarks are advisory only)
-  --storage-backend <local|s3|gcs|azure>
+  --storage-backend <local|s3>
                                   Storage backend for fixture generation and suite execution (default: local)
   --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
+  --backend-profile <name>        Optional backend profile file under backends/<name>.env
+  --runner <rust|python|all>      Runner mode forwarded to bench.sh run (default: all)
   -h, --help                      Show this help
 EOF
 }
@@ -96,12 +100,12 @@ while [[ $# -gt 0 ]]; do
       STORAGE_OPTIONS+=("$2")
       shift 2
       ;;
-    --storage-backend)
-      STORAGE_BACKEND="$2"
+    --backend-profile)
+      BACKEND_PROFILE="$2"
       shift 2
       ;;
-    --storage-option)
-      STORAGE_OPTIONS+=("$2")
+    --runner)
+      RUNNER_MODE="$2"
       shift 2
       ;;
     -h|--help)
@@ -139,6 +143,10 @@ if [[ ${#STORAGE_OPTIONS[@]} -gt 0 ]]; then
   for option in "${STORAGE_OPTIONS[@]}"; do
     storage_args+=(--storage-option "${option}")
   done
+fi
+profile_args=()
+if [[ -n "${BACKEND_PROFILE}" ]]; then
+  profile_args+=(--backend-profile "${BACKEND_PROFILE}")
 fi
 
 run_with_timeout() {
@@ -212,13 +220,13 @@ cand_label="cand-$(sanitize_label "${candidate_branch}")"
 run_step env DELTA_RS_BRANCH="${base_branch}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}"
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --warmup 1 --iters 5 "${storage_args[@]}"
+run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
+run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
 run_step env DELTA_RS_BRANCH="${candidate_branch}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${cand_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --warmup 1 --iters 5 "${storage_args[@]}"
+run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${cand_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
 base_json="${RUNNER_RESULTS_DIR}/${base_label}/${suite}.json"
 cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"

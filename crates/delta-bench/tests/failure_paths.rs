@@ -1,6 +1,6 @@
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{delete_update_dml, merge_dml, optimize_vacuum, write};
+use delta_bench::suites::{delete_update_dml, interop_py, merge_dml, optimize_vacuum, write};
 
 #[tokio::test]
 async fn write_suite_missing_fixtures_returns_case_failures() {
@@ -76,4 +76,23 @@ async fn delete_update_dml_suite_missing_fixtures_returns_case_failures() {
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
     assert!(cases.iter().all(|c| !c.success));
+}
+
+#[tokio::test]
+async fn interop_py_non_local_backend_is_reported_as_expected_failure() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut options = std::collections::HashMap::new();
+    options.insert(
+        "table_root".to_string(),
+        "s3://bench-bucket/path".to_string(),
+    );
+    let storage = StorageConfig::new(delta_bench::cli::StorageBackend::S3, options)
+        .expect("valid s3 storage config");
+
+    let cases = interop_py::run(temp.path(), "sf1", 0, 1, &storage)
+        .await
+        .expect("suite should not hard-fail");
+    assert!(!cases.is_empty());
+    assert!(cases.iter().all(|c| c.success));
+    assert!(cases.iter().all(|c| c.classification == "expected_failure"));
 }

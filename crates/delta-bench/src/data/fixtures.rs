@@ -57,7 +57,6 @@ pub fn validate_scale(scale: &str) -> BenchResult<()> {
 }
 
 pub fn fixture_root(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
-    validate_scale(scale)?;
     Ok(fixtures_dir.join(scale))
 }
 
@@ -65,28 +64,44 @@ pub fn narrow_sales_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<
     Ok(fixture_root(fixtures_dir, scale)?.join(NARROW_SALES_TABLE_DIR))
 }
 
+pub fn merge_target_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
+    Ok(fixture_root(fixtures_dir, scale)?.join(MERGE_TARGET_TABLE_DIR))
+}
+
 pub fn read_partitioned_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(READ_PARTITIONED_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(READ_PARTITIONED_TABLE_DIR)
 }
 
 pub fn merge_partitioned_target_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(MERGE_PARTITIONED_TARGET_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(MERGE_PARTITIONED_TARGET_TABLE_DIR)
 }
 
 pub fn delete_update_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(DELETE_UPDATE_SMALL_FILES_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(DELETE_UPDATE_SMALL_FILES_TABLE_DIR)
 }
 
 pub fn optimize_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(OPTIMIZE_SMALL_FILES_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(OPTIMIZE_SMALL_FILES_TABLE_DIR)
 }
 
 pub fn optimize_compacted_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(OPTIMIZE_COMPACTED_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(OPTIMIZE_COMPACTED_TABLE_DIR)
 }
 
 pub fn vacuum_ready_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale).join(VACUUM_READY_TABLE_DIR)
+    fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join(VACUUM_READY_TABLE_DIR)
 }
 
 fn required_local_fixture_tables_exist(root: &Path) -> bool {
@@ -169,7 +184,7 @@ pub fn optimize_small_files_table_url(
     storage: &StorageConfig,
 ) -> BenchResult<Url> {
     storage.table_url_for(
-        &optimize_small_files_table_path(fixtures_dir, scale)?,
+        &optimize_small_files_table_path(fixtures_dir, scale),
         scale,
         OPTIMIZE_SMALL_FILES_TABLE_DIR,
     )
@@ -193,7 +208,7 @@ pub fn vacuum_ready_table_url(
     storage: &StorageConfig,
 ) -> BenchResult<Url> {
     storage.table_url_for(
-        &vacuum_ready_table_path(fixtures_dir, scale)?,
+        &vacuum_ready_table_path(fixtures_dir, scale),
         scale,
         VACUUM_READY_TABLE_DIR,
     )
@@ -465,7 +480,8 @@ pub(crate) fn rows_to_batch(
 }
 
 pub fn load_rows(fixtures_dir: &Path, scale: &str) -> BenchResult<Vec<NarrowSaleRow>> {
-    let data_path = fixture_root(fixtures_dir, scale)?
+    let data_path = fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
         .join("narrow_sales")
         .join("rows.jsonl");
 
@@ -482,7 +498,9 @@ pub fn load_rows(fixtures_dir: &Path, scale: &str) -> BenchResult<Vec<NarrowSale
 }
 
 pub fn load_manifest(fixtures_dir: &Path, scale: &str) -> BenchResult<FixtureManifest> {
-    let path = fixture_root(fixtures_dir, scale)?.join("manifest.json");
+    let path = fixture_root(fixtures_dir, scale)
+        .expect("validated scale path")
+        .join("manifest.json");
     let manifest: FixtureManifest = serde_json::from_slice(&fs::read(path)?)?;
     Ok(manifest)
 }

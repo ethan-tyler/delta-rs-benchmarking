@@ -1,19 +1,29 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
+import pytest
+
 from delta_bench_compare.compare import (
+    _load,
+    ci_regression_violation,
     compare_runs,
     format_change,
 )
-import delta_bench_compare.compare as compare_module
 
 
 def _run(cases: list[dict]) -> dict:
+    normalized_cases: list[dict] = []
+    for case in cases:
+        if "classification" in case:
+            normalized_cases.append(case)
+            continue
+        normalized_cases.append({"classification": "supported", **case})
     return {
-        "schema_version": 1,
-        "context": {"label": "test"},
-        "cases": cases,
+        "schema_version": 2,
+        "context": {"schema_version": 2, "label": "test"},
+        "cases": normalized_cases,
     }
 
 
@@ -52,6 +62,33 @@ def test_compare_runs_handles_failures_and_missing_cases() -> None:
     assert comparison.summary.incomparable == 1
     assert comparison.summary.removed == 1
     assert comparison.summary.new == 1
+
+
+def test_compare_runs_marks_expected_failure_classification_explicitly() -> None:
+    base = _run(
+        [
+            {
+                "case": "dv_lane",
+                "classification": "expected_failure",
+                "success": True,
+                "samples": [],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "dv_lane",
+                "classification": "expected_failure",
+                "success": True,
+                "samples": [],
+            }
+        ]
+    )
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    row = comparison.rows[0]
+    assert row.change == "expected_failure"
 
 
 def test_compare_rows_use_metrics_from_fastest_sample() -> None:
@@ -285,18 +322,74 @@ def test_advisory_mode_never_violates_ci_policy() -> None:
     assert message == ""
 
 
+def test_load_rejects_schema_v1_payload(tmp_path: Path) -> None:
+    payload = {
+        "schema_version": 1,
+        "context": {"schema_version": 1, "label": "legacy"},
+        "cases": [],
+    }
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="schema_version"):
+        _load(path)
+
+
+def test_load_rejects_missing_case_classification(tmp_path: Path) -> None:
+    payload = {
+        "schema_version": 2,
+        "context": {"schema_version": 2, "label": "v2"},
+        "cases": [{"case": "a", "success": True, "samples": []}],
+    }
+    path = tmp_path / "missing-classification.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="classification"):
+        _load(path)
+
+
+def test_load_rejects_unknown_case_classification(tmp_path: Path) -> None:
+    payload = {
+        "schema_version": 2,
+        "context": {"schema_version": 2, "label": "v2"},
+        "cases": [
+            {
+                "case": "a",
+                "success": True,
+                "classification": "experimental",
+                "samples": [],
+            }
+        ],
+    }
+    path = tmp_path / "bad-classification.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="classification"):
+        _load(path)
+
+
 def test_compare_runs_handles_deterministic_tpcds_case_names() -> None:
     base = _run(
         [
             {"case": "tpcds_q03", "success": True, "samples": [{"elapsed_ms": 100.0}]},
-            {"case": "tpcds_q72", "success": False, "failure": {"message": "skipped"}, "samples": []},
+            {
+                "case": "tpcds_q72",
+                "success": False,
+                "failure": {"message": "skipped"},
+                "samples": [],
+            },
         ]
     )
     cand = _run(
         [
             {"case": "tpcds_q07", "success": True, "samples": [{"elapsed_ms": 95.0}]},
             {"case": "tpcds_q03", "success": True, "samples": [{"elapsed_ms": 90.0}]},
-            {"case": "tpcds_q72", "success": False, "failure": {"message": "skipped"}, "samples": []},
+            {
+                "case": "tpcds_q72",
+                "success": False,
+                "failure": {"message": "skipped"},
+                "samples": [],
+            },
         ]
     )
 

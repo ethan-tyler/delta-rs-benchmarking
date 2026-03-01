@@ -1,8 +1,44 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
+
+fn deserialize_schema_version_v2<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = u32::deserialize(deserializer)?;
+    if value == 2 {
+        Ok(value)
+    } else {
+        Err(de::Error::custom(format!(
+            "schema_version must be 2 (found {value})"
+        )))
+    }
+}
+
+fn deserialize_case_classification<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+    parse_case_classification(&value).map_err(de::Error::custom)
+}
+
+fn parse_case_classification(value: &str) -> Result<String, String> {
+    match value {
+        "supported" | "expected_failure" => Ok(value.to_string()),
+        other => Err(format!(
+            "classification must be one of: supported, expected_failure (found {other})"
+        )),
+    }
+}
+
+pub fn validate_case_classification(value: &str) -> Result<(), String> {
+    parse_case_classification(value).map(|_| ())
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BenchContext {
+    #[serde(deserialize_with = "deserialize_schema_version_v2")]
     pub schema_version: u32,
     pub label: String,
     pub git_sha: Option<String>,
@@ -12,6 +48,14 @@ pub struct BenchContext {
     pub scale: String,
     pub iterations: u32,
     pub warmup: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_fingerprint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image_version: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -54,6 +98,22 @@ pub struct SampleMetrics {
     pub scan_time_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewrite_time_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_rss_mb: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_time_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_read: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes_written: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_touched: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub files_skipped: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spill_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_hash: Option<String>,
 }
 
 impl SampleMetrics {
@@ -73,6 +133,14 @@ impl SampleMetrics {
             bytes_scanned: None,
             scan_time_ms: None,
             rewrite_time_ms: None,
+            peak_rss_mb: None,
+            cpu_time_ms: None,
+            bytes_read: None,
+            bytes_written: None,
+            files_touched: None,
+            files_skipped: None,
+            spill_bytes: None,
+            result_hash: None,
         }
     }
 
@@ -89,6 +157,29 @@ impl SampleMetrics {
         self.bytes_scanned = bytes_scanned;
         self.scan_time_ms = scan_time_ms;
         self.rewrite_time_ms = rewrite_time_ms;
+        self
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_runtime_io_metrics(
+        mut self,
+        peak_rss_mb: Option<u64>,
+        cpu_time_ms: Option<u64>,
+        bytes_read: Option<u64>,
+        bytes_written: Option<u64>,
+        files_touched: Option<u64>,
+        files_skipped: Option<u64>,
+        spill_bytes: Option<u64>,
+        result_hash: Option<String>,
+    ) -> Self {
+        self.peak_rss_mb = peak_rss_mb;
+        self.cpu_time_ms = cpu_time_ms;
+        self.bytes_read = bytes_read;
+        self.bytes_written = bytes_written;
+        self.files_touched = files_touched;
+        self.files_skipped = files_skipped;
+        self.spill_bytes = spill_bytes;
+        self.result_hash = result_hash;
         self
     }
 }
@@ -117,12 +208,15 @@ pub struct CaseFailure {
 pub struct CaseResult {
     pub case: String,
     pub success: bool,
+    #[serde(deserialize_with = "deserialize_case_classification")]
+    pub classification: String,
     pub samples: Vec<IterationSample>,
     pub failure: Option<CaseFailure>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BenchRunResult {
+    #[serde(deserialize_with = "deserialize_schema_version_v2")]
     pub schema_version: u32,
     pub context: BenchContext,
     pub cases: Vec<CaseResult>,

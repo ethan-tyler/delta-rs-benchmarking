@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -144,12 +145,80 @@ impl StorageConfig {
     }
 }
 
+pub fn load_backend_profile_options(profile: Option<&str>) -> BenchResult<HashMap<String, String>> {
+    load_backend_profile_options_from_root(profile, Path::new("."))
+}
+
+pub fn load_backend_profile_options_from_root(
+    profile: Option<&str>,
+    root: &Path,
+) -> BenchResult<HashMap<String, String>> {
+    let Some(profile) = profile.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(HashMap::new());
+    };
+    if profile == "local" {
+        return Ok(HashMap::new());
+    }
+    validate_backend_profile_name(profile)?;
+
+    let file = root
+        .join("backends")
+        .join(format!("{profile}.env"))
+        .to_path_buf();
+    if !file.exists() {
+        return Err(BenchError::InvalidArgument(format!(
+            "backend profile '{profile}' was requested, but profile file is missing: {}",
+            file.display()
+        )));
+    }
+
+    parse_profile_file(&file)
+}
+
+fn validate_backend_profile_name(profile: &str) -> BenchResult<()> {
+    if !profile
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
+    {
+        return Err(BenchError::InvalidArgument(format!(
+            "invalid backend profile '{profile}'; allowed characters: [A-Za-z0-9._-]"
+        )));
+    }
+    Ok(())
+}
+
+fn parse_profile_file(file: &Path) -> BenchResult<HashMap<String, String>> {
+    let mut options = HashMap::new();
+    let content = fs::read_to_string(file)?;
+    for (line_no, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once('=') else {
+            return Err(BenchError::InvalidArgument(format!(
+                "invalid backend profile line {} in '{}': expected KEY=VALUE",
+                line_no + 1,
+                file.display()
+            )));
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            return Err(BenchError::InvalidArgument(format!(
+                "invalid backend profile line {} in '{}': key must not be empty",
+                line_no + 1,
+                file.display()
+            )));
+        }
+        options.insert(key.to_string(), value.trim().to_string());
+    }
+    Ok(options)
+}
+
 fn validate_table_root_scheme(backend: StorageBackend, table_root: &Url) -> BenchResult<()> {
     let expected: &[&str] = match backend {
         StorageBackend::Local => return Ok(()),
         StorageBackend::S3 => &["s3"],
-        StorageBackend::Gcs => &["gs", "gcs"],
-        StorageBackend::Azure => &["az", "abfs", "abfss", "adl", "wasb", "wasbs"],
     };
 
     if expected.iter().any(|scheme| *scheme == table_root.scheme()) {

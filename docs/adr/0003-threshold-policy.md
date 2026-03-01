@@ -12,4 +12,4 @@ Use a default no-change threshold of ±5% (`0.05`) for branch comparisons.
 
 ## Enforcement
 
-Wave 1 is advisory only. Comparisons are informational and do not gate merges.
+Current policy is advisory only. Comparisons are informational and do not gate merges.

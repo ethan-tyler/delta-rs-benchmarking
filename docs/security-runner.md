@@ -1,9 +1,9 @@
-# Vultr Wave 1 Security and Fidelity Runbook
+# Cloud Runner Security and Fidelity Runbook
 
 ## Baseline assumptions
 
-- Dedicated benchmarking Vultr account.
-- Single dedicated runner in private VPC topology.
+- Dedicated benchmarking cloud account or project.
+- Single dedicated runner in private network topology.
 - Runner has no public IPv4 address.
 - Benchmark data is synthetic and non-sensitive.
 
@@ -41,7 +41,7 @@ Use maintenance mode for patching, scans, snapshots, and key rotation.
 
 ## Provisioning controls
 
-- Use `scripts/provision_vultr.sh` for Terraform orchestration.
+- Use `scripts/provision_runner.sh` for Terraform orchestration.
 - `rotate-runner` and `destroy` require CI context by default (`CI=true`) unless breakglass override is set.
 - `rotate-runner` and `destroy` require two distinct approver IDs via environment variables.
 - `rotate-runner` and `destroy` require `DELTA_BENCH_APPROVAL_EVIDENCE_FILE` pointing to immutable approval evidence.

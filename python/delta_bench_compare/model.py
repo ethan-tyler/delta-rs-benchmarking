@@ -18,6 +18,8 @@ class ComparisonRow:
     baseline_ms: float | None
     candidate_ms: float | None
     change: str
+    baseline_classification: str | None
+    candidate_classification: str | None
     baseline_metrics: SampleMetricSnapshot | None = None
     candidate_metrics: SampleMetricSnapshot | None = None
 

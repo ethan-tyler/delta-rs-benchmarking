@@ -7,6 +7,8 @@ from pathlib import Path
 from .formatting import render_markdown as render_markdown_output, render_text_table
 from .model import Comparison, ComparisonRow, SampleMetricSnapshot, Summary
 
+VALID_CLASSIFICATIONS = {"supported", "expected_failure"}
+
 
 def best_sample(case: dict) -> dict | None:
     if not case.get("success", True):
@@ -16,6 +18,23 @@ def best_sample(case: dict) -> dict | None:
     if not elapsed_samples:
         return None
     return min(elapsed_samples, key=lambda sample: float(sample["elapsed_ms"]))
+
+
+def case_classification(case: dict | None) -> str | None:
+    if not case:
+        return None
+    value = case.get("classification")
+    case_name = case.get("case", "<unknown>")
+    if value is None:
+        raise ValueError(f"case '{case_name}' is missing required classification")
+    if not isinstance(value, str):
+        raise ValueError(f"case '{case_name}' has non-string classification")
+    if value not in VALID_CLASSIFICATIONS:
+        raise ValueError(
+            f"case '{case_name}' has invalid classification '{value}'; "
+            "expected one of: supported, expected_failure"
+        )
+    return value
 
 
 def best_ms(case: dict) -> float | None:
@@ -75,6 +94,8 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
     for name in names:
         b = baseline_cases.get(name)
         c = candidate_cases.get(name)
+        baseline_classification = case_classification(b)
+        candidate_classification = case_classification(c)
 
         if b is None and c is not None:
             new += 1
@@ -84,6 +105,8 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
                     None,
                     best_ms(c),
                     "new",
+                    baseline_classification=baseline_classification,
+                    candidate_classification=candidate_classification,
                     baseline_metrics=None,
                     candidate_metrics=best_sample_metrics(c),
                 )
@@ -97,6 +120,8 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
                     best_ms(b),
                     None,
                     "removed",
+                    baseline_classification=baseline_classification,
+                    candidate_classification=candidate_classification,
                     baseline_metrics=best_sample_metrics(b),
                     candidate_metrics=None,
                 )
@@ -105,6 +130,24 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
 
         if b is None or c is None:
             raise ValueError(f"inconsistent comparison state for case '{name}'")
+        if (
+            baseline_classification == "expected_failure"
+            or candidate_classification == "expected_failure"
+        ):
+            incomparable += 1
+            rows.append(
+                ComparisonRow(
+                    name,
+                    best_ms(b),
+                    best_ms(c),
+                    "expected_failure",
+                    baseline_classification=baseline_classification,
+                    candidate_classification=candidate_classification,
+                    baseline_metrics=best_sample_metrics(b),
+                    candidate_metrics=best_sample_metrics(c),
+                )
+            )
+            continue
         base_ms = best_ms(b)
         cand_ms = best_ms(c)
 
@@ -116,6 +159,8 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
                     base_ms,
                     cand_ms,
                     "incomparable",
+                    baseline_classification=baseline_classification,
+                    candidate_classification=candidate_classification,
                     baseline_metrics=best_sample_metrics(b),
                     candidate_metrics=best_sample_metrics(c),
                 )
@@ -135,6 +180,8 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
                 base_ms,
                 cand_ms,
                 change,
+                baseline_classification=baseline_classification,
+                candidate_classification=candidate_classification,
                 baseline_metrics=best_sample_metrics(b),
                 candidate_metrics=best_sample_metrics(c),
             )
@@ -152,7 +199,26 @@ def compare_runs(baseline: dict, candidate: dict, threshold: float = 0.05) -> Co
 
 
 def _load(path: Path) -> dict:
-    return json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != 2:
+        raise ValueError(
+            f"{path}: top-level schema_version must be 2 (found {payload.get('schema_version')!r})"
+        )
+    context = payload.get("context")
+    if not isinstance(context, dict):
+        raise ValueError(f"{path}: context must be an object")
+    if context.get("schema_version") != 2:
+        raise ValueError(
+            f"{path}: context.schema_version must be 2 (found {context.get('schema_version')!r})"
+        )
+    cases = payload.get("cases")
+    if not isinstance(cases, list):
+        raise ValueError(f"{path}: cases must be an array")
+    for case in cases:
+        if not isinstance(case, dict):
+            raise ValueError(f"{path}: each case entry must be an object")
+        case_classification(case)
+    return payload
 
 
 def render_text(comparison: Comparison, include_metrics: bool = False) -> str:

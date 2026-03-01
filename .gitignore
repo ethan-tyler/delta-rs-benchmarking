@@ -13,3 +13,6 @@ infra/vultr/terraform.tfplan
 \# Best-in-Class Benchmark Suite and Auto.md
 \# Research Prompt: Design and Build a Be.md
 Below is a **complete, production-qualit.md
+
+docs/adr/
+docs/plans/

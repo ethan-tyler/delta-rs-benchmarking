@@ -16,13 +16,13 @@ Prepare a managed `delta-rs` checkout and sync the harness:
 Generate deterministic fixture data:
 
 ```bash
-./scripts/bench.sh data --scale sf1 --seed 42
+./scripts/bench.sh data --dataset-id tiny_smoke --seed 42
 ```
 
 Run benchmark suites:
 
 ```bash
-./scripts/bench.sh run --suite all --scale sf1 --warmup 1 --iters 5 --label local
+./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
 Outputs are written to `results/<label>/<suite>.json`.
@@ -57,18 +57,19 @@ Local is the default backend. To run fixture-backed suites against object storag
 
 ```bash
 ./scripts/bench.sh data \
-  --scale sf1 \
+  --dataset-id medium_selective \
   --seed 42 \
   --storage-backend s3 \
   --storage-option table_root=s3://bench-bucket/delta-bench \
   --storage-option AWS_REGION=us-east-1
 
 ./scripts/bench.sh run \
-  --suite optimize_vacuum \
-  --scale sf1 \
+  --suite all \
+  --runner all \
+  --dataset-id medium_selective \
   --warmup 1 \
   --iters 2 \
-  --label wave2-s3 \
+  --label s3-smoke \
   --storage-backend s3 \
   --storage-option table_root=s3://bench-bucket/delta-bench \
   --storage-option AWS_REGION=us-east-1
@@ -83,8 +84,10 @@ Notes:
 
 Workflow mode storage configuration:
 
-- Optional repository variable `BENCH_STORAGE_BACKEND` (`s3`, `gcs`, or `azure`)
+- Optional repository variable `BENCH_STORAGE_BACKEND` (`local` or `s3`)
 - Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line)
+- Optional repository variable `BENCH_BACKEND_PROFILE` (profile name in `backends/*.env`)
+- Optional repository variable `BENCH_RUNNER_MODE` (`rust`, `python`, or `all`)
 - Benchmark workflow comments are advisory and do not gate PR merge
 
 ## Security and remote runner options
@@ -137,8 +140,8 @@ See [architecture.md](architecture.md) for schema details and execution context.
 ```bash
 cargo run -p delta-bench -- --help
 cargo run -p delta-bench -- list all
-cargo run -p delta-bench -- data --scale sf1 --seed 42
-cargo run -p delta-bench -- run --target all --scale sf1 --warmup 1 --iterations 5 --storage-backend local
+cargo run -p delta-bench -- data --dataset-id tiny_smoke --seed 42
+cargo run -p delta-bench -- run --target all --runner all --dataset-id tiny_smoke --warmup 1 --iterations 5
 cargo run -p delta-bench -- doctor
 ```
 

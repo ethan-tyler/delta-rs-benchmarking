@@ -6,14 +6,14 @@
 - `python/delta_bench_compare`: result comparison and rendering.
 - `python/delta_bench_interop`: targeted Python interop benchmark cases (`pandas`, `polars`, `pyarrow`).
 - `bench/manifests/*.yaml`: required benchmark catalogs used as the only execution planning source.
-- `backends/*.env`: backend profile defaults (`s3_locking_vultr`, custom profiles).
+- `backends/*.env`: backend profile defaults (provider-specific and custom profiles).
 - `scripts/prepare_delta_rs.sh`: manages local checkout at `.delta-rs-under-test`.
 - `scripts/sync_harness_to_delta_rs.sh`: syncs `crates/delta-bench`, benchmark manifests, backend profiles, and Python interop runner into the checked-out `delta-rs` workspace.
 - `scripts/bench.sh`: wraps `delta-bench` subcommands.
 - `scripts/compare_branch.sh`: sequential base vs candidate run orchestration.
 - `scripts/security_mode.sh`: toggles benchmark run mode vs maintenance mode.
 - `scripts/security_check.sh`: preflight guardrails for run mode, interface exposure, and egress policy drift.
-- `scripts/provision_vultr.sh`: Terraform orchestration wrapper for Vultr provisioning operations.
+- `scripts/provision_runner.sh`: Terraform orchestration wrapper for runner provisioning operations.
 
 ## Data flow
 
@@ -59,7 +59,7 @@
     - `merge_dml`: `MergeMetrics` (`files_scanned`, `files_pruned`, `scan_time_ms`, `rewrite_time_ms`)
     - `optimize_vacuum` optimize cases: considered/skipped counts (`files_scanned`, `files_pruned`)
 
-## Wave 1 benchmark additions
+## Benchmark coverage additions
 
 - `read_scan` includes partition-pruning contrast cases (`read_partition_pruning_hit`, `read_partition_pruning_miss`).
 - `merge_dml` includes localized partition-aware case (`merge_partition_localized_1pct`) using target/source region alignment and partition predicate.

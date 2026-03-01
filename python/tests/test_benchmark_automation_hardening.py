@@ -40,7 +40,7 @@ def test_benchmark_workflow_uses_env_vars_for_compare_refs() -> None:
 
 def test_compare_branch_supports_storage_backend_passthrough() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
-    assert "--storage-backend <local|s3|gcs|azure>" in script
+    assert "--storage-backend <local|s3>" in script
     assert "--storage-option <KEY=VALUE>" in script
     assert re.search(r"storage_args=\(--storage-backend \"\$\{STORAGE_BACKEND\}\"\)", script)
     assert re.search(r"storage_args\+=\(--storage-option \"\$\{option\}\"\)", script)

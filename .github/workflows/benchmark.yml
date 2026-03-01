@@ -31,6 +31,7 @@ jobs:
               "merge_dml",
               "metadata",
               "optimize_vacuum",
+              "interop_py",
               "all",
             ]);
 
@@ -153,10 +154,13 @@ jobs:
           SUITE: ${{ steps.parse.outputs.suite }}
           BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
           BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
+          BENCH_BACKEND_PROFILE: ${{ vars.BENCH_BACKEND_PROFILE }}
+          BENCH_RUNNER_MODE: ${{ vars.BENCH_RUNNER_MODE }}
         run: |
           set -euo pipefail
           status=0
           storage_args=()
+          bench_args=()
           if [[ -n "${BENCH_STORAGE_BACKEND:-}" ]]; then
             storage_args+=(--storage-backend "${BENCH_STORAGE_BACKEND}")
           fi
@@ -166,9 +170,16 @@ jobs:
               storage_args+=(--storage-option "${opt}")
             done <<< "${BENCH_STORAGE_OPTIONS}"
           fi
+          if [[ -n "${BENCH_BACKEND_PROFILE:-}" ]]; then
+            bench_args+=(--backend-profile "${BENCH_BACKEND_PROFILE}")
+          fi
+          if [[ -n "${BENCH_RUNNER_MODE:-}" ]]; then
+            bench_args+=(--runner "${BENCH_RUNNER_MODE}")
+          fi
           set +e
           ./scripts/compare_branch.sh \
             "${storage_args[@]}" \
+            "${bench_args[@]}" \
             "$BASE_REF" \
             "$HEAD_REF" \
             "$SUITE" > benchmark_output.md 2>&1

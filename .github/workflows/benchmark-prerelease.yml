@@ -1,0 +1,81 @@
+name: Benchmark Pre-Release (Advisory)
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Base branch/ref to compare
+        required: true
+        default: main
+      candidate_ref:
+        description: Candidate branch/ref to compare
+        required: true
+      suite:
+        description: Benchmark suite
+        required: true
+        default: all
+      runner_mode:
+        description: Runner mode (rust|python|all)
+        required: true
+        default: all
+      backend_profile:
+        description: Optional backend profile under backends/*.env
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  prerelease:
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 300
+    concurrency:
+      group: delta-bench-prerelease
+      cancel-in-progress: false
+    env:
+      BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
+      BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run advisory branch comparison
+        shell: bash
+        run: |
+          set -euo pipefail
+          storage_args=()
+          if [[ -n "${BENCH_STORAGE_BACKEND:-}" ]]; then
+            storage_args+=(--storage-backend "${BENCH_STORAGE_BACKEND}")
+          fi
+          if [[ -n "${BENCH_STORAGE_OPTIONS:-}" ]]; then
+            while IFS= read -r opt; do
+              [[ -z "${opt}" ]] && continue
+              storage_args+=(--storage-option "${opt}")
+            done <<< "${BENCH_STORAGE_OPTIONS}"
+          fi
+          profile_args=()
+          if [[ -n "${{ inputs.backend_profile }}" ]]; then
+            profile_args+=(--backend-profile "${{ inputs.backend_profile }}")
+          fi
+
+          ./scripts/compare_branch.sh \
+            "${storage_args[@]}" \
+            "${profile_args[@]}" \
+            --runner "${{ inputs.runner_mode }}" \
+            "${{ inputs.base_ref }}" \
+            "${{ inputs.candidate_ref }}" \
+            "${{ inputs.suite }}" | tee prerelease_compare_output.txt
+
+      - name: Upload advisory compare output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prerelease-benchmark-output
+          path: |
+            prerelease_compare_output.txt
+            results/
+          if-no-files-found: warn

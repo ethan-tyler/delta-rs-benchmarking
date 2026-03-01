@@ -7,8 +7,8 @@ Repo-first benchmark harness for `delta-rs` with manual branch comparison.
 ```bash
 ./scripts/prepare_delta_rs.sh
 ./scripts/sync_harness_to_delta_rs.sh
-./scripts/bench.sh data --scale sf1 --seed 42
-./scripts/bench.sh run --suite all --scale sf1 --warmup 1 --iters 5 --label local
+./scripts/bench.sh data --dataset-id tiny_smoke --seed 42
+./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
 Results are written to `results/<label>/<suite>.json`.
@@ -33,6 +33,17 @@ Tuning options:
 - `--noise-threshold` to tune compare sensitivity while keeping benchmark output advisory.
 - `cd python && python3 -m delta_bench_compare.compare ... --include-metrics` to append per-case metric columns in compare output.
 - `--storage-backend` and repeatable `--storage-option KEY=VALUE` to run fixture generation + suite execution against object storage.
+- `--backend-profile <name>` to load backend defaults from `backends/<name>.env`.
+- `--runner rust|python|all` to control Rust-only, Python-only, or mixed execution.
+- `--case-filter <substring>` to pre-select cases by ID (command fails if no case IDs match).
+- `DELTA_BENCH_INTEROP_TIMEOUT_MS` to cap each python interop case subprocess runtime (default `120000`).
+- `DELTA_BENCH_INTEROP_RETRIES` to retry transient python interop case failures (default `1`).
+- `DELTA_BENCH_INTEROP_PYTHON` to override python executable used by interop runner (default `python3`).
+
+Manifest assertions:
+- `bench/manifests/*.yaml` case entries may include optional `assertions` lists.
+- Supported assertion types: `exact_result_hash`, `schema_hash`, `expected_error_contains`, `version_monotonicity`.
+- Assertions are applied during `run` after suite execution and can classify expected-failure lanes.
 
 ## Result metrics
 
@@ -71,21 +82,22 @@ Local remains the default backend. To run fixture-backed suites against object s
 
 ```bash
 ./scripts/bench.sh data \
-  --scale sf1 \
+  --dataset-id medium_selective \
   --seed 42 \
   --storage-backend s3 \
-  --storage-option table_root=s3://bench-bucket/delta-bench \
-  --storage-option AWS_REGION=us-east-1
+  --backend-profile s3_locking_vultr \
+  --storage-option table_root=s3://bench-bucket/delta-bench
 
 ./scripts/bench.sh run \
-  --suite optimize_vacuum \
-  --scale sf1 \
+  --suite all \
+  --runner all \
+  --dataset-id medium_selective \
   --warmup 1 \
   --iters 2 \
   --label wave2-s3 \
   --storage-backend s3 \
-  --storage-option table_root=s3://bench-bucket/delta-bench \
-  --storage-option AWS_REGION=us-east-1
+  --backend-profile s3_locking_vultr \
+  --storage-option table_root=s3://bench-bucket/delta-bench
 ```
 
 Notes:
@@ -107,8 +119,9 @@ Example:
   --remote-runner bench-runner-01 \
   --remote-root /opt/delta-rs-benchmarking \
   --storage-backend s3 \
+  --backend-profile s3_locking_vultr \
+  --runner all \
   --storage-option table_root=s3://bench-bucket/delta-bench \
-  --storage-option AWS_REGION=us-east-1 \
   main feature/merge-opt optimize_vacuum
 
 ./scripts/compare_branch.sh \
@@ -121,8 +134,10 @@ Example:
 ```
 
 Workflow mode storage configuration:
-- Optional repository variable `BENCH_STORAGE_BACKEND` (`s3`, `gcs`, or `azure`)
+- Optional repository variable `BENCH_STORAGE_BACKEND` (`local` or `s3`)
 - Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line; for example `table_root=...`, `AWS_REGION=...`)
+- Optional repository variable `BENCH_BACKEND_PROFILE` (`local`, `s3_locking_vultr`, or custom profile name in `backends/*.env`)
+- Optional repository variable `BENCH_RUNNER_MODE` (`rust`, `python`, or `all`)
 - Benchmark workflow comments are advisory and do not gate PR merge.
 
 ## Security operations
@@ -156,8 +171,8 @@ Destructive provisioning commands (`rotate-runner`, `destroy`) require CI contex
 ```bash
 cargo run -p delta-bench -- --help
 cargo run -p delta-bench -- list all
-cargo run -p delta-bench -- data --scale sf1 --seed 42
-cargo run -p delta-bench -- run --target all --scale sf1 --warmup 1 --iterations 5 --storage-backend local
+cargo run -p delta-bench -- data --dataset-id tiny_smoke --seed 42
+cargo run -p delta-bench -- run --target all --runner all --dataset-id tiny_smoke --warmup 1 --iterations 5 --storage-backend local
 cargo run -p delta-bench -- doctor
 ```
 
@@ -171,10 +186,12 @@ DELTA_RS_DIR="$(pwd)/.delta-rs-under-test" \
 
 ## Current scope
 
-- Implemented suites: `read_scan`, `write`, `merge_dml`, `metadata`, `optimize_vacuum`
+- Implemented suites: `read_scan`, `write`, `merge_dml`, `metadata`, `optimize_vacuum`, `interop_py`
 - Implemented: Wave 1 pruning/compaction benchmark expansion across read, merge, and optimize suites
 - Implemented: suites execute real `deltalake-core` operations (read provider scans, write builders, merge builders, metadata loads)
-- Implemented: deterministic fixture generation + result schema v1
+- Implemented: deterministic fixture generation + manifest-driven deterministic case ordering (`bench/manifests/p0-rust.yaml`, `bench/manifests/p0-python.yaml`)
+- Implemented: strict result schema v2 production + ingestion
 - Implemented: manual comparison workflow (`scripts/compare_branch.sh` + Python compare) in advisory mode (non-gating)
 - Implemented: Option B PR benchmark workflow (`.github/workflows/benchmark.yml`) with issue-comment trigger, role-based authorization, and serialized execution
+- Implemented: advisory nightly and pre-release workflows (`benchmark-nightly.yml`, `benchmark-prerelease.yml`)
 - Limitation: workflow mode currently relies on `compare_branch.sh` branch names being available in the upstream `delta-rs` checkout; fork PR heads may require manual handling

@@ -1,22 +1,19 @@
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
-use deltalake_core::arrow;
 use deltalake_core::datafusion::logical_expr::col;
 use deltalake_core::datafusion::prelude::{DataFrame, SessionContext};
 use url::Url;
 
+use super::{copy_dir_all, fixture_error_cases, into_case_result};
 use crate::data::datasets::NarrowSaleRow;
 use crate::data::fixtures::{
-    load_rows, merge_partitioned_target_table_path, merge_target_table_path, write_delta_table,
-    write_delta_table_partitioned_small_files,
+    load_rows, merge_partitioned_target_table_path, merge_target_table_path, rows_to_batch,
+    write_delta_table, write_delta_table_partitioned_small_files,
 };
 use crate::error::{BenchError, BenchResult};
-use crate::results::{CaseFailure, CaseResult, SampleMetrics};
-use crate::runner::{
-    run_case_async_with_async_setup, run_case_async_with_setup, CaseExecutionResult,
-};
+use crate::results::{CaseResult, SampleMetrics};
+use crate::runner::{run_case_async_with_async_setup, run_case_async_with_setup};
 use crate::storage::StorageConfig;
 
 #[derive(Clone, Copy, Debug)]
@@ -120,7 +117,7 @@ pub async fn run(
 ) -> BenchResult<Vec<CaseResult>> {
     let rows = match load_rows(fixtures_dir, scale) {
         Ok(rows) => Arc::new(rows),
-        Err(e) => return Ok(fixture_error_cases(&e.to_string())),
+        Err(e) => return Ok(fixture_error_cases(case_names(), &e.to_string())),
     };
     if storage.is_local() {
         let standard_fixture = merge_target_table_path(fixtures_dir, scale);
@@ -356,72 +353,4 @@ fn build_source_df(
     let batch = rows_to_batch(&source_rows)?;
     let ctx = SessionContext::new();
     Ok((ctx.read_batch(batch)?, source_rows.len()))
-}
-
-fn rows_to_batch(rows: &[NarrowSaleRow]) -> BenchResult<arrow::record_batch::RecordBatch> {
-    let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-        arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Int64, false),
-        arrow::datatypes::Field::new("ts_ms", arrow::datatypes::DataType::Int64, false),
-        arrow::datatypes::Field::new("region", arrow::datatypes::DataType::Utf8, false),
-        arrow::datatypes::Field::new("value_i64", arrow::datatypes::DataType::Int64, false),
-        arrow::datatypes::Field::new("flag", arrow::datatypes::DataType::Boolean, false),
-    ]));
-
-    let ids: Vec<i64> = rows.iter().map(|r| r.id as i64).collect();
-    let ts_ms: Vec<i64> = rows.iter().map(|r| r.ts_ms).collect();
-    let regions: Vec<String> = rows.iter().map(|r| r.region.clone()).collect();
-    let values: Vec<i64> = rows.iter().map(|r| r.value_i64).collect();
-    let flags: Vec<bool> = rows.iter().map(|r| r.flag).collect();
-
-    Ok(arrow::record_batch::RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(arrow::array::Int64Array::from(ids)),
-            Arc::new(arrow::array::Int64Array::from(ts_ms)),
-            Arc::new(arrow::array::StringArray::from(regions)),
-            Arc::new(arrow::array::Int64Array::from(values)),
-            Arc::new(arrow::array::BooleanArray::from(flags)),
-        ],
-    )?)
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> BenchResult<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
-            return Err(BenchError::InvalidArgument(format!(
-                "symlinks are not allowed in fixture tree: {}",
-                entry.path().display()
-            )));
-        }
-        let to = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_all(&entry.path(), &to)?;
-        } else {
-            fs::copy(entry.path(), to)?;
-        }
-    }
-    Ok(())
-}
-
-fn into_case_result(result: CaseExecutionResult) -> CaseResult {
-    match result {
-        CaseExecutionResult::Success(c) | CaseExecutionResult::Failure(c) => c,
-    }
-}
-
-fn fixture_error_cases(message: &str) -> Vec<CaseResult> {
-    case_names()
-        .into_iter()
-        .map(|case| CaseResult {
-            case,
-            success: false,
-            samples: Vec::new(),
-            failure: Some(CaseFailure {
-                message: format!("fixture load failed: {message}"),
-            }),
-        })
-        .collect()
 }

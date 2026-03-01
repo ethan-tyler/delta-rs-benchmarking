@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NarrowSaleRow {
-    pub id: u64,
+    pub id: i64,
     pub ts_ms: i64,
     pub region: String,
     pub value_i64: i64,

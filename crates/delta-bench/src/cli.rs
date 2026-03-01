@@ -25,6 +25,8 @@ pub struct Args {
     pub storage_backend: StorageBackend,
     #[arg(long = "storage-option")]
     pub storage_options: Vec<String>,
+    #[arg(long, env = "DELTA_BENCH_BACKEND_PROFILE")]
+    pub backend_profile: Option<String>,
     #[command(subcommand)]
     pub command: Command,
 }
@@ -33,8 +35,23 @@ pub struct Args {
 pub enum StorageBackend {
     Local,
     S3,
-    Gcs,
-    Azure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RunnerMode {
+    Rust,
+    Python,
+    All,
+}
+
+impl RunnerMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Rust => "rust",
+            Self::Python => "python",
+            Self::All => "all",
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -46,6 +63,8 @@ pub enum Command {
     Data {
         #[arg(long, default_value = "sf1")]
         scale: String,
+        #[arg(long)]
+        dataset_id: Option<String>,
         #[arg(long, default_value_t = 42)]
         seed: u64,
         #[arg(long)]
@@ -54,8 +73,14 @@ pub enum Command {
     Run {
         #[arg(long, default_value = "sf1")]
         scale: String,
+        #[arg(long)]
+        dataset_id: Option<String>,
         #[arg(long, default_value = "all")]
         target: String,
+        #[arg(long)]
+        case_filter: Option<String>,
+        #[arg(long, value_enum, default_value_t = RunnerMode::All)]
+        runner: RunnerMode,
         #[arg(long, default_value_t = 1)]
         warmup: u32,
         #[arg(long, default_value_t = 5)]

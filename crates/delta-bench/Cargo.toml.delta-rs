@@ -28,6 +28,7 @@ anyhow = "1"
 rand = "0.8"
 rand_chacha = "0.3"
 sha2 = "0.10"
+serde_yaml = "0.9"
 
 [dev-dependencies]
 tempfile = { workspace = true }

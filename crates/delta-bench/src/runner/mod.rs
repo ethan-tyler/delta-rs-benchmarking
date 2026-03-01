@@ -40,6 +40,7 @@ where
                 let case = CaseResult {
                     case: name.to_string(),
                     success: false,
+                    classification: "supported".to_string(),
                     samples,
                     failure: Some(failure),
                 };
@@ -51,6 +52,7 @@ where
     let case = CaseResult {
         case: name.to_string(),
         success: true,
+        classification: "supported".to_string(),
         samples,
         failure: None,
     };
@@ -91,6 +93,7 @@ where
                 let case = CaseResult {
                     case: name.to_string(),
                     success: false,
+                    classification: "supported".to_string(),
                     samples,
                     failure: Some(CaseFailure {
                         message: e.to_string(),
@@ -104,6 +107,7 @@ where
     CaseExecutionResult::Success(CaseResult {
         case: name.to_string(),
         success: true,
+        classification: "supported".to_string(),
         samples,
         failure: None,
     })
@@ -137,6 +141,7 @@ where
                 return CaseExecutionResult::Failure(CaseResult {
                     case: name.to_string(),
                     success: false,
+                    classification: "supported".to_string(),
                     samples,
                     failure: Some(CaseFailure {
                         message: e.to_string(),
@@ -161,6 +166,7 @@ where
                 return CaseExecutionResult::Failure(CaseResult {
                     case: name.to_string(),
                     success: false,
+                    classification: "supported".to_string(),
                     samples,
                     failure: Some(CaseFailure {
                         message: e.to_string(),
@@ -173,6 +179,7 @@ where
     CaseExecutionResult::Success(CaseResult {
         case: name.to_string(),
         success: true,
+        classification: "supported".to_string(),
         samples,
         failure: None,
     })
@@ -207,6 +214,7 @@ where
                 return CaseExecutionResult::Failure(CaseResult {
                     case: name.to_string(),
                     success: false,
+                    classification: "supported".to_string(),
                     samples,
                     failure: Some(CaseFailure {
                         message: e.to_string(),
@@ -231,6 +239,7 @@ where
                 return CaseExecutionResult::Failure(CaseResult {
                     case: name.to_string(),
                     success: false,
+                    classification: "supported".to_string(),
                     samples,
                     failure: Some(CaseFailure {
                         message: e.to_string(),
@@ -243,6 +252,7 @@ where
     CaseExecutionResult::Success(CaseResult {
         case: name.to_string(),
         success: true,
+        classification: "supported".to_string(),
         samples,
         failure: None,
     })

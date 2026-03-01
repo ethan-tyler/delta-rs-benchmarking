@@ -174,6 +174,7 @@ fn fixture_error_cases(message: &str) -> Vec<CaseResult> {
         .map(|case| CaseResult {
             case,
             success: false,
+            classification: "supported".to_string(),
             samples: Vec::new(),
             failure: Some(CaseFailure {
                 message: format!("fixture load failed: {message}"),

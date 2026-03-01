@@ -53,32 +53,6 @@ fn s3_backend_rejects_non_s3_table_root_scheme() {
 }
 
 #[test]
-fn gcs_backend_rejects_non_gcs_table_root_scheme() {
-    let mut options = HashMap::new();
-    options.insert("table_root".to_string(), "s3://bucket/path".to_string());
-
-    let err = StorageConfig::new(StorageBackend::Gcs, options)
-        .expect_err("gcs backend should reject non-gcs table_root scheme");
-    assert!(
-        err.to_string().contains("table_root") && err.to_string().contains("gs"),
-        "unexpected error: {err}"
-    );
-}
-
-#[test]
-fn azure_backend_rejects_non_azure_table_root_scheme() {
-    let mut options = HashMap::new();
-    options.insert("table_root".to_string(), "s3://bucket/path".to_string());
-
-    let err = StorageConfig::new(StorageBackend::Azure, options)
-        .expect_err("azure backend should reject non-azure table_root scheme");
-    assert!(
-        err.to_string().contains("table_root") && err.to_string().contains("az://"),
-        "unexpected error: {err}"
-    );
-}
-
-#[test]
 fn non_local_storage_can_produce_unique_isolated_table_urls() {
     let mut options = HashMap::new();
     options.insert(

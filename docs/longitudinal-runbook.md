@@ -116,7 +116,7 @@ Idempotency behavior:
   --artifacts-dir longitudinal/artifacts \
   --state-path longitudinal/state/matrix-state.json \
   --results-dir results \
-  --suite read_scan --suite write --suite merge_dml --suite metadata --suite optimize_vacuum \
+  --suite read_scan --suite write --suite delete_update_dml --suite merge_dml --suite metadata --suite optimize_vacuum \
   --scale sf1 \
   --timeout-seconds 3600 \
   --max-retries 2

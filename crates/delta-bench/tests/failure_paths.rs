@@ -1,6 +1,6 @@
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{merge_dml, optimize_vacuum, write};
+use delta_bench::suites::{delete_update_dml, merge_dml, optimize_vacuum, write};
 
 #[tokio::test]
 async fn write_suite_missing_fixtures_returns_case_failures() {
@@ -61,6 +61,17 @@ async fn optimize_vacuum_suite_missing_fixtures_returns_case_failures() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
     let cases = optimize_vacuum::run(temp.path(), "sf1", 0, 1, &storage)
+        .await
+        .expect("suite should not hard-fail");
+    assert!(!cases.is_empty());
+    assert!(cases.iter().all(|c| !c.success));
+}
+
+#[tokio::test]
+async fn delete_update_dml_suite_missing_fixtures_returns_case_failures() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    let cases = delete_update_dml::run(temp.path(), "sf1", 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());

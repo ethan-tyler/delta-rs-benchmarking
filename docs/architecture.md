@@ -17,7 +17,7 @@
 ## Data flow
 
 1. `delta-bench data` generates deterministic fixtures under `fixtures/<scale>/`.
-2. Fixture generation writes both JSON row snapshots and concrete Delta tables (`narrow_sales_delta`, `merge_target_delta`, `read_partitioned_delta`, `merge_partitioned_target_delta`, `optimize_small_files_delta`, `optimize_compacted_delta`, `vacuum_ready_delta`).
+2. Fixture generation writes both JSON row snapshots and concrete Delta tables (`narrow_sales_delta`, `merge_target_delta`, `read_partitioned_delta`, `delete_update_small_files_delta`, `merge_partitioned_target_delta`, `optimize_small_files_delta`, `optimize_compacted_delta`, `vacuum_ready_delta`).
 3. TPC-DS suite execution consumes pre-generated Delta tables at `fixtures/<scale>/tpcds/<table>/` (or `<table_root>/<scale>/tpcds/<table>/` in object-store mode).
 4. `delta-bench run` executes suite cases using real `deltalake-core` read/write/merge/metadata/DataFusion SQL operations and writes `results/<label>/<suite>.json`.
 5. `compare.py` reads baseline/candidate result JSON and classifies per-case changes.

@@ -44,6 +44,7 @@ async fn generates_wave1_specialized_fixture_tables() {
     let root = temp.path().join("sf1");
     for table_name in [
         "read_partitioned_delta",
+        "delete_update_small_files_delta",
         "merge_partitioned_target_delta",
         "optimize_compacted_delta",
     ] {

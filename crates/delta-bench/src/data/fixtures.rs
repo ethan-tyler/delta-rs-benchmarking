@@ -15,6 +15,7 @@ use crate::storage::StorageConfig;
 const NARROW_SALES_TABLE_DIR: &str = "narrow_sales_delta";
 const MERGE_TARGET_TABLE_DIR: &str = "merge_target_delta";
 const READ_PARTITIONED_TABLE_DIR: &str = "read_partitioned_delta";
+const DELETE_UPDATE_SMALL_FILES_TABLE_DIR: &str = "delete_update_small_files_delta";
 const MERGE_PARTITIONED_TARGET_TABLE_DIR: &str = "merge_partitioned_target_delta";
 const OPTIMIZE_SMALL_FILES_TABLE_DIR: &str = "optimize_small_files_delta";
 const OPTIMIZE_COMPACTED_TABLE_DIR: &str = "optimize_compacted_delta";
@@ -70,6 +71,10 @@ pub fn read_partitioned_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf 
 
 pub fn merge_partitioned_target_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
     fixture_root(fixtures_dir, scale).join(MERGE_PARTITIONED_TARGET_TABLE_DIR)
+}
+
+pub fn delete_update_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixture_root(fixtures_dir, scale).join(DELETE_UPDATE_SMALL_FILES_TABLE_DIR)
 }
 
 pub fn optimize_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
@@ -143,6 +148,18 @@ pub fn merge_partitioned_target_table_url(
         &merge_partitioned_target_table_path(fixtures_dir, scale),
         scale,
         MERGE_PARTITIONED_TARGET_TABLE_DIR,
+    )
+}
+
+pub fn delete_update_small_files_table_url(
+    fixtures_dir: &Path,
+    scale: &str,
+    storage: &StorageConfig,
+) -> BenchResult<Url> {
+    storage.table_url_for(
+        &delete_update_small_files_table_path(fixtures_dir, scale),
+        scale,
+        DELETE_UPDATE_SMALL_FILES_TABLE_DIR,
     )
 }
 
@@ -248,6 +265,15 @@ pub async fn generate_fixtures(
     write_delta_table_partitioned_small_files(
         merge_partitioned_target_table_url(fixtures_dir, scale, storage)?,
         &merge_rows,
+        64,
+        &["region"],
+        storage,
+    )
+    .await?;
+
+    write_delta_table_partitioned_small_files(
+        delete_update_small_files_table_url(fixtures_dir, scale, storage)?,
+        &data,
         64,
         &["region"],
         storage,
@@ -409,7 +435,9 @@ fn prepare_local_table_dir(table_url: &Url) -> BenchResult<()> {
     Ok(())
 }
 
-fn rows_to_batch(rows: &[NarrowSaleRow]) -> BenchResult<arrow::record_batch::RecordBatch> {
+pub(crate) fn rows_to_batch(
+    rows: &[NarrowSaleRow],
+) -> BenchResult<arrow::record_batch::RecordBatch> {
     let schema = Arc::new(arrow::datatypes::Schema::new(vec![
         arrow::datatypes::Field::new("id", arrow::datatypes::DataType::Int64, false),
         arrow::datatypes::Field::new("ts_ms", arrow::datatypes::DataType::Int64, false),
@@ -418,7 +446,7 @@ fn rows_to_batch(rows: &[NarrowSaleRow]) -> BenchResult<arrow::record_batch::Rec
         arrow::datatypes::Field::new("flag", arrow::datatypes::DataType::Boolean, false),
     ]));
 
-    let ids: Vec<i64> = rows.iter().map(|r| r.id as i64).collect();
+    let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
     let ts_ms: Vec<i64> = rows.iter().map(|r| r.ts_ms).collect();
     let regions: Vec<String> = rows.iter().map(|r| r.region.clone()).collect();
     let values: Vec<i64> = rows.iter().map(|r| r.value_i64).collect();

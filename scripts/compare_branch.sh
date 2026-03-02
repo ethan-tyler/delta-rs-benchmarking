@@ -44,7 +44,7 @@ usage() {
   cat <<EOF
 Usage:
   ./scripts/compare_branch.sh [options] <base_ref> <candidate_ref> [suite]
-  ./scripts/compare_branch.sh [options] --working-vs-upstream-main [suite]
+  ./scripts/compare_branch.sh [options] --current-vs-main [suite]
 
 Options:
   --remote-runner <ssh-host>      Run the workflow on a remote runner over SSH
@@ -56,8 +56,9 @@ Options:
   --aggregation <min|median|p95>  Representative sample aggregation for compare.py (default: median)
   --base-sha <sha>                Force immutable commit mode for the base revision
   --candidate-sha <sha>           Force immutable commit mode for the candidate revision
-  --working-vs-upstream-main      Compare current HEAD commit against latest <remote>/main
-  --upstream-remote <name>        Remote used with --working-vs-upstream-main (default: upstream, else origin)
+  --current-vs-main               Compare current HEAD commit against latest <remote>/main
+  --working-vs-upstream-main      Legacy alias for --current-vs-main
+  --upstream-remote <name>        Remote used with --current-vs-main (default: upstream, else origin)
   --storage-backend <local|s3>
                                   Storage backend for fixture generation and suite execution (default: local)
   --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
@@ -105,7 +106,7 @@ while [[ $# -gt 0 ]]; do
       CANDIDATE_SHA_OVERRIDE="$2"
       shift 2
       ;;
-    --working-vs-upstream-main)
+    --current-vs-main|--working-vs-upstream-main)
       WORKING_VS_UPSTREAM_MAIN=1
       shift
       ;;
@@ -162,11 +163,11 @@ candidate_ref_mode="auto"
 
 if (( WORKING_VS_UPSTREAM_MAIN != 0 )); then
   if [[ -n "${BASE_SHA_OVERRIDE}" || -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
-    echo "--working-vs-upstream-main cannot be combined with --base-sha/--candidate-sha" >&2
+    echo "--current-vs-main cannot be combined with --base-sha/--candidate-sha" >&2
     exit 1
   fi
   if (( ${#positional_refs[@]} > 1 )); then
-    echo "with --working-vs-upstream-main, provide at most one positional [suite]" >&2
+    echo "with --current-vs-main, provide at most one positional [suite]" >&2
     usage >&2
     exit 1
   fi

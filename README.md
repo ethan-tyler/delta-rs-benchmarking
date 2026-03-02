@@ -56,7 +56,7 @@ Pin immutable commits when needed:
 Compare your current checkout commit against the latest remote `main` (auto-picks `upstream`, falls back to `origin`):
 
 ```bash
-./scripts/compare_branch.sh --working-vs-upstream-main all
+./scripts/compare_branch.sh --current-vs-main all
 ```
 
 Refresh committed release-history benchmark manifests:

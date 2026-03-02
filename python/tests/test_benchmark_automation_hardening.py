@@ -90,6 +90,7 @@ def test_compare_branch_supports_explicit_sha_flags() -> None:
 
 def test_compare_branch_supports_working_branch_vs_upstream_main_shortcut() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "--current-vs-main" in script
     assert "--working-vs-upstream-main" in script
     assert "--upstream-remote <name>" in script
     assert re.search(r"WORKING_VS_UPSTREAM_MAIN=0", script)
@@ -131,7 +132,7 @@ def test_compare_branch_emits_clear_missing_ref_guidance() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "benchmark ref '${ref}' not found in delta-rs checkout" in script
     assert "--candidate-sha" in script
-    assert "git -C \"${DELTA_RS_DIR}\" branch -a" in script
+    assert 'git -C "${DELTA_RS_DIR}" branch -a' in script
     assert re.search(
         r"ensure_known_ref_mode \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"[\s\S]*prepare_delta_rs_ref \"\$\{base_ref\}\"",
         script,

@@ -1,11 +1,16 @@
-#![allow(clippy::await_holding_lock)]
+#[path = "support/env_lock.rs"]
+mod env_lock_support;
+#[path = "support/env_vars.rs"]
+mod env_vars_support;
 
 use delta_bench::data::fixtures::{
     generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
 };
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::{delete_update, interop_py, merge, optimize_vacuum, write};
-use std::sync::{Mutex, OnceLock};
+
+use env_lock_support::env_lock;
+use env_vars_support::with_env_vars;
 
 #[tokio::test]
 async fn write_suite_missing_fixtures_returns_case_failures() {
@@ -131,6 +136,7 @@ async fn interop_py_non_local_backend_is_reported_as_expected_failure() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn tpcds_duckdb_profile_reports_missing_python_executable() {
     let _env_lock = env_lock();
     let temp = tempfile::tempdir().expect("tempdir");
@@ -183,6 +189,7 @@ with open(args.output_csv, "w", encoding="utf-8") as handle:
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn tpcds_duckdb_profile_reports_timeout() {
     let _env_lock = env_lock();
     let temp = tempfile::tempdir().expect("tempdir");
@@ -234,6 +241,7 @@ with open(args.output_csv, "w", encoding="utf-8") as handle:
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn tpcds_duckdb_profile_reports_malformed_csv() {
     let _env_lock = env_lock();
     let temp = tempfile::tempdir().expect("tempdir");
@@ -281,6 +289,7 @@ with open(args.output_csv, "w", encoding="utf-8") as handle:
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn tpcds_duckdb_profile_reports_csv_header_mismatch() {
     let _env_lock = env_lock();
     let temp = tempfile::tempdir().expect("tempdir");
@@ -327,6 +336,7 @@ with open(args.output_csv, "w", encoding="utf-8") as handle:
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn tpcds_duckdb_profile_reports_csv_without_data_rows() {
     let _env_lock = env_lock();
     let temp = tempfile::tempdir().expect("tempdir");
@@ -371,37 +381,4 @@ with open(args.output_csv, "w", encoding="utf-8") as handle:
         message.contains("no data rows"),
         "unexpected no-rows error: {err}"
     );
-}
-
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("env lock poisoned")
-}
-
-async fn with_env_vars<F, Fut, T>(
-    entries: &[(&str, &str)],
-    f: F,
-) -> Result<T, delta_bench::error::BenchError>
-where
-    F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<T, delta_bench::error::BenchError>>,
-{
-    let previous = entries
-        .iter()
-        .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
-        .collect::<Vec<_>>();
-    for (key, value) in entries {
-        std::env::set_var(key, value);
-    }
-    let result = f().await;
-    for (key, value) in previous {
-        if let Some(value) = value {
-            std::env::set_var(&key, value);
-        } else {
-            std::env::remove_var(&key);
-        }
-    }
-    result
 }

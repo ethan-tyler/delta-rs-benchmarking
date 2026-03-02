@@ -1,4 +1,7 @@
-#![allow(clippy::await_holding_lock)]
+#[path = "support/env_lock.rs"]
+mod env_lock_support;
+#[path = "support/env_vars.rs"]
+mod env_vars_support;
 
 use delta_bench::assertions::CaseAssertion;
 use delta_bench::cli::RunnerMode;
@@ -9,8 +12,9 @@ use delta_bench::storage::StorageConfig;
 use delta_bench::suites::{
     apply_dataset_assertion_policy, plan_run_cases, run_planned_cases, run_target, PlannedCase,
 };
-use std::future::Future;
-use std::sync::{Mutex, OnceLock};
+
+use env_lock_support::env_lock;
+use env_vars_support::with_env_vars;
 
 #[test]
 fn case_filter_requires_at_least_one_matching_case() {
@@ -208,6 +212,7 @@ fn tpcds_duckdb_dataset_policy_does_not_modify_non_tpcds_cases() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn tpcds_duckdb_schema_hash_mismatch_still_fails_after_policy() {
     let _env_lock = env_lock();
     let temp = tempfile::tempdir().expect("tempdir");
@@ -295,52 +300,8 @@ path.write_text(
     );
 }
 
-fn env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .expect("env lock poisoned")
-}
-
-async fn with_env_vars<F, Fut>(entries: &[(&str, &str)], f: F)
-where
-    F: FnOnce() -> Fut,
-    Fut: Future<Output = ()>,
-{
-    let _restore_guard = EnvVarRestoreGuard::set(entries);
-    f().await;
-}
-
-struct EnvVarRestoreGuard {
-    previous: Vec<(String, Option<std::ffi::OsString>)>,
-}
-
-impl EnvVarRestoreGuard {
-    fn set(entries: &[(&str, &str)]) -> Self {
-        let previous = entries
-            .iter()
-            .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
-            .collect::<Vec<_>>();
-        for (key, value) in entries {
-            std::env::set_var(key, value);
-        }
-        Self { previous }
-    }
-}
-
-impl Drop for EnvVarRestoreGuard {
-    fn drop(&mut self) {
-        for (key, value) in self.previous.drain(..) {
-            if let Some(value) = value {
-                std::env::set_var(&key, value);
-            } else {
-                std::env::remove_var(&key);
-            }
-        }
-    }
-}
-
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn with_env_vars_restores_values_when_closure_panics() {
     let _env_lock = env_lock();
     let key = "DELTA_BENCH_TEST_ENV_PANIC_RESTORE";

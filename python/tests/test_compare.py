@@ -503,6 +503,42 @@ def test_load_rejects_unknown_case_classification(tmp_path: Path) -> None:
         _load(path)
 
 
+def test_load_rejects_duplicate_case_ids(tmp_path: Path) -> None:
+    payload = {
+        "schema_version": 2,
+        "context": {"schema_version": 2, "label": "v2"},
+        "cases": [
+            {
+                "case": "duplicate",
+                "success": True,
+                "classification": "supported",
+                "samples": [],
+            },
+            {
+                "case": "duplicate",
+                "success": True,
+                "classification": "supported",
+                "samples": [],
+            },
+        ],
+    }
+    path = tmp_path / "duplicate-case.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="duplicate case"):
+        _load(path)
+
+
+def test_public_schema_loader_rejects_invalid_json(tmp_path: Path) -> None:
+    from delta_bench_compare.schema import load_benchmark_payload
+
+    path = tmp_path / "invalid.json"
+    path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid JSON"):
+        load_benchmark_payload(path)
+
+
 def test_compare_runs_handles_deterministic_tpcds_case_names() -> None:
     base = _run(
         [

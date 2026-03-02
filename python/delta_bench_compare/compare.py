@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import math
 from pathlib import Path
 
 from .formatting import render_markdown as render_markdown_output, render_text_table
 from .model import Comparison, ComparisonRow, SampleMetricSnapshot, Summary
+from .schema import case_classification, load_benchmark_payload
 
-VALID_CLASSIFICATIONS = {"supported", "expected_failure"}
 VALID_AGGREGATIONS = {"min", "median", "p95"}
 
 
@@ -35,23 +34,6 @@ def representative_sample(case: dict, aggregation: str = "median") -> dict | Non
         0, min(len(sorted_samples) - 1, math.ceil(0.95 * len(sorted_samples)) - 1)
     )
     return sorted_samples[idx]
-
-
-def case_classification(case: dict | None) -> str | None:
-    if not case:
-        return None
-    value = case.get("classification")
-    case_name = case.get("case", "<unknown>")
-    if value is None:
-        raise ValueError(f"case '{case_name}' is missing required classification")
-    if not isinstance(value, str):
-        raise ValueError(f"case '{case_name}' has non-string classification")
-    if value not in VALID_CLASSIFICATIONS:
-        raise ValueError(
-            f"case '{case_name}' has invalid classification '{value}'; "
-            "expected one of: supported, expected_failure"
-        )
-    return value
 
 
 def representative_ms(case: dict, aggregation: str = "median") -> float | None:
@@ -228,26 +210,7 @@ def compare_runs(
 
 
 def _load(path: Path) -> dict:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 2:
-        raise ValueError(
-            f"{path}: top-level schema_version must be 2 (found {payload.get('schema_version')!r})"
-        )
-    context = payload.get("context")
-    if not isinstance(context, dict):
-        raise ValueError(f"{path}: context must be an object")
-    if context.get("schema_version") != 2:
-        raise ValueError(
-            f"{path}: context.schema_version must be 2 (found {context.get('schema_version')!r})"
-        )
-    cases = payload.get("cases")
-    if not isinstance(cases, list):
-        raise ValueError(f"{path}: cases must be an array")
-    for case in cases:
-        if not isinstance(case, dict):
-            raise ValueError(f"{path}: each case entry must be an object")
-        case_classification(case)
-    return payload
+    return load_benchmark_payload(path)
 
 
 def render_text(comparison: Comparison, include_metrics: bool = False) -> str:

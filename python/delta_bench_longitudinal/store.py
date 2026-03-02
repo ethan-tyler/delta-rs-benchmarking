@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import IO
 from typing import Any
 
+from delta_bench_compare.schema import load_benchmark_payload
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - non-POSIX platforms
@@ -28,7 +30,7 @@ def ingest_benchmark_result(
 ) -> dict[str, Any]:
     store_root = Path(store_dir)
     source = Path(result_path)
-    payload = json.loads(source.read_text(encoding="utf-8"))
+    payload = load_benchmark_payload(source)
     context = payload.get("context", {})
     cases = payload.get("cases", [])
     run_id = _run_id(

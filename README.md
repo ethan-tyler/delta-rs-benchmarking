@@ -4,6 +4,8 @@ Benchmark harness for `delta-rs` with branch comparison and longitudinal trend t
 
 ## Quickstart
 
+Managed checkout mode (recommended first run):
+
 ```bash
 ./scripts/prepare_delta_rs.sh
 ./scripts/sync_harness_to_delta_rs.sh
@@ -12,6 +14,18 @@ Benchmark harness for `delta-rs` with branch comparison and longitudinal trend t
 ```
 
 Results are written to `results/<label>/<suite>.json`.
+
+Use your existing local `delta-rs` checkout instead of `.delta-rs-under-test`:
+
+```bash
+DELTA_RS_DIR=/path/to/your/delta-rs \
+DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
+./scripts/sync_harness_to_delta_rs.sh
+
+DELTA_RS_DIR=/path/to/your/delta-rs \
+DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
+./scripts/bench.sh doctor
+```
 
 TPC-DS DuckDB-backed fixture generation (subset-first):
 
@@ -28,13 +42,21 @@ Marketplace datasets are currently a document-only path: place external Delta ta
 Compare two refs:
 
 ```bash
-./scripts/compare_branch.sh main candidate-branch all
+./scripts/compare_branch.sh main <candidate_ref> all
 ```
+
+`<candidate_ref>` must be a real branch in `.delta-rs-under-test` (or use commit SHAs below).
 
 Pin immutable commits when needed:
 
 ```bash
 ./scripts/compare_branch.sh --base-sha <base_sha> --candidate-sha <candidate_sha> all
+```
+
+Compare your current checkout commit against the latest remote `main` (auto-picks `upstream`, falls back to `origin`):
+
+```bash
+./scripts/compare_branch.sh --working-vs-upstream-main all
 ```
 
 Refresh committed release-history benchmark manifests:

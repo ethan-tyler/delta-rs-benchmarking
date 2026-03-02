@@ -38,7 +38,7 @@ Use maintenance mode for patching, scans, snapshots, and key rotation.
   --require-egress-policy \
   --backend-profile s3_locking_vultr \
   --runner all \
-  main candidate-branch all
+  main <candidate_ref> all
 ```
 
 Backend profile guidance:

@@ -15,6 +15,8 @@ NOISE_THRESHOLD="${BENCH_NOISE_THRESHOLD:-0.05}"
 AGGREGATION="${BENCH_AGGREGATION:-median}"
 BASE_SHA_OVERRIDE=""
 CANDIDATE_SHA_OVERRIDE=""
+WORKING_VS_UPSTREAM_MAIN=0
+UPSTREAM_REMOTE_OVERRIDE=""
 STORAGE_BACKEND="${BENCH_STORAGE_BACKEND:-local}"
 STORAGE_OPTIONS=()
 BACKEND_PROFILE="${BENCH_BACKEND_PROFILE:-}"
@@ -42,6 +44,7 @@ usage() {
   cat <<EOF
 Usage:
   ./scripts/compare_branch.sh [options] <base_ref> <candidate_ref> [suite]
+  ./scripts/compare_branch.sh [options] --working-vs-upstream-main [suite]
 
 Options:
   --remote-runner <ssh-host>      Run the workflow on a remote runner over SSH
@@ -53,6 +56,8 @@ Options:
   --aggregation <min|median|p95>  Representative sample aggregation for compare.py (default: median)
   --base-sha <sha>                Force immutable commit mode for the base revision
   --candidate-sha <sha>           Force immutable commit mode for the candidate revision
+  --working-vs-upstream-main      Compare current HEAD commit against latest <remote>/main
+  --upstream-remote <name>        Remote used with --working-vs-upstream-main (default: upstream, else origin)
   --storage-backend <local|s3>
                                   Storage backend for fixture generation and suite execution (default: local)
   --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
@@ -98,6 +103,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --candidate-sha)
       CANDIDATE_SHA_OVERRIDE="$2"
+      shift 2
+      ;;
+    --working-vs-upstream-main)
+      WORKING_VS_UPSTREAM_MAIN=1
+      shift
+      ;;
+    --upstream-remote)
+      UPSTREAM_REMOTE_OVERRIDE="$2"
       shift 2
       ;;
     --storage-backend)
@@ -147,6 +160,21 @@ suite="${positional_refs[2]:-all}"
 base_ref_mode="auto"
 candidate_ref_mode="auto"
 
+if (( WORKING_VS_UPSTREAM_MAIN != 0 )); then
+  if [[ -n "${BASE_SHA_OVERRIDE}" || -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
+    echo "--working-vs-upstream-main cannot be combined with --base-sha/--candidate-sha" >&2
+    exit 1
+  fi
+  if (( ${#positional_refs[@]} > 1 )); then
+    echo "with --working-vs-upstream-main, provide at most one positional [suite]" >&2
+    usage >&2
+    exit 1
+  fi
+  base_ref=""
+  candidate_ref=""
+  suite="${positional_refs[0]:-all}"
+fi
+
 if [[ -n "${BASE_SHA_OVERRIDE}" ]]; then
   base_ref="${BASE_SHA_OVERRIDE}"
   base_ref_mode="commit"
@@ -171,7 +199,7 @@ if [[ -n "${BASE_SHA_OVERRIDE}" && -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
   esac
 fi
 
-if [[ -z "${candidate_ref}" ]]; then
+if [[ -z "${candidate_ref}" && ${WORKING_VS_UPSTREAM_MAIN} -eq 0 ]]; then
   usage >&2
   exit 1
 fi
@@ -208,6 +236,28 @@ branch_ref_exists() {
     exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/remotes/origin/${ref}"
 }
 
+print_ref_not_found_guidance() {
+  local ref="${1:-}"
+  echo "benchmark ref '${ref}' not found in delta-rs checkout '${DELTA_RS_DIR}'." >&2
+  echo 'use an existing branch (inspect with: git -C "${DELTA_RS_DIR}" branch -a), or pin SHAs with --base-sha/--candidate-sha.' >&2
+}
+
+ensure_known_ref_mode() {
+  local ref="${1:-}"
+  local mode="${2:-auto}"
+  if [[ "${mode}" == "commit" ]]; then
+    return 0
+  fi
+  if branch_ref_exists "${ref}"; then
+    return 0
+  fi
+  if is_commit_sha "${ref}"; then
+    return 0
+  fi
+  print_ref_not_found_guidance "${ref}"
+  return 1
+}
+
 prepare_delta_rs_ref() {
   local ref="${1:-}"
   local mode="${2:-auto}"
@@ -223,7 +273,8 @@ prepare_delta_rs_ref() {
     run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
     return
   fi
-  run_step env DELTA_RS_BRANCH="${ref}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+  print_ref_not_found_guidance "${ref}"
+  return 1
 }
 
 if [[ -n "${BASE_SHA_OVERRIDE}" ]] && ! is_commit_sha "${BASE_SHA_OVERRIDE}"; then
@@ -279,6 +330,36 @@ exec_on_runner() {
   fi
 }
 
+if (( WORKING_VS_UPSTREAM_MAIN != 0 )); then
+  if ! exec_on_runner test -d "${DELTA_RS_DIR}/.git"; then
+    run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+  fi
+
+  working_head_sha="$(exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD)"
+
+  upstream_remote="${UPSTREAM_REMOTE_OVERRIDE:-}"
+  if [[ -z "${upstream_remote}" ]]; then
+    if exec_on_runner git -C "${DELTA_RS_DIR}" remote get-url upstream >/dev/null 2>&1; then
+      upstream_remote="upstream"
+    else
+      upstream_remote="origin"
+    fi
+  fi
+
+  if ! exec_on_runner git -C "${DELTA_RS_DIR}" remote get-url "${upstream_remote}" >/dev/null 2>&1; then
+    echo "remote '${upstream_remote}' is not configured in delta-rs checkout '${DELTA_RS_DIR}'." >&2
+    exit 1
+  fi
+
+  run_step git -C "${DELTA_RS_DIR}" fetch "${upstream_remote}" main
+  upstream_main_sha="$(exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify "refs/remotes/${upstream_remote}/main^{commit}")"
+
+  candidate_ref="${working_head_sha}"
+  base_ref="${upstream_main_sha}"
+  candidate_ref_mode="commit"
+  base_ref_mode="commit"
+fi
+
 run_security_check() {
   local check_cmd=(./scripts/security_check.sh)
   if (( ENFORCE_RUN_MODE != 0 )); then
@@ -302,6 +383,9 @@ run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 
 base_label="base-$(sanitize_label "${base_ref}")"
 cand_label="cand-$(sanitize_label "${candidate_ref}")"
+
+ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"
+ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"
 
 prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh

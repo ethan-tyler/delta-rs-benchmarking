@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -87,6 +88,26 @@ def test_compare_branch_supports_explicit_sha_flags() -> None:
     assert re.search(r"if \[\[ \"\$\{mode\}\" == \"commit\" \]\]; then", script)
 
 
+def test_compare_branch_supports_working_branch_vs_upstream_main_shortcut() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "--working-vs-upstream-main" in script
+    assert "--upstream-remote <name>" in script
+    assert re.search(r"WORKING_VS_UPSTREAM_MAIN=0", script)
+    assert re.search(r"UPSTREAM_REMOTE_OVERRIDE=\"\"", script)
+    assert re.search(
+        r"if \(\( WORKING_VS_UPSTREAM_MAIN != 0 \)\); then[\s\S]*candidate_ref=\"\$\{working_head_sha\}\"",
+        script,
+    )
+    assert re.search(
+        r"if \(\( WORKING_VS_UPSTREAM_MAIN != 0 \)\); then[\s\S]*base_ref=\"\$\{upstream_main_sha\}\"",
+        script,
+    )
+    assert re.search(
+        r"git -C \"\$\{DELTA_RS_DIR\}\" fetch \"\$\{upstream_remote\}\" main",
+        script,
+    )
+
+
 def test_compare_branch_prefers_existing_branch_refs_before_sha_fallback() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "branch_ref_exists" in script
@@ -103,6 +124,17 @@ def test_compare_branch_prefers_existing_branch_refs_before_sha_fallback() -> No
         r"if is_commit_sha \"\$\{ref\}\"; then\s+run_step env DELTA_RS_REF=",
         script,
         flags=re.DOTALL,
+    )
+
+
+def test_compare_branch_emits_clear_missing_ref_guidance() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "benchmark ref '${ref}' not found in delta-rs checkout" in script
+    assert "--candidate-sha" in script
+    assert "git -C \"${DELTA_RS_DIR}\" branch -a" in script
+    assert re.search(
+        r"ensure_known_ref_mode \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"[\s\S]*prepare_delta_rs_ref \"\$\{base_ref\}\"",
+        script,
     )
 
 
@@ -141,3 +173,20 @@ def test_non_pr_workflows_do_not_use_advisory_mode_wording() -> None:
     prerelease = PRERELEASE_WORKFLOW.read_text(encoding="utf-8")
     assert "advisory" not in nightly.lower()
     assert "advisory" not in prerelease.lower()
+
+
+def test_bench_wrapper_help_is_structured_and_readable() -> None:
+    result = subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "bench.sh"), "--help"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert "Usage:" in result.stdout
+    assert "Commands:" in result.stdout
+    assert "Data command options:" in result.stdout
+    assert "Run command options:" in result.stdout
+    assert "-h, --help" in result.stdout

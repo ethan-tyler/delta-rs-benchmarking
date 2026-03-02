@@ -126,23 +126,31 @@ fn unknown_target_returns_error() {
 }
 
 #[test]
-fn legacy_scan_target_alias_resolves_to_scan_cases() {
-    let canonical = list_cases_for_target("scan").expect("canonical target should work");
-    let legacy = list_cases_for_target("read_scan").expect("legacy target alias should work");
-    assert_eq!(legacy, canonical);
+fn legacy_scan_target_alias_is_rejected() {
+    let err = list_cases_for_target("read_scan")
+        .expect_err("legacy target alias should return an explicit error");
+    assert!(
+        err.to_string().contains("unknown suite target"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
-fn legacy_delete_update_target_alias_resolves_to_delete_update_cases() {
-    let canonical = list_cases_for_target("delete_update").expect("canonical target should work");
-    let legacy =
-        list_cases_for_target("delete_update_dml").expect("legacy target alias should work");
-    assert_eq!(legacy, canonical);
+fn legacy_delete_update_target_alias_is_rejected() {
+    let err = list_cases_for_target("delete_update_dml")
+        .expect_err("legacy target alias should return an explicit error");
+    assert!(
+        err.to_string().contains("unknown suite target"),
+        "unexpected error: {err}"
+    );
 }
 
 #[test]
-fn legacy_merge_target_alias_resolves_to_merge_cases() {
-    let canonical = list_cases_for_target("merge").expect("canonical target should work");
-    let legacy = list_cases_for_target("merge_dml").expect("legacy target alias should work");
-    assert_eq!(legacy, canonical);
+fn legacy_merge_target_alias_is_rejected() {
+    let err = list_cases_for_target("merge_dml")
+        .expect_err("legacy target alias should return an explicit error");
+    assert!(
+        err.to_string().contains("unknown suite target"),
+        "unexpected error: {err}"
+    );
 }

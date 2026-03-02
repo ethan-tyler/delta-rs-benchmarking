@@ -195,12 +195,7 @@ pub fn list_cases_for_target(target: &str) -> BenchResult<Vec<String>> {
 }
 
 fn canonical_suite_target(target: &str) -> &str {
-    match target {
-        "read_scan" => "scan",
-        "delete_update_dml" => "delete_update",
-        "merge_dml" => "merge",
-        other => other,
-    }
+    target
 }
 
 fn validate_runner_target(runner: RunnerMode, target: &str) -> BenchResult<()> {

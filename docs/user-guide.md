@@ -11,6 +11,18 @@ Prepare a managed `delta-rs` checkout and sync the harness:
 ./scripts/sync_harness_to_delta_rs.sh
 ```
 
+Use an existing local `delta-rs` clone (instead of managed `.delta-rs-under-test`):
+
+```bash
+DELTA_RS_DIR=/path/to/your/delta-rs \
+DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
+./scripts/sync_harness_to_delta_rs.sh
+
+DELTA_RS_DIR=/path/to/your/delta-rs \
+DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
+./scripts/bench.sh doctor
+```
+
 ## Generate fixtures and run suites
 
 Generate deterministic fixture data:
@@ -62,8 +74,11 @@ ingestion.
 Run sequential base-vs-candidate comparison using branch names:
 
 ```bash
-./scripts/compare_branch.sh main candidate-branch all
+./scripts/compare_branch.sh main <candidate_ref> all
 ```
+
+`<candidate_ref>` must be a real branch in `.delta-rs-under-test`.
+If unsure, run `git -C .delta-rs-under-test branch -a` first.
 
 Pin exact commits to avoid ref drift during long runs:
 
@@ -150,7 +165,7 @@ Example:
   --enforce-run-mode \
   --require-no-public-ipv4 \
   --require-egress-policy \
-  main candidate-branch all
+  main <candidate_ref> all
 ```
 
 For run-mode operations and provisioning constraints, use the dedicated runbook: [security-runner.md](security-runner.md).

@@ -10,11 +10,16 @@ FIXTURES_DIR="${DELTA_BENCH_FIXTURES:-${ROOT_DIR}/fixtures}"
 RESULTS_DIR="${DELTA_BENCH_RESULTS:-${ROOT_DIR}/results}"
 LABEL="${DELTA_BENCH_LABEL:-local}"
 BACKEND_PROFILE="${DELTA_BENCH_BACKEND_PROFILE:-}"
+DELTA_BENCH_SUPPRESS_RUST_WARNINGS="${DELTA_BENCH_SUPPRESS_RUST_WARNINGS:-1}"
 
 run_delta_bench() {
   (
     cd "${DELTA_BENCH_EXEC_ROOT}"
-    cargo run -p delta-bench -- "$@"
+    if [[ "${DELTA_BENCH_SUPPRESS_RUST_WARNINGS}" == "1" ]]; then
+      RUSTFLAGS="${RUSTFLAGS:-} -Awarnings" cargo run --quiet -p delta-bench -- "$@"
+    else
+      cargo run -p delta-bench -- "$@"
+    fi
   )
 }
 
@@ -59,6 +64,7 @@ Run command options:
     --runner <rust|python|all>
     --warmup <N>
     --iters <N>
+    --no-summary-table
     --label <L>
     --storage-backend <local|s3>
     --storage-option <KEY=VALUE> (repeatable)
@@ -71,6 +77,7 @@ Other commands:
 Environment:
   DELTA_BENCH_EXEC_ROOT=/path/to/cargo/workspace
   DELTA_RS_DIR=/path/to/.delta-rs-under-test
+  DELTA_BENCH_SUPPRESS_RUST_WARNINGS=1   # set 0 to show compiler warnings
 EOF
 }
 
@@ -139,6 +146,7 @@ case "${cmd}" in
     runner="all"
     warmup="1"
     iters="5"
+    no_summary_table=0
     storage_backend="local"
     storage_options=()
 
@@ -151,6 +159,7 @@ case "${cmd}" in
         --runner) runner="$2"; shift 2 ;;
         --warmup) warmup="$2"; shift 2 ;;
         --iters) iters="$2"; shift 2 ;;
+        --no-summary-table) no_summary_table=1; shift 1 ;;
         --label) LABEL="$2"; shift 2 ;;
         --storage-backend) storage_backend="$2"; shift 2 ;;
         --storage-option) storage_options+=("$2"); shift 2 ;;
@@ -183,6 +192,9 @@ case "${cmd}" in
     fi
     if [[ -n "${case_filter}" ]]; then
       run_args+=(--case-filter "${case_filter}")
+    fi
+    if (( no_summary_table != 0 )); then
+      run_args+=(--no-summary-table)
     fi
 
     cmd_args=(

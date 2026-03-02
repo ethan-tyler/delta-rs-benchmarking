@@ -24,7 +24,7 @@
 4. `delta-bench run` resolves runner mode (`rust|python|all`) from manifest-planned cases and executes:
    - Rust suites against `deltalake-core`
    - Python interoperability suite through `python/delta_bench_interop/run_case.py`
-5. Results are written as schema v2 JSON to `results/<label>/<suite>.json`.
+5. `delta-bench run` prints a per-case terminal summary table and writes schema v2 JSON results to `results/<label>/<suite>.json`.
 6. `compare.py` reads baseline/candidate result JSON (schema v2 only) and classifies per-case changes.
 7. `security_check.sh` runs before benchmark execution to validate security/fidelity invariants.
 8. Manual compare script prints markdown output suitable for PR comments.

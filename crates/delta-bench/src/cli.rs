@@ -85,6 +85,8 @@ pub enum Command {
         warmup: u32,
         #[arg(long, default_value_t = 5)]
         iterations: u32,
+        #[arg(long)]
+        no_summary_table: bool,
     },
     Doctor,
 }

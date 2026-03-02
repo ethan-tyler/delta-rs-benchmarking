@@ -7,7 +7,7 @@ use delta_bench::cli::{parse_storage_options, validate_label, Args, Command, Run
 use delta_bench::data::fixtures::{generate_fixtures_with_profile, FixtureProfile};
 use delta_bench::error::BenchResult;
 use delta_bench::manifests::{ensure_required_manifests_exist, DatasetId};
-use delta_bench::results::{BenchContext, BenchRunResult};
+use delta_bench::results::{render_run_summary_table, BenchContext, BenchRunResult};
 use delta_bench::storage::{load_backend_profile_options, StorageConfig};
 use delta_bench::suites::{
     apply_dataset_assertion_policy, list_targets, plan_run_cases, run_planned_cases,
@@ -70,6 +70,7 @@ async fn main() -> BenchResult<()> {
             runner,
             warmup,
             iterations,
+            no_summary_table,
         } => {
             let effective_scale = resolve_scale(&scale, dataset_id.as_deref())?;
             validate_label(&args.label)?;
@@ -124,6 +125,17 @@ async fn main() -> BenchResult<()> {
             fs::create_dir_all(&out_dir)?;
             let out_file = out_dir.join(format!("{target}.json"));
             fs::write(out_file.clone(), serde_json::to_vec_pretty(&output)?)?;
+            if !no_summary_table {
+                let ok_count = output.cases.iter().filter(|case| case.success).count();
+                let failed_count = output.cases.len().saturating_sub(ok_count);
+                println!(
+                    "run summary: {} case(s), {} ok, {} failed",
+                    output.cases.len(),
+                    ok_count,
+                    failed_count
+                );
+                println!("{}", render_run_summary_table(&output.cases));
+            }
             println!("wrote result: {}", out_file.display());
         }
         Command::Doctor => {

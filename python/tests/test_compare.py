@@ -275,6 +275,8 @@ def test_render_markdown_includes_summary_table() -> None:
 
     comparison = compare_runs(base, cand, threshold=0.05)
     out = render_markdown(comparison)
+    assert "Case | baseline | candidate | delta_pct | change" in out
+    assert "a | 100.00 ms | 90.00 ms | -10.00% | 1.11x faster" in out
     assert "| metric | value |" in out
 
 
@@ -311,7 +313,11 @@ def test_render_text_default_output_does_not_include_metric_columns() -> None:
 
     comparison = compare_runs(base, cand, threshold=0.05)
     out = render_text(comparison)
-    assert "Case | baseline | candidate | change" in out
+    assert "Summary:" in out
+    assert "Improvements (faster):" in out
+    assert "Case" in out and "baseline" in out and "delta_pct" in out
+    assert "-10.00%" in out
+    assert "1.11x faster" in out
     assert "files_scanned" not in out
     assert "files_pruned" not in out
 
@@ -361,6 +367,7 @@ def test_render_text_include_metrics_outputs_metric_columns() -> None:
 
     comparison = compare_runs(base, cand, threshold=0.05)
     out = render_text(comparison, include_metrics=True)
+    assert "Summary:" in out
     assert "baseline_files_scanned" in out
     assert "candidate_files_scanned" in out
     assert "baseline_files_pruned" in out
@@ -371,6 +378,44 @@ def test_render_text_include_metrics_outputs_metric_columns() -> None:
     assert "candidate_scan_time_ms" in out
     assert "baseline_rewrite_time_ms" in out
     assert "candidate_rewrite_time_ms" in out
+
+
+def test_render_text_groups_cases_into_readable_sections() -> None:
+    base = _run(
+        [
+            {"case": "slower_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {"case": "faster_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {"case": "stable_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {
+                "case": "incomparable_case",
+                "success": False,
+                "failure": {"message": "boom"},
+                "samples": [],
+            },
+        ]
+    )
+    cand = _run(
+        [
+            {"case": "slower_case", "success": True, "samples": [{"elapsed_ms": 120.0}]},
+            {"case": "faster_case", "success": True, "samples": [{"elapsed_ms": 90.0}]},
+            {"case": "stable_case", "success": True, "samples": [{"elapsed_ms": 103.0}]},
+            {
+                "case": "incomparable_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 95.0}],
+            },
+        ]
+    )
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison)
+    assert "Summary:" in out
+    assert "Regressions (slower):" in out
+    assert "Improvements (faster):" in out
+    assert "Stable (no change):" in out
+    assert "Needs Attention:" in out
+    assert out.index("Regressions (slower):") < out.index("Improvements (faster):")
 
 
 def test_render_markdown_include_metrics_outputs_metric_columns() -> None:
@@ -420,6 +465,50 @@ def test_render_markdown_include_metrics_outputs_metric_columns() -> None:
     out = render_markdown(comparison, include_metrics=True)
     assert "baseline_files_scanned" in out
     assert "candidate_rewrite_time_ms" in out
+
+
+def test_render_markdown_groups_cases_into_readable_sections() -> None:
+    base = _run(
+        [
+            {"case": "slower_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {"case": "faster_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {"case": "stable_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {
+                "case": "incomparable_case",
+                "success": False,
+                "failure": {"message": "boom"},
+                "samples": [],
+            },
+        ]
+    )
+    cand = _run(
+        [
+            {"case": "slower_case", "success": True, "samples": [{"elapsed_ms": 120.0}]},
+            {"case": "faster_case", "success": True, "samples": [{"elapsed_ms": 90.0}]},
+            {"case": "stable_case", "success": True, "samples": [{"elapsed_ms": 103.0}]},
+            {
+                "case": "incomparable_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 95.0}],
+            },
+        ]
+    )
+
+    from delta_bench_compare.compare import render_markdown
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_markdown(comparison)
+
+    assert "## Summary" in out
+    assert "## Regressions (slower)" in out
+    assert "## Improvements (faster)" in out
+    assert "## Stable (no change)" in out
+    assert "## Needs Attention" in out
+    assert "slower_case" in out
+    assert "faster_case" in out
+    assert "stable_case" in out
+    assert "incomparable_case" in out
+    assert out.index("## Regressions (slower)") < out.index("## Improvements (faster)")
 
 
 def test_compare_cli_rejects_removed_ci_policy_flags(tmp_path: Path) -> None:

@@ -13,7 +13,8 @@ Managed checkout mode (recommended first run):
 ./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
-Results are written to `results/<label>/<suite>.json`.
+`run` prints a per-case summary table in the terminal, and detailed results are written to `results/<label>/<suite>.json` (pass `--no-summary-table` to suppress table output).
+Rust compiler warnings are suppressed by default in `scripts/bench.sh` output; set `DELTA_BENCH_SUPPRESS_RUST_WARNINGS=0` to show them.
 
 Use your existing local `delta-rs` checkout instead of `.delta-rs-under-test`:
 

@@ -313,6 +313,10 @@ run_step() {
   run_with_retry exec_on_runner "$@"
 }
 
+run_step_no_retry() {
+  exec_on_runner "$@"
+}
+
 exec_on_runner() {
   if [[ -n "${REMOTE_RUNNER}" ]]; then
     local remote_cmd=""
@@ -330,6 +334,23 @@ exec_on_runner() {
     )
   fi
 }
+
+cleanup_harness_overlay_untracked() {
+  local managed_paths=(
+    "crates/delta-bench"
+    "bench/manifests"
+    "backends"
+    "python/delta_bench_interop"
+    "python/delta_bench_tpcds"
+  )
+  local path
+  for path in "${managed_paths[@]}"; do
+    # Keep delta-rs checkout reusable and avoid stash-pop collisions after compare runs.
+    exec_on_runner git -C "${DELTA_RS_DIR}" clean -fd -- "${path}" >/dev/null 2>&1 || true
+  done
+}
+
+trap cleanup_harness_overlay_untracked EXIT
 
 if (( WORKING_VS_UPSTREAM_MAIN != 0 )); then
   if ! exec_on_runner test -d "${DELTA_RS_DIR}/.git"; then
@@ -391,17 +412,17 @@ ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"
 prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
+run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
+run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
 prepare_delta_rs_ref "${candidate_ref}" "${candidate_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${cand_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
+run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${cand_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
 base_json="${RUNNER_RESULTS_DIR}/${base_label}/${suite}.json"
 cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"
 
-compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format markdown)
+compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"

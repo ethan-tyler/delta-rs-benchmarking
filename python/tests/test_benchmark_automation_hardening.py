@@ -62,12 +62,34 @@ def test_compare_branch_supports_storage_backend_passthrough() -> None:
     assert re.search(r"\./scripts/bench\.sh run .*\"\$\{storage_args\[@\]\}\"", script)
 
 
+def test_compare_branch_does_not_retry_benchmark_producing_steps() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "run_step_no_retry()" in script
+    assert re.search(
+        r"run_step_no_retry env .*?/scripts/bench\.sh data --scale sf1 --seed 42",
+        script,
+    )
+    assert len(re.findall(r"run_step_no_retry env .*?/scripts/bench\.sh run --scale sf1", script)) == 2
+
+
+def test_compare_branch_cleans_untracked_harness_overlay_on_exit() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "cleanup_harness_overlay_untracked" in script
+    assert re.search(r"git -C \"\$\{DELTA_RS_DIR\}\" clean -fd -- \"\$\{path\}\"", script)
+    assert "crates/delta-bench" in script
+    assert "bench/manifests" in script
+    assert "backends" in script
+    assert "python/delta_bench_interop" in script
+    assert "python/delta_bench_tpcds" in script
+    assert re.search(r"trap cleanup_harness_overlay_untracked EXIT", script)
+
+
 def test_compare_branch_supports_aggregation_passthrough() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "--aggregation <min|median|p95>" in script
     assert re.search(r"AGGREGATION=\"\$\{BENCH_AGGREGATION:-median\}\"", script)
     assert re.search(
-        r"compare_args=\(--noise-threshold \"\$\{NOISE_THRESHOLD\}\" --aggregation \"\$\{AGGREGATION\}\" --format markdown\)",
+        r"compare_args=\(--noise-threshold \"\$\{NOISE_THRESHOLD\}\" --aggregation \"\$\{AGGREGATION\}\" --format text\)",
         script,
     )
 
@@ -147,6 +169,18 @@ def test_prepare_delta_rs_supports_immutable_ref_checkout() -> None:
     assert "pull --ff-only origin" in script
 
 
+def test_prepare_delta_rs_cleans_untracked_harness_overlay_before_checkout() -> None:
+    script = PREPARE_DELTA_RS.read_text(encoding="utf-8")
+    assert "cleanup_harness_overlay_untracked" in script
+    assert re.search(r"git -C \"\$\{DELTA_RS_DIR\}\" clean -fd -- \"\$\{path\}\"", script)
+    assert "crates/delta-bench" in script
+    assert "bench/manifests" in script
+    assert "backends" in script
+    assert "python/delta_bench_interop" in script
+    assert "python/delta_bench_tpcds" in script
+    assert re.search(r"cleanup_harness_overlay_untracked\s+git -C \"\$\{DELTA_RS_DIR\}\" fetch origin", script)
+
+
 def test_benchmark_workflow_accepts_optional_storage_configuration() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "BENCH_STORAGE_BACKEND" in workflow
@@ -190,4 +224,25 @@ def test_bench_wrapper_help_is_structured_and_readable() -> None:
     assert "Commands:" in result.stdout
     assert "Data command options:" in result.stdout
     assert "Run command options:" in result.stdout
+    assert "--no-summary-table" in result.stdout
     assert "-h, --help" in result.stdout
+
+
+def test_bench_wrapper_supports_no_summary_table_passthrough() -> None:
+    script = (REPO_ROOT / "scripts" / "bench.sh").read_text(encoding="utf-8")
+    assert "--no-summary-table" in script
+    assert re.search(r"--no-summary-table\)\s+no_summary_table=1; shift 1 ;;", script)
+    assert re.search(
+        r"if \(\( no_summary_table != 0 \)\); then\s+run_args\+=\(--no-summary-table\)",
+        script,
+    )
+
+
+def test_bench_wrapper_suppresses_rust_warnings_by_default() -> None:
+    script = (REPO_ROOT / "scripts" / "bench.sh").read_text(encoding="utf-8")
+    assert re.search(
+        r'DELTA_BENCH_SUPPRESS_RUST_WARNINGS="\$\{DELTA_BENCH_SUPPRESS_RUST_WARNINGS:-1\}"',
+        script,
+    )
+    assert "RUSTFLAGS=\"${RUSTFLAGS:-} -Awarnings\"" in script
+    assert "--quiet -p delta-bench --" in script

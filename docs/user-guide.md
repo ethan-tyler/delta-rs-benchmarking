@@ -37,7 +37,9 @@ Run benchmark suites:
 ./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
-Outputs are written to `results/<label>/<suite>.json`.
+`run` prints a per-case summary table in the terminal, and detailed outputs are written to `results/<label>/<suite>.json`.
+Use `--no-summary-table` for quieter CI/log output.
+`scripts/bench.sh` suppresses Rust compiler warnings by default; set `DELTA_BENCH_SUPPRESS_RUST_WARNINGS=0` to re-enable warning output.
 
 ## DuckDB-backed TPC-DS fixture profile (`tpcds_duckdb`)
 
@@ -95,7 +97,8 @@ The compare workflow will:
 2. Sync this repo's harness into the `delta-rs` workspace.
 3. Benchmark the base ref.
 4. Benchmark the candidate ref.
-5. Print a markdown comparison table.
+5. Print a terminal comparison report with grouped sections (`Regressions`, `Improvements`,
+   `Stable`, `Needs Attention`) and a `delta_pct` column for per-case percentage difference.
 
 Useful tuning options:
 

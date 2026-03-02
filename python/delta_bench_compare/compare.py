@@ -4,7 +4,10 @@ import argparse
 import math
 from pathlib import Path
 
-from .formatting import render_markdown as render_markdown_output, render_text_table
+from .formatting import (
+    render_markdown as render_markdown_output,
+    render_text_report,
+)
 from .model import Comparison, ComparisonRow, SampleMetricSnapshot, Summary
 from .schema import case_classification, load_benchmark_payload
 
@@ -214,15 +217,7 @@ def _load(path: Path) -> dict:
 
 
 def render_text(comparison: Comparison, include_metrics: bool = False) -> str:
-    lines = [render_text_table(comparison, include_metrics=include_metrics)]
-    lines.append("")
-    s = comparison.summary
-    lines.append(
-        "summary: "
-        f"faster={s.faster} slower={s.slower} no_change={s.no_change} "
-        f"incomparable={s.incomparable} new={s.new} removed={s.removed}"
-    )
-    return "\n".join(lines)
+    return render_text_report(comparison, include_metrics=include_metrics)
 
 
 def render_markdown(comparison: Comparison, include_metrics: bool = False) -> str:

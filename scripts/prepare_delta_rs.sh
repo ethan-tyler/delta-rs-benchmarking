@@ -9,11 +9,27 @@ DELTA_RS_BRANCH="${DELTA_RS_BRANCH:-main}"
 DELTA_RS_REF="${DELTA_RS_REF:-}"
 DELTA_RS_REF_TYPE="${DELTA_RS_REF_TYPE:-auto}"
 
+cleanup_harness_overlay_untracked() {
+  local managed_paths=(
+    "crates/delta-bench"
+    "bench/manifests"
+    "backends"
+    "python/delta_bench_interop"
+    "python/delta_bench_tpcds"
+  )
+  local path
+  for path in "${managed_paths[@]}"; do
+    # Keep checkout transitions idempotent by removing untracked synced harness artifacts.
+    git -C "${DELTA_RS_DIR}" clean -fd -- "${path}" >/dev/null
+  done
+}
+
 if [[ ! -d "${DELTA_RS_DIR}/.git" ]]; then
   echo "cloning ${DELTA_RS_REPO_URL} into ${DELTA_RS_DIR}"
   git clone --origin origin "${DELTA_RS_REPO_URL}" "${DELTA_RS_DIR}"
 fi
 
+cleanup_harness_overlay_untracked
 git -C "${DELTA_RS_DIR}" fetch origin
 
 if [[ -n "${DELTA_RS_REF}" ]]; then

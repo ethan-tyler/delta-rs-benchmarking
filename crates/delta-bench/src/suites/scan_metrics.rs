@@ -41,6 +41,7 @@ pub(crate) fn extract_scan_metrics(plan: &Arc<dyn ExecutionPlan>) -> ScanMetrics
     }
 }
 
+// Recursive aggregation updates eight independent accumulators in-place.
 #[allow(clippy::too_many_arguments)]
 fn collect_scan_metrics(
     plan: &Arc<dyn ExecutionPlan>,

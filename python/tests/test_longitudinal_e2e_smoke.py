@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from delta_bench_longitudinal.artifacts import (
     artifact_binary_path,
@@ -16,6 +17,84 @@ from delta_bench_longitudinal.revisions import (
     write_manifest,
 )
 from delta_bench_longitudinal.store import load_longitudinal_rows
+
+
+def _make_fake_build(
+    artifacts_dir: Path,
+    *,
+    write_metadata: bool = True,
+):  # type: ignore[no-untyped-def]
+    """Factory for a fake build function that can optionally persist metadata."""
+
+    def fake_build(**kwargs):  # type: ignore[no-untyped-def]
+        revision = kwargs["revision"]
+        binary = artifact_binary_path(artifacts_dir, revision)
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        metadata = {
+            "revision": revision,
+            "commit_timestamp": kwargs["commit_timestamp"],
+            "build_timestamp": "2026-02-01T00:00:00+00:00",
+            "rust_toolchain": "stable",
+            "status": "success",
+            "artifact_path": str(binary),
+            "error": None,
+        }
+        if write_metadata:
+            metadata_path = artifact_metadata_path(artifacts_dir, revision)
+            metadata_path.parent.mkdir(parents=True, exist_ok=True)
+            metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        return metadata
+
+    return fake_build
+
+
+def _make_fake_executor(
+    results_dir: Path,
+    label_fn: Callable[..., str] | None = None,
+):  # type: ignore[no-untyped-def]
+    """Factory for a fake matrix executor that writes result JSON files.
+
+    Args:
+        results_dir: Directory where results will be written.
+        label_fn: Optional callable(artifact, scale) -> str for custom labels.
+            Defaults to ``f"longitudinal-{artifact.revision}"``.
+    """
+
+    def fake_matrix_executor(artifact, suite, scale, attempt, timeout):  # type: ignore[no-untyped-def]
+        if label_fn is not None:
+            label = label_fn(artifact, scale)
+        else:
+            label = f"longitudinal-{artifact.revision}"
+        out_dir = results_dir / label
+        out_dir.mkdir(parents=True, exist_ok=True)
+        result = {
+            "schema_version": 2,
+            "context": {
+                "schema_version": 2,
+                "label": label,
+                "git_sha": artifact.revision,
+                "created_at": "2026-02-02T00:00:00+00:00",
+                "host": "host",
+                "suite": suite,
+                "scale": scale,
+                "iterations": 1,
+                "warmup": 0,
+            },
+            "cases": [
+                {
+                    "case": "scan_all",
+                    "classification": "supported",
+                    "success": True,
+                    "samples": [{"elapsed_ms": 100.0}],
+                    "failure": None,
+                }
+            ],
+        }
+        (out_dir / f"{suite}.json").write_text(json.dumps(result), encoding="utf-8")
+        return 0, ""
+
+    return fake_matrix_executor
 
 
 def test_smoke_build_run_report_flow(tmp_path: Path) -> None:
@@ -42,54 +121,6 @@ def test_smoke_build_run_report_flow(tmp_path: Path) -> None:
     reports_dir = tmp_path / "reports"
     state_path = tmp_path / "matrix_state.json"
 
-    def fake_build(**kwargs):  # type: ignore[no-untyped-def]
-        revision = kwargs["revision"]
-        binary = artifact_binary_path(artifacts_dir, revision)
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-        metadata = {
-            "revision": revision,
-            "commit_timestamp": kwargs["commit_timestamp"],
-            "build_timestamp": "2026-02-01T00:00:00+00:00",
-            "rust_toolchain": "stable",
-            "status": "success",
-            "artifact_path": str(binary),
-            "error": None,
-        }
-        metadata_path = artifact_metadata_path(artifacts_dir, revision)
-        metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-        return metadata
-
-    def fake_matrix_executor(artifact, suite, scale, attempt, timeout):  # type: ignore[no-untyped-def]
-        label = f"longitudinal-{artifact.revision}"
-        out_dir = results_dir / label
-        out_dir.mkdir(parents=True, exist_ok=True)
-        result = {
-            "schema_version": 1,
-            "context": {
-                "schema_version": 1,
-                "label": label,
-                "git_sha": artifact.revision,
-                "created_at": "2026-02-02T00:00:00+00:00",
-                "host": "host",
-                "suite": suite,
-                "scale": scale,
-                "iterations": 1,
-                "warmup": 0,
-            },
-            "cases": [
-                {
-                    "case": "scan_all",
-                    "success": True,
-                    "samples": [{"elapsed_ms": 100.0}],
-                    "failure": None,
-                }
-            ],
-        }
-        (out_dir / f"{suite}.json").write_text(json.dumps(result), encoding="utf-8")
-        return 0, ""
-
     summary = orchestrate_from_manifest(
         manifest_path=manifest_path,
         artifacts_dir=artifacts_dir,
@@ -109,8 +140,8 @@ def test_smoke_build_run_report_flow(tmp_path: Path) -> None:
         regression_threshold=0.05,
         significance_method="none",
         significance_alpha=0.05,
-        build_fn=fake_build,
-        matrix_executor=fake_matrix_executor,
+        build_fn=_make_fake_build(artifacts_dir),
+        matrix_executor=_make_fake_executor(results_dir),
     )
 
     assert summary["built"] == 1
@@ -145,54 +176,6 @@ def test_orchestrate_uses_sanitized_label_prefix_for_ingest(tmp_path: Path) -> N
     state_path = tmp_path / "matrix_state.json"
     label_prefix = "nightly/bench"
 
-    def fake_build(**kwargs):  # type: ignore[no-untyped-def]
-        revision = kwargs["revision"]
-        binary = artifact_binary_path(artifacts_dir, revision)
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-        metadata = {
-            "revision": revision,
-            "commit_timestamp": kwargs["commit_timestamp"],
-            "build_timestamp": "2026-02-01T00:00:00+00:00",
-            "rust_toolchain": "stable",
-            "status": "success",
-            "artifact_path": str(binary),
-            "error": None,
-        }
-        metadata_path = artifact_metadata_path(artifacts_dir, revision)
-        metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
-        return metadata
-
-    def fake_matrix_executor(artifact, suite, scale, attempt, timeout):  # type: ignore[no-untyped-def]
-        label = sanitize_label(f"{label_prefix}-{artifact.revision}")
-        out_dir = results_dir / label
-        out_dir.mkdir(parents=True, exist_ok=True)
-        result = {
-            "schema_version": 1,
-            "context": {
-                "schema_version": 1,
-                "label": label,
-                "git_sha": artifact.revision,
-                "created_at": "2026-02-02T00:00:00+00:00",
-                "host": "host",
-                "suite": suite,
-                "scale": scale,
-                "iterations": 1,
-                "warmup": 0,
-            },
-            "cases": [
-                {
-                    "case": "scan_all",
-                    "success": True,
-                    "samples": [{"elapsed_ms": 100.0}],
-                    "failure": None,
-                }
-            ],
-        }
-        (out_dir / f"{suite}.json").write_text(json.dumps(result), encoding="utf-8")
-        return 0, ""
-
     summary = orchestrate_from_manifest(
         manifest_path=manifest_path,
         artifacts_dir=artifacts_dir,
@@ -213,8 +196,13 @@ def test_orchestrate_uses_sanitized_label_prefix_for_ingest(tmp_path: Path) -> N
         significance_method="none",
         significance_alpha=0.05,
         label_prefix=label_prefix,
-        build_fn=fake_build,
-        matrix_executor=fake_matrix_executor,
+        build_fn=_make_fake_build(artifacts_dir),
+        matrix_executor=_make_fake_executor(
+            results_dir,
+            label_fn=lambda artifact, scale: sanitize_label(
+                f"{label_prefix}-{artifact.revision}"
+            ),
+        ),
     )
 
     assert summary["ingested_rows"] == 1
@@ -244,50 +232,6 @@ def test_orchestrate_ingests_distinct_scales(tmp_path: Path) -> None:
     reports_dir = tmp_path / "reports"
     state_path = tmp_path / "matrix_state.json"
 
-    def fake_build(**kwargs):  # type: ignore[no-untyped-def]
-        revision = kwargs["revision"]
-        binary = artifact_binary_path(artifacts_dir, revision)
-        binary.parent.mkdir(parents=True, exist_ok=True)
-        binary.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
-        return {
-            "revision": revision,
-            "commit_timestamp": kwargs["commit_timestamp"],
-            "build_timestamp": "2026-02-01T00:00:00+00:00",
-            "rust_toolchain": "stable",
-            "status": "success",
-            "artifact_path": str(binary),
-            "error": None,
-        }
-
-    def fake_matrix_executor(artifact, suite, scale, attempt, timeout):  # type: ignore[no-untyped-def]
-        label = f"longitudinal-{artifact.revision}-{scale}"
-        out_dir = results_dir / label
-        out_dir.mkdir(parents=True, exist_ok=True)
-        result = {
-            "schema_version": 1,
-            "context": {
-                "schema_version": 1,
-                "label": label,
-                "git_sha": artifact.revision,
-                "created_at": "2026-02-02T00:00:00+00:00",
-                "host": "host",
-                "suite": suite,
-                "scale": scale,
-                "iterations": 1,
-                "warmup": 0,
-            },
-            "cases": [
-                {
-                    "case": "scan_all",
-                    "success": True,
-                    "samples": [{"elapsed_ms": 100.0}],
-                    "failure": None,
-                }
-            ],
-        }
-        (out_dir / f"{suite}.json").write_text(json.dumps(result), encoding="utf-8")
-        return 0, ""
-
     summary = orchestrate_from_manifest(
         manifest_path=manifest_path,
         artifacts_dir=artifacts_dir,
@@ -307,8 +251,12 @@ def test_orchestrate_ingests_distinct_scales(tmp_path: Path) -> None:
         regression_threshold=0.05,
         significance_method="none",
         significance_alpha=0.05,
-        build_fn=fake_build,
-        matrix_executor=fake_matrix_executor,
+        build_fn=_make_fake_build(artifacts_dir, write_metadata=False),
+        matrix_executor=_make_fake_executor(
+            results_dir,
+            label_fn=lambda artifact,
+            scale: f"longitudinal-{artifact.revision}-{scale}",
+        ),
     )
 
     rows = load_longitudinal_rows(store_dir)

@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Any
 
 
-def _load_rows(fixtures_dir: Path, scale: str, limit: int = 5000) -> list[dict[str, Any]]:
+def _load_rows(
+    fixtures_dir: Path, scale: str, limit: int = 5000
+) -> list[dict[str, Any]]:
     path = fixtures_dir / scale / "narrow_sales" / "rows.jsonl"
     rows: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8") as fh:

@@ -4,7 +4,10 @@ import json
 import os
 from pathlib import Path
 
-from delta_bench_longitudinal.store import ingest_benchmark_result, load_longitudinal_rows
+from delta_bench_longitudinal.store import (
+    ingest_benchmark_result,
+    load_longitudinal_rows,
+)
 
 
 def _result_payload() -> dict:

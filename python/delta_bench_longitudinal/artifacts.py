@@ -91,7 +91,9 @@ def build_artifact_from_checkout(
     checkout = Path(checkout_dir)
     metadata_file = artifact_metadata_path(artifacts_dir, revision)
     build_timestamp = datetime.now(timezone.utc).isoformat()
-    command = list(build_command or ["cargo", "build", "-p", "delta-bench", "--release"])
+    command = list(
+        build_command or ["cargo", "build", "-p", "delta-bench", "--release"]
+    )
 
     proc = subprocess.run(
         command,

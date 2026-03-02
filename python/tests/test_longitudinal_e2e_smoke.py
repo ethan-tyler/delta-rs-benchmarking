@@ -4,10 +4,17 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from delta_bench_longitudinal.artifacts import artifact_binary_path, artifact_metadata_path
+from delta_bench_longitudinal.artifacts import (
+    artifact_binary_path,
+    artifact_metadata_path,
+)
 from delta_bench_longitudinal.cli import orchestrate_from_manifest
 from delta_bench_longitudinal.matrix_runner import sanitize_label
-from delta_bench_longitudinal.revisions import RevisionEntry, RevisionManifest, write_manifest
+from delta_bench_longitudinal.revisions import (
+    RevisionEntry,
+    RevisionManifest,
+    write_manifest,
+)
 from delta_bench_longitudinal.store import load_longitudinal_rows
 
 

@@ -20,11 +20,7 @@ class _FakeConnection:
         self.commands.append(sql)
         if self.fail_on and self.fail_on in sql:
             raise RuntimeError(f"forced failure for {self.fail_on}")
-        if (
-            self.fail_once_on
-            and not self._failed_once
-            and self.fail_once_on in sql
-        ):
+        if self.fail_once_on and not self._failed_once and self.fail_once_on in sql:
             self._failed_once = True
             raise RuntimeError(f"forced one-time failure for {self.fail_once_on}")
         if "COPY (" in sql:

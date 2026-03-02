@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import math
-import sys
 from pathlib import Path
 
 from .formatting import render_markdown as render_markdown_output, render_text_table
@@ -24,13 +23,17 @@ def representative_sample(case: dict, aggregation: str = "median") -> dict | Non
     elapsed_samples = [sample for sample in samples if "elapsed_ms" in sample]
     if not elapsed_samples:
         return None
-    sorted_samples = sorted(elapsed_samples, key=lambda sample: float(sample["elapsed_ms"]))
+    sorted_samples = sorted(
+        elapsed_samples, key=lambda sample: float(sample["elapsed_ms"])
+    )
     if aggregation == "min":
         return sorted_samples[0]
     if aggregation == "median":
         return sorted_samples[len(sorted_samples) // 2]
     # Nearest-rank p95
-    idx = max(0, min(len(sorted_samples) - 1, math.ceil(0.95 * len(sorted_samples)) - 1))
+    idx = max(
+        0, min(len(sorted_samples) - 1, math.ceil(0.95 * len(sorted_samples)) - 1)
+    )
     return sorted_samples[idx]
 
 
@@ -224,22 +227,6 @@ def compare_runs(
     return Comparison(rows=rows, summary=summary)
 
 
-def ci_regression_violation(
-    comparison: Comparison,
-    ci_enabled: bool,
-    max_allowed_regressions: int,
-) -> tuple[bool, str]:
-    if not ci_enabled:
-        return False, ""
-    slower = comparison.summary.slower
-    if slower > max_allowed_regressions:
-        return (
-            True,
-            f"slower cases {slower} exceed allowed {max_allowed_regressions}",
-        )
-    return False, ""
-
-
 def _load(path: Path) -> dict:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 2:
@@ -284,19 +271,12 @@ def main() -> None:
     parser.add_argument("baseline", type=Path)
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--noise-threshold", type=float, default=0.05)
-    parser.add_argument("--aggregation", choices=["min", "median", "p95"], default="median")
+    parser.add_argument(
+        "--aggregation", choices=["min", "median", "p95"], default="median"
+    )
     parser.add_argument("--format", choices=["text", "markdown"], default="text")
     parser.add_argument("--include-metrics", action="store_true")
-    parser.add_argument("--ci", action="store_true")
-    parser.add_argument("--max-allowed-regressions", type=int, default=None)
     args = parser.parse_args()
-
-    if args.ci or args.max_allowed_regressions is not None:
-        print(
-            "warning: --ci and --max-allowed-regressions are deprecated and ignored; "
-            "benchmark compare is advisory-only",
-            file=sys.stderr,
-        )
 
     comparison = compare_runs(
         _load(args.baseline),

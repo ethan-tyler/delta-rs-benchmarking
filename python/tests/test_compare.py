@@ -10,7 +10,6 @@ import pytest
 
 from delta_bench_compare.compare import (
     _load,
-    ci_regression_violation,
     compare_runs,
     format_change,
 )
@@ -40,7 +39,12 @@ def test_compare_runs_handles_failures_and_missing_cases() -> None:
     base = _run(
         [
             {"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]},
-            {"case": "b", "success": False, "failure": {"message": "boom"}, "samples": []},
+            {
+                "case": "b",
+                "success": False,
+                "failure": {"message": "boom"},
+                "samples": [],
+            },
             {"case": "only_base", "success": True, "samples": [{"elapsed_ms": 20.0}]},
         ]
     )
@@ -418,44 +422,13 @@ def test_render_markdown_include_metrics_outputs_metric_columns() -> None:
     assert "candidate_rewrite_time_ms" in out
 
 
-def test_ci_policy_fails_when_slower_cases_exceed_allowed() -> None:
-    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
-    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
-    comparison = compare_runs(base, cand, threshold=0.05)
-
-    violates, message = ci_regression_violation(
-        comparison, ci_enabled=True, max_allowed_regressions=0
+def test_compare_cli_rejects_removed_ci_policy_flags(tmp_path: Path) -> None:
+    baseline = _run(
+        [{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}]
     )
-    assert violates is True
-    assert "slower cases" in message
-
-
-def test_ci_policy_passes_when_within_allowed_regressions() -> None:
-    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
-    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
-    comparison = compare_runs(base, cand, threshold=0.05)
-
-    violates, _ = ci_regression_violation(
-        comparison, ci_enabled=True, max_allowed_regressions=1
+    candidate = _run(
+        [{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}]
     )
-    assert violates is False
-
-
-def test_advisory_mode_never_violates_ci_policy() -> None:
-    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
-    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
-    comparison = compare_runs(base, cand, threshold=0.05)
-
-    violates, message = ci_regression_violation(
-        comparison, ci_enabled=False, max_allowed_regressions=0
-    )
-    assert violates is False
-    assert message == ""
-
-
-def test_compare_cli_warns_when_deprecated_ci_flags_are_used(tmp_path: Path) -> None:
-    baseline = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
-    candidate = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 130.0}]}])
     baseline_path = tmp_path / "baseline.json"
     candidate_path = tmp_path / "candidate.json"
     baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
@@ -480,8 +453,8 @@ def test_compare_cli_warns_when_deprecated_ci_flags_are_used(tmp_path: Path) -> 
         env=env,
     )
 
-    assert result.returncode == 0
-    assert "deprecated and ignored" in result.stderr.lower()
+    assert result.returncode != 0
+    assert "unrecognized arguments" in result.stderr.lower()
 
 
 def test_load_rejects_schema_v1_payload(tmp_path: Path) -> None:

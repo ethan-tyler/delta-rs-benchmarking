@@ -57,6 +57,6 @@ Show CLI help:
 
 - Suites: `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `tpcds`, `interop_py`
 - Deterministic fixture generation and normalized result schema
-- Manual branch-to-branch comparison in advisory mode
+- Manual branch-to-branch comparison with result reporting
 - Longitudinal revision benchmarking pipeline with resumable execution
 - Release-tag longitudinal history for `rust-v*` and `python-v*` tracks

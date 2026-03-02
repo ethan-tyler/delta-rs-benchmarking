@@ -105,7 +105,9 @@ def orchestrate_from_manifest(
         executor=matrix_executor,
     )
 
-    revision_to_ts = {entry.commit: entry.commit_timestamp for entry in manifest.revisions}
+    revision_to_ts = {
+        entry.commit: entry.commit_timestamp for entry in manifest.revisions
+    }
     ingested_rows = _ingest_from_state(
         matrix_state=matrix_state,
         results_dir=Path(results_dir),
@@ -169,7 +171,9 @@ def _ingest_from_state(
     return total
 
 
-def _coerce_metadata(value: ArtifactBuildMetadata | dict[str, Any]) -> ArtifactBuildMetadata:
+def _coerce_metadata(
+    value: ArtifactBuildMetadata | dict[str, Any],
+) -> ArtifactBuildMetadata:
     if isinstance(value, ArtifactBuildMetadata):
         return value
     if is_dataclass(value):
@@ -182,7 +186,9 @@ def _load_manifest_artifacts(
     artifacts_dir: Path | str,
 ) -> tuple[list[MatrixArtifact], dict[str, str]]:
     manifest = load_manifest(manifest_path)
-    revision_to_ts = {entry.commit: entry.commit_timestamp for entry in manifest.revisions}
+    revision_to_ts = {
+        entry.commit: entry.commit_timestamp for entry in manifest.revisions
+    }
     artifacts: list[MatrixArtifact] = []
     for entry in manifest.revisions:
         metadata_file = artifact_metadata_path(artifacts_dir, entry.commit)
@@ -222,11 +228,15 @@ def main(argv: list[str] | None = None) -> int:
     select_cmd.add_argument("--release-tag-pattern", default=None)
     select_cmd.add_argument("--output", required=True, type=Path)
 
-    build_cmd = sub.add_parser("build-artifacts", help="Build artifacts for manifest revisions")
+    build_cmd = sub.add_parser(
+        "build-artifacts", help="Build artifacts for manifest revisions"
+    )
     build_cmd.add_argument("--manifest", required=True, type=Path)
     build_cmd.add_argument("--artifacts-dir", required=True, type=Path)
 
-    matrix_cmd = sub.add_parser("run-matrix", help="Run suite/scale matrix for built artifacts")
+    matrix_cmd = sub.add_parser(
+        "run-matrix", help="Run suite/scale matrix for built artifacts"
+    )
     matrix_cmd.add_argument("--manifest", required=True, type=Path)
     matrix_cmd.add_argument("--artifacts-dir", required=True, type=Path)
     matrix_cmd.add_argument("--state-path", required=True, type=Path)
@@ -241,7 +251,9 @@ def main(argv: list[str] | None = None) -> int:
     matrix_cmd.add_argument("--load-check-interval-seconds", type=float, default=5.0)
     matrix_cmd.add_argument("--label-prefix", default="longitudinal")
 
-    ingest_cmd = sub.add_parser("ingest-results", help="Normalize successful matrix results")
+    ingest_cmd = sub.add_parser(
+        "ingest-results", help="Normalize successful matrix results"
+    )
     ingest_cmd.add_argument("--manifest", required=True, type=Path)
     ingest_cmd.add_argument("--state-path", required=True, type=Path)
     ingest_cmd.add_argument("--results-dir", required=True, type=Path)
@@ -261,7 +273,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     report_cmd.add_argument("--significance-alpha", type=float, default=0.05)
 
-    prune_cmd = sub.add_parser("prune", help="Apply retention policies to artifacts/store")
+    prune_cmd = sub.add_parser(
+        "prune", help="Apply retention policies to artifacts/store"
+    )
     prune_cmd.add_argument("--artifacts-dir", type=Path)
     prune_cmd.add_argument("--store-dir", type=Path)
     prune_cmd.add_argument("--max-artifact-age-days", type=int, default=None)
@@ -270,7 +284,9 @@ def main(argv: list[str] | None = None) -> int:
     prune_cmd.add_argument("--max-runs", type=int, default=None)
     prune_cmd.add_argument("--apply", action="store_true")
 
-    orchestration_cmd = sub.add_parser("orchestrate", help="Build -> run matrix -> ingest -> report")
+    orchestration_cmd = sub.add_parser(
+        "orchestrate", help="Build -> run matrix -> ingest -> report"
+    )
     orchestration_cmd.add_argument("--manifest", required=True, type=Path)
     orchestration_cmd.add_argument("--artifacts-dir", required=True, type=Path)
     orchestration_cmd.add_argument("--results-dir", required=True, type=Path)
@@ -284,7 +300,9 @@ def main(argv: list[str] | None = None) -> int:
     orchestration_cmd.add_argument("--max-retries", type=int, default=2)
     orchestration_cmd.add_argument("--max-parallel", type=int, default=1)
     orchestration_cmd.add_argument("--max-load-per-cpu", type=float, default=None)
-    orchestration_cmd.add_argument("--load-check-interval-seconds", type=float, default=5.0)
+    orchestration_cmd.add_argument(
+        "--load-check-interval-seconds", type=float, default=5.0
+    )
     orchestration_cmd.add_argument("--baseline-window", type=int, default=7)
     orchestration_cmd.add_argument("--regression-threshold", type=float, default=0.05)
     orchestration_cmd.add_argument(
@@ -379,7 +397,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "prune":
         summary: dict[str, Any] = {}
         if args.artifacts_dir is None and args.store_dir is None:
-            raise SystemExit("at least one of --artifacts-dir or --store-dir is required")
+            raise SystemExit(
+                "at least one of --artifacts-dir or --store-dir is required"
+            )
 
         if args.artifacts_dir is not None:
             summary["artifacts"] = prune_artifacts(

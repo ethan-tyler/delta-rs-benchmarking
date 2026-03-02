@@ -31,7 +31,12 @@ def render_text_table(comparison: Comparison, include_metrics: bool = False) -> 
 
     lines = [" | ".join(header), " | ".join(["---"] * len(header))]
     for row in comparison.rows:
-        cells = [row.case, _fmt_ms(row.baseline_ms), _fmt_ms(row.candidate_ms), row.change]
+        cells = [
+            row.case,
+            _fmt_ms(row.baseline_ms),
+            _fmt_ms(row.candidate_ms),
+            row.change,
+        ]
         if include_metrics:
             baseline_metrics = row.baseline_metrics
             candidate_metrics = row.candidate_metrics

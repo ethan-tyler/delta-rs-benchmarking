@@ -11,7 +11,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
 
-def _run_script(name: str, args: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def _run_script(
+    name: str, args: list[str], *, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     cmd = ["bash", str(SCRIPTS_DIR / name), *args]
     merged_env = os.environ.copy()
     if env:
@@ -42,7 +44,7 @@ def test_security_check_requires_explicit_expected_egress_hash() -> None:
         nft = tmp / "nft"
         nft.write_text(
             "#!/usr/bin/env bash\n"
-            "if [[ \"$1\" == \"list\" && \"$2\" == \"ruleset\" ]]; then\n"
+            'if [[ "$1" == "list" && "$2" == "ruleset" ]]; then\n'
             "  cat <<'EOF'\n"
             f"{ruleset}"
             "EOF\n"

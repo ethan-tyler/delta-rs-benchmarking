@@ -1,4 +1,4 @@
-name: Benchmark Pre-Release (Advisory)
+name: Benchmark Pre-Release
 
 on:
   workflow_dispatch:
@@ -43,7 +43,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run advisory branch comparison
+      - name: Run branch comparison
         shell: bash
         run: |
           set -euo pipefail
@@ -70,7 +70,7 @@ jobs:
             "${{ inputs.candidate_ref }}" \
             "${{ inputs.suite }}" | tee prerelease_compare_output.txt
 
-      - name: Upload advisory compare output
+      - name: Upload compare output
         if: always()
         uses: actions/upload-artifact@v4
         with:

@@ -56,9 +56,13 @@ def select_revisions(
         if start > end:
             raise ValueError("start_date must be <= end_date")
         if strategy == "date-window":
-            revisions = list(_select_date_window(repo=repo, start=start, end=end, ref=ref))
+            revisions = list(
+                _select_date_window(repo=repo, start=start, end=end, ref=ref)
+            )
         else:
-            revisions = list(_select_one_per_day(repo=repo, start=start, end=end, ref=ref))
+            revisions = list(
+                _select_one_per_day(repo=repo, start=start, end=end, ref=ref)
+            )
         selected_ref = ref
 
     return RevisionManifest(
@@ -108,7 +112,9 @@ def _select_release_tags(
         if not tag or not pattern.match(tag):
             continue
         commit = _git(repo, ["rev-list", "-n", "1", tag]).strip()
-        commit_ts = _git(repo, ["show", "-s", "--date=iso-strict", "--format=%cI", commit]).strip()
+        commit_ts = _git(
+            repo, ["show", "-s", "--date=iso-strict", "--format=%cI", commit]
+        ).strip()
         out.append(
             RevisionEntry(
                 commit=commit,
@@ -121,7 +127,9 @@ def _select_release_tags(
     return out
 
 
-def _select_date_window(*, repo: Path, start: date, end: date, ref: str) -> Iterable[RevisionEntry]:
+def _select_date_window(
+    *, repo: Path, start: date, end: date, ref: str
+) -> Iterable[RevisionEntry]:
     rows = _git_commit_rows(repo=repo, start=start, end=end, ref=ref)
     return [
         RevisionEntry(
@@ -134,7 +142,9 @@ def _select_date_window(*, repo: Path, start: date, end: date, ref: str) -> Iter
     ]
 
 
-def _select_one_per_day(*, repo: Path, start: date, end: date, ref: str) -> Iterable[RevisionEntry]:
+def _select_one_per_day(
+    *, repo: Path, start: date, end: date, ref: str
+) -> Iterable[RevisionEntry]:
     rows = _git_commit_rows(repo=repo, start=start, end=end, ref=ref)
     latest_per_day: dict[str, tuple[str, str]] = {}
     for commit, commit_ts in rows:
@@ -154,7 +164,9 @@ def _select_one_per_day(*, repo: Path, start: date, end: date, ref: str) -> Iter
     return selected
 
 
-def _git_commit_rows(*, repo: Path, start: date, end: date, ref: str) -> list[tuple[str, str]]:
+def _git_commit_rows(
+    *, repo: Path, start: date, end: date, ref: str
+) -> list[tuple[str, str]]:
     start_ts = f"{start.isoformat()}T00:00:00+00:00"
     end_ts = f"{end.isoformat()}T23:59:59+00:00"
     raw = _git(

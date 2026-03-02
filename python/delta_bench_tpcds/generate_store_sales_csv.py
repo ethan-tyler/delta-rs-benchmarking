@@ -21,9 +21,7 @@ def _validate_scale_factor(raw: str) -> str:
             f"invalid scale factor '{raw}': {exc}"
         ) from exc
     if value <= 0:
-        raise argparse.ArgumentTypeError(
-            f"invalid scale factor '{raw}': must be > 0"
-        )
+        raise argparse.ArgumentTypeError(f"invalid scale factor '{raw}': must be > 0")
     if value.is_integer():
         return str(int(value))
     return raw

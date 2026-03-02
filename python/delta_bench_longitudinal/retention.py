@@ -18,7 +18,9 @@ def prune_artifacts(
     apply: bool,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    _validate_policies(max_age_days=max_age_days, max_count=max_artifacts, count_name="max_artifacts")
+    _validate_policies(
+        max_age_days=max_age_days, max_count=max_artifacts, count_name="max_artifacts"
+    )
     reference = now or datetime.now(timezone.utc)
     root = Path(artifacts_dir)
     if not root.exists():
@@ -64,7 +66,9 @@ def prune_store(
     apply: bool,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    _validate_policies(max_age_days=max_age_days, max_count=max_runs, count_name="max_runs")
+    _validate_policies(
+        max_age_days=max_age_days, max_count=max_runs, count_name="max_runs"
+    )
     reference = now or datetime.now(timezone.utc)
     root = Path(store_dir)
     rows_path = root / "rows.jsonl"
@@ -103,7 +107,9 @@ def prune_store(
             "total_runs": len(run_timestamps),
             "candidate_runs": candidate_runs,
             "removed_runs": len(candidate_runs) if apply else 0,
-            "remaining_runs": len(run_timestamps) - len(candidate_runs) if apply else len(run_timestamps),
+            "remaining_runs": len(run_timestamps) - len(candidate_runs)
+            if apply
+            else len(run_timestamps),
             "invalid_rows_skipped": invalid_rows,
             "applied": apply,
         }

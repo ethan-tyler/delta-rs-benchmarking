@@ -134,7 +134,9 @@ def test_generate_trend_reports_with_significance_metrics(tmp_path: Path) -> Non
     assert "p-value" in markdown
 
 
-def test_generate_trend_reports_handles_zero_baseline_regression(tmp_path: Path) -> None:
+def test_generate_trend_reports_handles_zero_baseline_regression(
+    tmp_path: Path,
+) -> None:
     store_dir = tmp_path / "store"
     rows = [
         {

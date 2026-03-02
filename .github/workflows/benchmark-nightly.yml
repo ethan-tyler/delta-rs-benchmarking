@@ -1,4 +1,4 @@
-name: Benchmark Nightly (Advisory)
+name: Benchmark Nightly
 
 on:
   schedule:
@@ -33,14 +33,14 @@ jobs:
           ./scripts/prepare_delta_rs.sh
           ./scripts/sync_harness_to_delta_rs.sh
 
-      - name: Run nightly local advisory benchmark
+      - name: Run nightly local benchmark
         shell: bash
         run: |
           set -euo pipefail
           ./scripts/bench.sh data --dataset-id medium_selective --seed 42
           ./scripts/bench.sh run --dataset-id medium_selective --suite all --runner all --warmup 1 --iters 3 --label nightly-local
 
-      - name: Run nightly object-store advisory benchmark
+      - name: Run nightly object-store benchmark
         if: env.BENCH_STORAGE_BACKEND != '' && env.BENCH_STORAGE_BACKEND != 'local'
         shell: bash
         run: |

@@ -46,13 +46,22 @@ def generate_trend_reports(
 
     for key, series in sorted(grouped.items()):
         ordered = sorted(
-            series, key=lambda row: row.get("benchmark_created_at") or row.get("ingested_at") or ""
+            series,
+            key=lambda row: row.get("benchmark_created_at")
+            or row.get("ingested_at")
+            or "",
         )
         medians = [float(row["median_ms"]) for row in ordered]
         latest = medians[-1]
         baseline_rows = ordered[-(baseline_window + 1) : -1]
-        baseline_values = [float(row["median_ms"]) for row in baseline_rows if row.get("median_ms") is not None]
-        baseline_median = statistics.median(baseline_values) if baseline_values else None
+        baseline_values = [
+            float(row["median_ms"])
+            for row in baseline_rows
+            if row.get("median_ms") is not None
+        ]
+        baseline_median = (
+            statistics.median(baseline_values) if baseline_values else None
+        )
         change_pct = None
         status = "insufficient-baseline"
         is_regression = False
@@ -76,7 +85,11 @@ def generate_trend_reports(
                     if significance_method == "none":
                         status = "regression"
                     else:
-                        status = "regression-significant" if significant else "regression-not-significant"
+                        status = (
+                            "regression-significant"
+                            if significant
+                            else "regression-not-significant"
+                        )
                 elif latest < baseline_median * (1.0 - regression_threshold):
                     status = "improvement"
                 else:
@@ -87,7 +100,11 @@ def generate_trend_reports(
                 if significance_method == "none":
                     status = "regression"
                 else:
-                    status = "regression-significant" if significant else "regression-not-significant"
+                    status = (
+                        "regression-significant"
+                        if significant
+                        else "regression-not-significant"
+                    )
             else:
                 change_pct = 0.0
                 status = "stable"
@@ -162,7 +179,9 @@ def _mann_whitney_one_sided_p_value(
     if n1 < 2 or n2 < 2:
         return None
 
-    combined = [(value, 1) for value in latest_samples] + [(value, 0) for value in baseline_samples]
+    combined = [(value, 1) for value in latest_samples] + [
+        (value, 0) for value in baseline_samples
+    ]
     combined.sort(key=lambda item: item[0])
 
     rank_sum_latest = 0.0
@@ -332,7 +351,9 @@ def _html_report(
             f" | Method: {significance_method} (alpha={significance_alpha:.3f})"
         )
 
-    invalid_rows_meta = f" | Invalid rows skipped: {invalid_rows}" if invalid_rows else ""
+    invalid_rows_meta = (
+        f" | Invalid rows skipped: {invalid_rows}" if invalid_rows else ""
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -360,7 +381,7 @@ def _html_report(
   <h1>Longitudinal Benchmark Trends</h1>
   <p class="meta">Series: {len(series_stats)} | Regressions: {len(regressions)}{significance_meta}{invalid_rows_meta} | Threshold: {regression_threshold:.2%}</p>
   <div class="grid">
-    {''.join(cards)}
+    {"".join(cards)}
   </div>
 </body>
 </html>

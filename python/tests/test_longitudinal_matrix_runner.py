@@ -37,7 +37,9 @@ def test_resume_skips_successful_cases(tmp_path: Path) -> None:
 
     called: list[tuple[str, str, str, int]] = []
 
-    def fake_executor(artifact: MatrixArtifact, suite: str, scale: str, attempt: int, timeout: int):
+    def fake_executor(
+        artifact: MatrixArtifact, suite: str, scale: str, attempt: int, timeout: int
+    ):
         called.append((artifact.revision, suite, scale, attempt))
         return 0, ""
 
@@ -49,7 +51,11 @@ def test_resume_skips_successful_cases(tmp_path: Path) -> None:
         state_path=state_path,
     )
     run_matrix(
-        artifacts=[MatrixArtifact(revision="revA", commit_timestamp="t", artifact_path="/tmp/a")],
+        artifacts=[
+            MatrixArtifact(
+                revision="revA", commit_timestamp="t", artifact_path="/tmp/a"
+            )
+        ],
         config=config,
         executor=fake_executor,
     )
@@ -59,7 +65,9 @@ def test_resume_skips_successful_cases(tmp_path: Path) -> None:
 def test_retry_until_success_within_bound(tmp_path: Path) -> None:
     attempts = {"count": 0}
 
-    def flaky_executor(artifact: MatrixArtifact, suite: str, scale: str, attempt: int, timeout: int):
+    def flaky_executor(
+        artifact: MatrixArtifact, suite: str, scale: str, attempt: int, timeout: int
+    ):
         attempts["count"] += 1
         if attempts["count"] < 3:
             return 1, "transient failure"
@@ -74,7 +82,11 @@ def test_retry_until_success_within_bound(tmp_path: Path) -> None:
         state_path=state_path,
     )
     state = run_matrix(
-        artifacts=[MatrixArtifact(revision="revB", commit_timestamp="t", artifact_path="/tmp/b")],
+        artifacts=[
+            MatrixArtifact(
+                revision="revB", commit_timestamp="t", artifact_path="/tmp/b"
+            )
+        ],
         config=config,
         executor=flaky_executor,
     )
@@ -104,7 +116,11 @@ def test_timeout_is_recorded_as_failure_reason(tmp_path: Path) -> None:
     )
 
     state = run_matrix(
-        artifacts=[MatrixArtifact(revision="revC", commit_timestamp="t", artifact_path="/tmp/c")],
+        artifacts=[
+            MatrixArtifact(
+                revision="revC", commit_timestamp="t", artifact_path="/tmp/c"
+            )
+        ],
         config=config,
         executor=timeout_executor,
     )
@@ -130,7 +146,9 @@ def test_failed_case_is_retried_on_subsequent_run(tmp_path: Path) -> None:
         max_retries=1,
         state_path=state_path,
     )
-    artifact = MatrixArtifact(revision="revD", commit_timestamp="t", artifact_path="/tmp/d")
+    artifact = MatrixArtifact(
+        revision="revD", commit_timestamp="t", artifact_path="/tmp/d"
+    )
 
     def always_fail(
         _artifact: MatrixArtifact,
@@ -157,7 +175,9 @@ def test_failed_case_is_retried_on_subsequent_run(tmp_path: Path) -> None:
     assert first_state["cases"]["revD|read_scan|sf1"]["status"] == "failure"
     assert first_state["cases"]["revD|read_scan|sf1"]["attempts"] == 2
 
-    second_state = run_matrix(artifacts=[artifact], config=config, executor=then_succeed)
+    second_state = run_matrix(
+        artifacts=[artifact], config=config, executor=then_succeed
+    )
     case = second_state["cases"]["revD|read_scan|sf1"]
     assert case["status"] == "success"
     assert case["failure_reason"] is None
@@ -190,8 +210,12 @@ def test_parallel_execution_uses_multiple_workers(tmp_path: Path) -> None:
     )
     run_matrix(
         artifacts=[
-            MatrixArtifact(revision="revP1", commit_timestamp="t", artifact_path="/tmp/p1"),
-            MatrixArtifact(revision="revP2", commit_timestamp="t", artifact_path="/tmp/p2"),
+            MatrixArtifact(
+                revision="revP1", commit_timestamp="t", artifact_path="/tmp/p1"
+            ),
+            MatrixArtifact(
+                revision="revP2", commit_timestamp="t", artifact_path="/tmp/p2"
+            ),
         ],
         config=config,
         executor=slow_executor,
@@ -224,7 +248,11 @@ def test_load_guard_waits_before_dispatch(tmp_path: Path) -> None:
     )
 
     run_matrix(
-        artifacts=[MatrixArtifact(revision="revL", commit_timestamp="t", artifact_path="/tmp/l")],
+        artifacts=[
+            MatrixArtifact(
+                revision="revL", commit_timestamp="t", artifact_path="/tmp/l"
+            )
+        ],
         config=config,
         executor=lambda *_args: (0, ""),
         load_provider=fake_load,
@@ -245,7 +273,11 @@ def test_invalid_parallelism_is_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="max_parallel"):
         run_matrix(
-            artifacts=[MatrixArtifact(revision="revBad", commit_timestamp="t", artifact_path="/tmp/b")],
+            artifacts=[
+                MatrixArtifact(
+                    revision="revBad", commit_timestamp="t", artifact_path="/tmp/b"
+                )
+            ],
             config=config,
             executor=lambda *_args: (0, ""),
         )

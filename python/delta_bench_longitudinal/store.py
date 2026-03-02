@@ -87,7 +87,9 @@ def _normalize_case_row(
     source: Path,
 ) -> dict[str, Any]:
     samples = case.get("samples") or []
-    elapsed = [float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample]
+    elapsed = [
+        float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample
+    ]
     metrics = _elapsed_metrics(elapsed)
     failure = case.get("failure") or {}
 
@@ -209,7 +211,8 @@ def _load_index(store_dir: Path) -> set[str]:
             try:
                 current = rows_path.stat()
                 should_reconcile = not (
-                    current.st_mtime_ns == rows_mtime_ns and current.st_size == rows_size
+                    current.st_mtime_ns == rows_mtime_ns
+                    and current.st_size == rows_size
                 )
             except OSError:
                 should_reconcile = True
@@ -242,7 +245,10 @@ def _scan_row_run_ids(rows_path: Path) -> set[str]:
 def _save_index(store_dir: Path, run_ids: set[str]) -> None:
     path = _index_path(store_dir)
     store_dir.mkdir(parents=True, exist_ok=True)
-    data: dict[str, Any] = {"schema_version": STORE_SCHEMA_VERSION, "run_ids": sorted(run_ids)}
+    data: dict[str, Any] = {
+        "schema_version": STORE_SCHEMA_VERSION,
+        "run_ids": sorted(run_ids),
+    }
     rows_path = _rows_path(store_dir)
     if rows_path.exists():
         rows_stat = rows_path.stat()

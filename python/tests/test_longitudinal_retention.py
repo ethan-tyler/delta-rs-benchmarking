@@ -119,7 +119,10 @@ def test_prune_store_apply_rewrites_rows_and_index(tmp_path: Path) -> None:
         now=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
     )
     assert summary["removed_runs"] == 1
-    rows = [json.loads(line) for line in (store_dir / "rows.jsonl").read_text(encoding="utf-8").splitlines()]
+    rows = [
+        json.loads(line)
+        for line in (store_dir / "rows.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
     assert {row["run_id"] for row in rows} == {"run-2", "run-3"}
     index = json.loads((store_dir / "index.json").read_text(encoding="utf-8"))
     assert index["run_ids"] == ["run-2", "run-3"]

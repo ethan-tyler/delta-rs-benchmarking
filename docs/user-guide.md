@@ -119,7 +119,7 @@ Workflow mode storage configuration:
 - Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line)
 - Optional repository variable `BENCH_BACKEND_PROFILE` (profile name in `backends/*.env`)
 - Optional repository variable `BENCH_RUNNER_MODE` (`rust`, `python`, or `all`)
-- Benchmark workflow comments are advisory and do not gate PR merge
+- Benchmark workflow comments publish benchmark output without merge gating
 
 ## Security and remote runner options
 

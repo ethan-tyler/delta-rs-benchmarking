@@ -52,7 +52,9 @@ def load_matrix_state(path: Path | str) -> dict:
 def save_matrix_state(path: Path | str, data: dict) -> None:
     state_path = Path(path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    state_path.write_text(
+        json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def run_matrix(
@@ -80,7 +82,9 @@ def run_matrix(
 
     state = load_matrix_state(config.state_path)
     cases = state.setdefault("cases", {})
-    run_exec = executor or (lambda a, s, sc, at, to: _default_executor(a, s, sc, at, to, config))
+    run_exec = executor or (
+        lambda a, s, sc, at, to: _default_executor(a, s, sc, at, to, config)
+    )
     get_load = load_provider or _system_load_per_cpu
     sleep = sleep_fn or time.sleep
     max_attempts = config.max_retries + 1
@@ -102,7 +106,9 @@ def run_matrix(
     if not pending:
         return state
 
-    in_flight: dict[concurrent.futures.Future, tuple[str, MatrixArtifact, str, str]] = {}
+    in_flight: dict[
+        concurrent.futures.Future, tuple[str, MatrixArtifact, str, str]
+    ] = {}
     next_idx = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=config.max_parallel) as pool:
         while next_idx < len(pending) or in_flight:
@@ -227,7 +233,9 @@ def _default_executor(
         text=True,
         timeout=timeout_seconds,
     )
-    message = (proc.stderr.strip() or proc.stdout.strip()) if proc.returncode != 0 else ""
+    message = (
+        (proc.stderr.strip() or proc.stdout.strip()) if proc.returncode != 0 else ""
+    )
     return proc.returncode, message
 
 

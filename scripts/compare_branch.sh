@@ -12,6 +12,9 @@ ENFORCE_RUN_MODE=0
 REQUIRE_NO_PUBLIC_IPV4=0
 REQUIRE_EGRESS_POLICY=0
 NOISE_THRESHOLD="${BENCH_NOISE_THRESHOLD:-0.05}"
+AGGREGATION="${BENCH_AGGREGATION:-median}"
+BASE_SHA_OVERRIDE=""
+CANDIDATE_SHA_OVERRIDE=""
 STORAGE_BACKEND="${BENCH_STORAGE_BACKEND:-local}"
 STORAGE_OPTIONS=()
 BACKEND_PROFILE="${BENCH_BACKEND_PROFILE:-}"
@@ -38,7 +41,7 @@ fi
 usage() {
   cat <<EOF
 Usage:
-  ./scripts/compare_branch.sh [options] <base_branch> <candidate_branch> [suite]
+  ./scripts/compare_branch.sh [options] <base_ref> <candidate_ref> [suite]
 
 Options:
   --remote-runner <ssh-host>      Run the workflow on a remote runner over SSH
@@ -47,6 +50,9 @@ Options:
   --require-no-public-ipv4        Require that no public IPv4 is assigned to runner interfaces
   --require-egress-policy         Require nftables egress hash check during preflight (set DELTA_BENCH_EGRESS_POLICY_SHA256)
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
+  --aggregation <min|median|p95>  Representative sample aggregation for compare.py (default: median)
+  --base-sha <sha>                Force immutable commit mode for the base revision
+  --candidate-sha <sha>           Force immutable commit mode for the candidate revision
   --storage-backend <local|s3>
                                   Storage backend for fixture generation and suite execution (default: local)
   --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
@@ -80,6 +86,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --noise-threshold)
       NOISE_THRESHOLD="$2"
+      shift 2
+      ;;
+    --aggregation)
+      AGGREGATION="$2"
+      shift 2
+      ;;
+    --base-sha)
+      BASE_SHA_OVERRIDE="$2"
+      shift 2
+      ;;
+    --candidate-sha)
+      CANDIDATE_SHA_OVERRIDE="$2"
       shift 2
       ;;
     --storage-backend)
@@ -117,14 +135,54 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-base_branch="${1:-main}"
-candidate_branch="${2:-}"
-suite="${3:-all}"
-
-if [[ -z "${candidate_branch}" ]]; then
+positional_refs=("$@")
+if (( ${#positional_refs[@]} > 3 )); then
   usage >&2
   exit 1
 fi
+
+base_ref="${positional_refs[0]:-main}"
+candidate_ref="${positional_refs[1]:-}"
+suite="${positional_refs[2]:-all}"
+base_ref_mode="auto"
+candidate_ref_mode="auto"
+
+if [[ -n "${BASE_SHA_OVERRIDE}" ]]; then
+  base_ref="${BASE_SHA_OVERRIDE}"
+  base_ref_mode="commit"
+fi
+if [[ -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
+  candidate_ref="${CANDIDATE_SHA_OVERRIDE}"
+  candidate_ref_mode="commit"
+fi
+
+if [[ -n "${BASE_SHA_OVERRIDE}" && -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
+  case "${#positional_refs[@]}" in
+    0)
+      ;;
+    1)
+      suite="${positional_refs[0]}"
+      ;;
+    *)
+      echo "when using both --base-sha and --candidate-sha, provide at most one positional [suite]" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+fi
+
+if [[ -z "${candidate_ref}" ]]; then
+  usage >&2
+  exit 1
+fi
+case "${AGGREGATION}" in
+  min|median|p95)
+    ;;
+  *)
+    echo "invalid --aggregation '${AGGREGATION}'; expected one of: min, median, p95" >&2
+    exit 1
+    ;;
+esac
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
 RUNNER_RESULTS_DIR="${DELTA_BENCH_RESULTS:-${RUNNER_ROOT}/results}"
@@ -137,6 +195,44 @@ fi
 profile_args=()
 if [[ -n "${BACKEND_PROFILE}" ]]; then
   profile_args+=(--backend-profile "${BACKEND_PROFILE}")
+fi
+
+is_commit_sha() {
+  local ref="${1:-}"
+  [[ "${ref}" =~ ^[0-9a-fA-F]{7,40}$ ]]
+}
+
+branch_ref_exists() {
+  local ref="${1:-}"
+  exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/heads/${ref}" || \
+    exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/remotes/origin/${ref}"
+}
+
+prepare_delta_rs_ref() {
+  local ref="${1:-}"
+  local mode="${2:-auto}"
+  if [[ "${mode}" == "commit" ]]; then
+    run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+    return
+  fi
+  if branch_ref_exists "${ref}"; then
+    run_step env DELTA_RS_BRANCH="${ref}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+    return
+  fi
+  if is_commit_sha "${ref}"; then
+    run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+    return
+  fi
+  run_step env DELTA_RS_BRANCH="${ref}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+}
+
+if [[ -n "${BASE_SHA_OVERRIDE}" ]] && ! is_commit_sha "${BASE_SHA_OVERRIDE}"; then
+  echo "invalid --base-sha '${BASE_SHA_OVERRIDE}'; expected 7-40 hex characters" >&2
+  exit 1
+fi
+if [[ -n "${CANDIDATE_SHA_OVERRIDE}" ]] && ! is_commit_sha "${CANDIDATE_SHA_OVERRIDE}"; then
+  echo "invalid --candidate-sha '${CANDIDATE_SHA_OVERRIDE}'; expected 7-40 hex characters" >&2
+  exit 1
 fi
 
 run_with_timeout() {
@@ -204,16 +300,16 @@ run_security_check() {
 
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 
-base_label="base-$(sanitize_label "${base_branch}")"
-cand_label="cand-$(sanitize_label "${candidate_branch}")"
+base_label="base-$(sanitize_label "${base_ref}")"
+cand_label="cand-$(sanitize_label "${candidate_ref}")"
 
-run_step env DELTA_RS_BRANCH="${base_branch}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
-run_step env DELTA_RS_BRANCH="${candidate_branch}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+prepare_delta_rs_ref "${candidate_ref}" "${candidate_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${cand_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
@@ -221,6 +317,6 @@ run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DI
 base_json="${RUNNER_RESULTS_DIR}/${base_label}/${suite}.json"
 cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"
 
-compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --format markdown)
+compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format markdown)
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"

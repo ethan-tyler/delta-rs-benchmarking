@@ -152,6 +152,8 @@ jobs:
             const sameRepo = headRepo === expectedRepo;
             core.setOutput("base_ref", pr.data.base.ref);
             core.setOutput("head_ref", pr.data.head.ref);
+            core.setOutput("base_sha", pr.data.base.sha);
+            core.setOutput("head_sha", pr.data.head.sha);
             core.setOutput("same_repo", sameRepo ? "true" : "false");
             if (!sameRepo) {
               core.setOutput(
@@ -182,8 +184,8 @@ jobs:
         if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
         shell: bash
         env:
-          BASE_REF: ${{ steps.pr.outputs.base_ref }}
-          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
           SUITE: ${{ steps.parse.outputs.suite }}
           BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
           BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
@@ -213,8 +215,8 @@ jobs:
           ./scripts/compare_branch.sh \
             "${storage_args[@]}" \
             "${bench_args[@]}" \
-            "$BASE_REF" \
-            "$HEAD_REF" \
+            --base-sha "$BASE_SHA" \
+            --candidate-sha "$HEAD_SHA" \
             "$SUITE" > benchmark_output.md 2>&1
           status=$?
           set -e

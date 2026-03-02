@@ -25,10 +25,16 @@ Marketplace datasets are currently a document-only path: place external Delta ta
 
 ## Common workflows
 
-Compare two branches:
+Compare two refs:
 
 ```bash
 ./scripts/compare_branch.sh main candidate-branch all
+```
+
+Pin immutable commits when needed:
+
+```bash
+./scripts/compare_branch.sh --base-sha <base_sha> --candidate-sha <candidate_sha> all
 ```
 
 Refresh committed release-history benchmark manifests:

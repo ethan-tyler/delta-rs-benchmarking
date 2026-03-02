@@ -57,20 +57,29 @@ copy those tables under the fixture roots expected by suite registration (for TP
 `fixtures/<scale>/tpcds/<table_name>`). This repository does not currently automate Marketplace
 ingestion.
 
-## Compare two branches
+## Compare two refs
 
-Run sequential base-vs-candidate comparison:
+Run sequential base-vs-candidate comparison using branch names:
 
 ```bash
 ./scripts/compare_branch.sh main candidate-branch all
+```
+
+Pin exact commits to avoid ref drift during long runs:
+
+```bash
+./scripts/compare_branch.sh \
+  --base-sha 5a0c8d7f3f2d9d42fdd9414f1ce2af319e0c52e1 \
+  --candidate-sha 8c6170f1de4af5e2d3336b4fce8a9896af4d9b90 \
+  all
 ```
 
 The compare workflow will:
 
 1. Update `.delta-rs-under-test`.
 2. Sync this repo's harness into the `delta-rs` workspace.
-3. Benchmark the base branch.
-4. Benchmark the candidate branch.
+3. Benchmark the base ref.
+4. Benchmark the candidate ref.
 5. Print a markdown comparison table.
 
 Useful tuning options:
@@ -79,7 +88,7 @@ Useful tuning options:
 - `BENCH_RETRY_ATTEMPTS` (default `2`) retries transient failures.
 - `BENCH_RETRY_DELAY_SECONDS` (default `5`) sets retry delay.
 - `--noise-threshold` controls compare sensitivity.
-- `--aggregation` controls representative sample selection (`min`, `median`, `p95`; default `median`).
+- `--aggregation` controls representative sample selection (`min`, `median`, `p95`; default `median`) and is forwarded to `compare.py`.
 - `cd python && python3 -m delta_bench_compare.compare ... --include-metrics` appends per-case metric columns.
 
 ## Object-store mode
@@ -119,6 +128,7 @@ Workflow mode storage configuration:
 - Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line)
 - Optional repository variable `BENCH_BACKEND_PROFILE` (profile name in `backends/*.env`)
 - Optional repository variable `BENCH_RUNNER_MODE` (`rust`, `python`, or `all`)
+- PR benchmark workflow compares immutable PR base/head SHAs to avoid moving branch refs during execution
 - Benchmark workflow comments publish benchmark output without merge gating
 
 ## Security and remote runner options

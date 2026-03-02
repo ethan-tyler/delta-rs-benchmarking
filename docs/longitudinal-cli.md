@@ -9,7 +9,7 @@ Operational recovery and nightly-job behavior are documented in [longitudinal-ru
 1. Select revisions.
 2. Build per-revision artifacts.
 3. Run resumable suite/scale matrix.
-4. Ingest normalized rows.
+4. Ingest normalized rows (strictly validated benchmark schema v2 payloads only).
 5. Generate markdown and HTML reports.
 6. Optionally prune old artifacts and runs.
 

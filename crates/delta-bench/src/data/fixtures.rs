@@ -87,57 +87,44 @@ pub fn validate_scale(scale: &str) -> BenchResult<()> {
     Ok(())
 }
 
-pub fn fixture_root(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
-    Ok(fixtures_dir.join(scale))
+pub fn fixture_root(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixtures_dir.join(scale)
 }
 
 pub fn narrow_sales_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
-    Ok(fixture_root(fixtures_dir, scale)?.join(NARROW_SALES_TABLE_DIR))
+    Ok(fixture_root(fixtures_dir, scale).join(NARROW_SALES_TABLE_DIR))
 }
 
 pub fn merge_target_table_path(fixtures_dir: &Path, scale: &str) -> BenchResult<PathBuf> {
-    Ok(fixture_root(fixtures_dir, scale)?.join(MERGE_TARGET_TABLE_DIR))
+    Ok(fixture_root(fixtures_dir, scale).join(MERGE_TARGET_TABLE_DIR))
 }
 
 pub fn read_partitioned_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
-        .join(READ_PARTITIONED_TABLE_DIR)
+    fixture_root(fixtures_dir, scale).join(READ_PARTITIONED_TABLE_DIR)
 }
 
 pub fn merge_partitioned_target_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
-        .join(MERGE_PARTITIONED_TARGET_TABLE_DIR)
+    fixture_root(fixtures_dir, scale).join(MERGE_PARTITIONED_TARGET_TABLE_DIR)
 }
 
 pub fn delete_update_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
-        .join(DELETE_UPDATE_SMALL_FILES_TABLE_DIR)
+    fixture_root(fixtures_dir, scale).join(DELETE_UPDATE_SMALL_FILES_TABLE_DIR)
 }
 
 pub fn optimize_small_files_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
-        .join(OPTIMIZE_SMALL_FILES_TABLE_DIR)
+    fixture_root(fixtures_dir, scale).join(OPTIMIZE_SMALL_FILES_TABLE_DIR)
 }
 
 pub fn optimize_compacted_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
-        .join(OPTIMIZE_COMPACTED_TABLE_DIR)
+    fixture_root(fixtures_dir, scale).join(OPTIMIZE_COMPACTED_TABLE_DIR)
 }
 
 pub fn vacuum_ready_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
-    fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
-        .join(VACUUM_READY_TABLE_DIR)
+    fixture_root(fixtures_dir, scale).join(VACUUM_READY_TABLE_DIR)
 }
 
 pub fn tpcds_store_sales_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
     fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
         .join(TPCDS_DIR)
         .join(TPCDS_STORE_SALES_TABLE_DIR)
 }
@@ -427,7 +414,7 @@ pub async fn generate_fixtures_with_profile(
     profile: FixtureProfile,
     storage: &StorageConfig,
 ) -> BenchResult<()> {
-    let root = fixture_root(fixtures_dir, scale)?;
+    let root = fixture_root(fixtures_dir, scale);
     let dataset_dir = root.join("narrow_sales");
     let data_path = dataset_dir.join("rows.jsonl");
     let manifest_path = root.join("manifest.json");
@@ -703,49 +690,18 @@ async fn write_tpcds_store_sales_table(
 ) -> BenchResult<()> {
     prepare_local_table_dir(&table_url)?;
 
-    let schema = Arc::new(arrow::datatypes::Schema::new(vec![
-        arrow::datatypes::Field::new("ss_customer_sk", arrow::datatypes::DataType::Int64, false),
-        arrow::datatypes::Field::new(
-            "ss_ext_sales_price",
-            arrow::datatypes::DataType::Float64,
-            false,
-        ),
-        arrow::datatypes::Field::new("ss_item_sk", arrow::datatypes::DataType::Int64, false),
-        arrow::datatypes::Field::new("ss_quantity", arrow::datatypes::DataType::Int64, false),
-        arrow::datatypes::Field::new("ss_sold_date_sk", arrow::datatypes::DataType::Int64, false),
-    ]));
+    let tpcds_rows: Vec<TpcdsStoreSalesRow> = rows
+        .iter()
+        .map(|row| TpcdsStoreSalesRow {
+            ss_customer_sk: (row.id.rem_euclid(10_000)) + 1,
+            ss_ext_sales_price: (row.value_i64.abs() as f64 / 10.0) + 1.0,
+            ss_item_sk: (row.id.rem_euclid(5_000)) + 1,
+            ss_quantity: row.value_i64.abs().rem_euclid(8) + 1,
+            ss_sold_date_sk: 2_451_545_i64 + row.id.rem_euclid(3_650),
+        })
+        .collect();
 
-    let ss_customer_sk = rows
-        .iter()
-        .map(|row| (row.id.rem_euclid(10_000)) + 1)
-        .collect::<Vec<_>>();
-    let ss_ext_sales_price = rows
-        .iter()
-        .map(|row| (row.value_i64.abs() as f64 / 10.0) + 1.0)
-        .collect::<Vec<_>>();
-    let ss_item_sk = rows
-        .iter()
-        .map(|row| (row.id.rem_euclid(5_000)) + 1)
-        .collect::<Vec<_>>();
-    let ss_quantity = rows
-        .iter()
-        .map(|row| row.value_i64.abs().rem_euclid(8) + 1)
-        .collect::<Vec<_>>();
-    let ss_sold_date_sk = rows
-        .iter()
-        .map(|row| 2_451_545_i64 + row.id.rem_euclid(3_650))
-        .collect::<Vec<_>>();
-
-    let batch = arrow::record_batch::RecordBatch::try_new(
-        schema,
-        vec![
-            Arc::new(arrow::array::Int64Array::from(ss_customer_sk)),
-            Arc::new(arrow::array::Float64Array::from(ss_ext_sales_price)),
-            Arc::new(arrow::array::Int64Array::from(ss_item_sk)),
-            Arc::new(arrow::array::Int64Array::from(ss_quantity)),
-            Arc::new(arrow::array::Int64Array::from(ss_sold_date_sk)),
-        ],
-    )?;
+    let batch = tpcds_store_sales_rows_to_batch(&tpcds_rows)?;
 
     let _ = storage
         .try_from_url_for_write(table_url)
@@ -1015,7 +971,6 @@ pub(crate) fn rows_to_batch(
 
 pub fn load_rows(fixtures_dir: &Path, scale: &str) -> BenchResult<Vec<NarrowSaleRow>> {
     let data_path = fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
         .join("narrow_sales")
         .join("rows.jsonl");
 
@@ -1032,9 +987,7 @@ pub fn load_rows(fixtures_dir: &Path, scale: &str) -> BenchResult<Vec<NarrowSale
 }
 
 pub fn load_manifest(fixtures_dir: &Path, scale: &str) -> BenchResult<FixtureManifest> {
-    let path = fixture_root(fixtures_dir, scale)
-        .expect("validated scale path")
-        .join("manifest.json");
+    let path = fixture_root(fixtures_dir, scale).join("manifest.json");
     let manifest: FixtureManifest = serde_json::from_slice(&fs::read(path)?)?;
     Ok(manifest)
 }

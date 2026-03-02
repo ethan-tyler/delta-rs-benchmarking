@@ -16,6 +16,24 @@ struct MetadataIterationSetup {
     table_url: Url,
 }
 
+fn metadata_metrics(
+    table_version: Option<u64>,
+    result_hash: String,
+    schema_hash: String,
+) -> SampleMetrics {
+    SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(RuntimeIOMetrics {
+        peak_rss_mb: None,
+        cpu_time_ms: None,
+        bytes_read: None,
+        bytes_written: None,
+        files_touched: None,
+        files_skipped: None,
+        spill_bytes: None,
+        result_hash: Some(result_hash),
+        schema_hash: Some(schema_hash),
+    })
+}
+
 pub fn case_names() -> Vec<String> {
     vec![
         "metadata_load".to_string(),
@@ -56,21 +74,11 @@ pub async fn run(
                     .map_err(|e| e.to_string())?;
                     let schema_hash = hash_json(&json!(["operation:string", "table_version:u64",]))
                         .map_err(|e| e.to_string())?;
-                    Ok::<SampleMetrics, String>(
-                        SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(
-                            RuntimeIOMetrics {
-                                peak_rss_mb: None,
-                                cpu_time_ms: None,
-                                bytes_read: None,
-                                bytes_written: None,
-                                files_touched: None,
-                                files_skipped: None,
-                                spill_bytes: None,
-                                result_hash: Some(result_hash),
-                                schema_hash: Some(schema_hash),
-                            },
-                        ),
-                    )
+                    Ok::<SampleMetrics, String>(metadata_metrics(
+                        table_version,
+                        result_hash,
+                        schema_hash,
+                    ))
                 }
             },
         )
@@ -100,21 +108,11 @@ pub async fn run(
                     .map_err(|e| e.to_string())?;
                     let schema_hash = hash_json(&json!(["operation:string", "table_version:u64",]))
                         .map_err(|e| e.to_string())?;
-                    Ok::<SampleMetrics, String>(
-                        SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(
-                            RuntimeIOMetrics {
-                                peak_rss_mb: None,
-                                cpu_time_ms: None,
-                                bytes_read: None,
-                                bytes_written: None,
-                                files_touched: None,
-                                files_skipped: None,
-                                spill_bytes: None,
-                                result_hash: Some(result_hash),
-                                schema_hash: Some(schema_hash),
-                            },
-                        ),
-                    )
+                    Ok::<SampleMetrics, String>(metadata_metrics(
+                        table_version,
+                        result_hash,
+                        schema_hash,
+                    ))
                 }
             },
         )
@@ -143,21 +141,7 @@ pub async fn run(
             .map_err(|e| e.to_string())?;
             let schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))
                 .map_err(|e| e.to_string())?;
-            Ok::<SampleMetrics, String>(
-                SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(
-                    RuntimeIOMetrics {
-                        peak_rss_mb: None,
-                        cpu_time_ms: None,
-                        bytes_read: None,
-                        bytes_written: None,
-                        files_touched: None,
-                        files_skipped: None,
-                        spill_bytes: None,
-                        result_hash: Some(result_hash),
-                        schema_hash: Some(schema_hash),
-                    },
-                ),
-            )
+            Ok::<SampleMetrics, String>(metadata_metrics(table_version, result_hash, schema_hash))
         }
     })
     .await;
@@ -180,21 +164,7 @@ pub async fn run(
             .map_err(|e| e.to_string())?;
             let schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))
                 .map_err(|e| e.to_string())?;
-            Ok::<SampleMetrics, String>(
-                SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(
-                    RuntimeIOMetrics {
-                        peak_rss_mb: None,
-                        cpu_time_ms: None,
-                        bytes_read: None,
-                        bytes_written: None,
-                        files_touched: None,
-                        files_skipped: None,
-                        spill_bytes: None,
-                        result_hash: Some(result_hash),
-                        schema_hash: Some(schema_hash),
-                    },
-                ),
-            )
+            Ok::<SampleMetrics, String>(metadata_metrics(table_version, result_hash, schema_hash))
         }
     })
     .await;

@@ -1,3 +1,5 @@
+#![allow(clippy::await_holding_lock)]
+
 use delta_bench::data::fixtures::{
     generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
 };

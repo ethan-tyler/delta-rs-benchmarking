@@ -6,8 +6,10 @@ use serde::Deserialize;
 
 use crate::error::{BenchError, BenchResult};
 use crate::results::{
-    validate_case_classification, CaseFailure, CaseResult, IterationSample, SampleMetrics,
+    validate_case_classification, CaseFailure, CaseResult, ElapsedStats, IterationSample,
+    RuntimeIOMetrics, SampleMetrics,
 };
+use crate::stats::compute_stats;
 use crate::storage::StorageConfig;
 
 const CASES: [&str; 3] = [
@@ -44,6 +46,8 @@ struct InteropCaseOutput {
     spill_bytes: Option<u64>,
     #[serde(default)]
     result_hash: Option<String>,
+    #[serde(default)]
+    schema_hash: Option<String>,
     classification: String,
 }
 
@@ -115,6 +119,7 @@ pub async fn run(
                 success: true,
                 classification: "expected_failure".to_string(),
                 samples: Vec::new(),
+                elapsed_stats: None,
                 failure: Some(CaseFailure {
                     message: "interop_py currently supports local backend only in P0".to_string(),
                 }),
@@ -156,16 +161,17 @@ async fn run_case(
                     output.operations,
                     output.table_version,
                 )
-                .with_runtime_io_metrics(
-                    output.peak_rss_mb,
-                    output.cpu_time_ms,
-                    output.bytes_read,
-                    output.bytes_written,
-                    output.files_touched,
-                    output.files_skipped,
-                    output.spill_bytes,
-                    output.result_hash,
-                );
+                .with_runtime_io(RuntimeIOMetrics {
+                    peak_rss_mb: output.peak_rss_mb,
+                    cpu_time_ms: output.cpu_time_ms,
+                    bytes_read: output.bytes_read,
+                    bytes_written: output.bytes_written,
+                    files_touched: output.files_touched,
+                    files_skipped: output.files_skipped,
+                    spill_bytes: output.spill_bytes,
+                    result_hash: output.result_hash,
+                    schema_hash: output.schema_hash,
+                });
                 samples.push(IterationSample {
                     elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
                     rows: metrics.rows_processed,
@@ -178,6 +184,7 @@ async fn run_case(
                     case: case.to_string(),
                     success: false,
                     classification,
+                    elapsed_stats: elapsed_stats_from_samples(&samples),
                     samples,
                     failure: Some(CaseFailure {
                         message: error.to_string(),
@@ -191,8 +198,25 @@ async fn run_case(
         case: case.to_string(),
         success: true,
         classification,
+        elapsed_stats: elapsed_stats_from_samples(&samples),
         samples,
         failure: None,
+    })
+}
+
+fn elapsed_stats_from_samples(samples: &[IterationSample]) -> Option<ElapsedStats> {
+    let elapsed = samples
+        .iter()
+        .map(|sample| sample.elapsed_ms)
+        .collect::<Vec<_>>();
+    let stats = compute_stats(&elapsed)?;
+    Some(ElapsedStats {
+        min_ms: stats.min_ms,
+        max_ms: stats.max_ms,
+        mean_ms: stats.mean_ms,
+        median_ms: stats.median_ms,
+        stddev_ms: stats.stddev_ms,
+        cv_pct: stats.cv_pct,
     })
 }
 

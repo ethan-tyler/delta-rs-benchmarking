@@ -6,8 +6,11 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::BenchResult;
-use crate::results::{CaseFailure, CaseResult, SampleMetrics};
-use crate::runner::{run_case_async, CaseExecutionResult};
+use crate::fingerprint::{hash_arrow_schema, hash_record_batches_unordered};
+use crate::results::{
+    CaseFailure, CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics,
+};
+use crate::runner::{run_case_async_custom_timing, CaseExecutionResult};
 use crate::storage::StorageConfig;
 use crate::suites::scan_metrics::extract_scan_metrics;
 use deltalake_core::datafusion::physical_plan::collect;
@@ -67,6 +70,7 @@ pub(crate) async fn run_with_specs_and_sql_dir(
                     success: false,
                     classification: "supported".to_string(),
                     samples: Vec::new(),
+                    elapsed_stats: None,
                     failure: Some(CaseFailure {
                         message: format!(
                             "failed to load SQL for enabled query {}: {}",
@@ -81,7 +85,7 @@ pub(crate) async fn run_with_specs_and_sql_dir(
         let fixture_root = fixtures_dir.to_path_buf();
         let scale = scale.to_string();
         let storage = storage.clone();
-        let result = run_case_async(&case_name, warmup, iterations, || {
+        let result = run_case_async_custom_timing(&case_name, warmup, iterations, || {
             let sql = sql.clone();
             let fixture_root = fixture_root.clone();
             let scale = scale.clone();
@@ -115,7 +119,8 @@ async fn execute_query(
     scale: &str,
     storage: &StorageConfig,
     sql: &str,
-) -> BenchResult<SampleMetrics> {
+) -> BenchResult<(SampleMetrics, Option<f64>)> {
+    let timed_start = std::time::Instant::now();
     let ctx = SessionContext::new();
     registration::register_tables_for_sql(&ctx, fixtures_dir, scale, storage, sql).await?;
 
@@ -123,19 +128,35 @@ async fn execute_query(
     let task_ctx = Arc::new(df.task_ctx());
     let plan = df.create_physical_plan().await?;
     let batches = collect(plan.clone(), task_ctx).await?;
+    let elapsed_ms = timed_start.elapsed().as_secs_f64() * 1000.0;
 
     let rows_processed = batches.iter().map(|batch| batch.num_rows() as u64).sum();
     let scan = extract_scan_metrics(&plan);
+    let result_hash = hash_record_batches_unordered(&batches)?;
+    let schema_hash = hash_arrow_schema(plan.schema().as_ref())?;
 
-    Ok(
-        SampleMetrics::base(Some(rows_processed), None, None, None).with_scan_rewrite_metrics(
-            scan.files_scanned,
-            scan.files_pruned,
-            scan.bytes_scanned,
-            scan.scan_time_ms,
-            None,
-        ),
-    )
+    Ok((
+        SampleMetrics::base(Some(rows_processed), None, None, None)
+            .with_scan_rewrite(ScanRewriteMetrics {
+                files_scanned: scan.files_scanned,
+                files_pruned: scan.files_pruned,
+                bytes_scanned: scan.bytes_scanned,
+                scan_time_ms: scan.scan_time_ms,
+                rewrite_time_ms: None,
+            })
+            .with_runtime_io(RuntimeIOMetrics {
+                peak_rss_mb: None,
+                cpu_time_ms: None,
+                bytes_read: None,
+                bytes_written: None,
+                files_touched: None,
+                files_skipped: None,
+                spill_bytes: None,
+                result_hash: Some(result_hash),
+                schema_hash: Some(schema_hash),
+            }),
+        Some(elapsed_ms),
+    ))
 }
 
 fn skipped_case_result(case: String, skip_reason: Option<&str>) -> CaseResult {
@@ -144,6 +165,7 @@ fn skipped_case_result(case: String, skip_reason: Option<&str>) -> CaseResult {
         success: false,
         classification: "supported".to_string(),
         samples: Vec::new(),
+        elapsed_stats: None,
         failure: Some(CaseFailure {
             message: format!(
                 "skipped: {}",

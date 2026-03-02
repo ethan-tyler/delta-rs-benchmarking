@@ -1,33 +1,33 @@
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{merge_dml, optimize_vacuum, read_scan};
+use delta_bench::suites::{merge, optimize_vacuum, scan};
 
 #[tokio::test]
-async fn generated_fixtures_support_real_read_scan_suite() {
+async fn generated_fixtures_support_real_scan_suite() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
     generate_fixtures(temp.path(), "sf1", 42, true, &storage)
         .await
         .expect("generate fixtures");
 
-    let cases = read_scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
         .await
-        .expect("read suite run");
+        .expect("scan suite run");
     assert!(!cases.is_empty());
     assert!(cases.iter().all(|c| c.success));
 }
 
 #[tokio::test]
-async fn read_scan_samples_include_physical_scan_metrics() {
+async fn scan_samples_include_physical_scan_metrics() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
     generate_fixtures(temp.path(), "sf1", 42, true, &storage)
         .await
         .expect("generate fixtures");
 
-    let cases = read_scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
         .await
-        .expect("read suite run");
+        .expect("scan suite run");
     assert!(!cases.is_empty());
     let sample_metrics = cases
         .iter()
@@ -37,7 +37,7 @@ async fn read_scan_samples_include_physical_scan_metrics() {
         .collect::<Vec<_>>();
     assert!(
         !sample_metrics.is_empty(),
-        "expected read_scan sample metrics; cases={:?}",
+        "expected scan sample metrics; cases={:?}",
         cases
             .iter()
             .map(|case| (&case.case, case.success, &case.failure))
@@ -59,25 +59,25 @@ async fn read_scan_samples_include_physical_scan_metrics() {
 }
 
 #[tokio::test]
-async fn read_partition_pruning_hit_scans_fewer_files_than_miss() {
+async fn scan_pruning_hit_scans_fewer_files_than_miss() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
     generate_fixtures(temp.path(), "sf1", 42, true, &storage)
         .await
         .expect("generate fixtures");
 
-    let cases = read_scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
         .await
-        .expect("read suite run");
+        .expect("scan suite run");
 
     let hit_case = cases
         .iter()
-        .find(|case| case.case == "read_partition_pruning_hit")
-        .expect("expected read_partition_pruning_hit case");
+        .find(|case| case.case == "scan_pruning_hit")
+        .expect("expected scan_pruning_hit case");
     let miss_case = cases
         .iter()
-        .find(|case| case.case == "read_partition_pruning_miss")
-        .expect("expected read_partition_pruning_miss case");
+        .find(|case| case.case == "scan_pruning_miss")
+        .expect("expected scan_pruning_miss case");
 
     assert!(
         hit_case.success,
@@ -221,13 +221,13 @@ async fn merge_partition_localized_case_reports_pruned_files() {
         .await
         .expect("generate fixtures");
 
-    let cases = merge_dml::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = merge::run(temp.path(), "sf1", 0, 1, &storage)
         .await
         .expect("run merge suite");
     let localized = cases
         .iter()
-        .find(|case| case.case == "merge_partition_localized_1pct")
-        .expect("expected merge_partition_localized_1pct case");
+        .find(|case| case.case == "merge_localized_1pct")
+        .expect("expected merge_localized_1pct case");
     assert!(
         localized.success,
         "localized merge case failed: {:?}",

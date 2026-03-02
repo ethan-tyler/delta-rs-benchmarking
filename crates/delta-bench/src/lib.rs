@@ -2,6 +2,7 @@ pub mod assertions;
 pub mod cli;
 pub mod data;
 pub mod error;
+pub mod fingerprint;
 pub mod manifests;
 pub mod results;
 pub mod runner;

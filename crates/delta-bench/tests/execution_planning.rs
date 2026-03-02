@@ -1,10 +1,16 @@
+#![allow(clippy::await_holding_lock)]
+
 use delta_bench::assertions::CaseAssertion;
 use delta_bench::cli::RunnerMode;
-use delta_bench::data::fixtures::generate_fixtures;
+use delta_bench::data::fixtures::{
+    generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
+};
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::{
     apply_dataset_assertion_policy, plan_run_cases, run_planned_cases, run_target, PlannedCase,
 };
+use std::future::Future;
+use std::sync::{Mutex, OnceLock};
 
 #[test]
 fn case_filter_requires_at_least_one_matching_case() {
@@ -199,4 +205,160 @@ fn tpcds_duckdb_dataset_policy_does_not_modify_non_tpcds_cases() {
         planned[0].assertions[1],
         CaseAssertion::SchemaHash(_)
     ));
+}
+
+#[tokio::test]
+async fn tpcds_duckdb_schema_hash_mismatch_still_fails_after_policy() {
+    let _env_lock = env_lock();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    let script = temp.path().join("fake_tpcds_generator.py");
+    std::fs::write(
+        &script,
+        r#"#!/usr/bin/env python3
+import argparse
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--scale-factor", required=True)
+parser.add_argument("--output-csv", required=True)
+args = parser.parse_args()
+
+path = Path(args.output_csv)
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(
+    "ss_customer_sk,ss_ext_sales_price,ss_item_sk,ss_quantity,ss_sold_date_sk\n"
+    "1,11.0,101,2,2450815\n"
+    "2,15.5,102,3,2450816\n",
+    encoding="utf-8",
+)
+"#,
+    )
+    .expect("write fake script");
+
+    with_env_vars(
+        &[(
+            "DELTA_BENCH_TPCDS_DUCKDB_SCRIPT",
+            script.to_string_lossy().as_ref(),
+        )],
+        || async {
+            generate_fixtures_with_profile(
+                temp.path(),
+                "sf1",
+                42,
+                true,
+                FixtureProfile::TpcdsDuckdb,
+                &storage,
+            )
+            .await
+            .expect("generate tpcds_duckdb fixtures");
+        },
+    )
+    .await;
+
+    let mut planned = vec![PlannedCase {
+        id: "tpcds_q03".to_string(),
+        target: "tpcds".to_string(),
+        assertions: vec![
+            CaseAssertion::ExactResultHash("sha256:any".to_string()),
+            CaseAssertion::SchemaHash("sha256:not-real".to_string()),
+        ],
+    }];
+
+    apply_dataset_assertion_policy(&mut planned, Some("tpcds_duckdb"));
+    assert!(
+        planned[0]
+            .assertions
+            .iter()
+            .all(|assertion| !matches!(assertion, CaseAssertion::ExactResultHash(_))),
+        "exact result hash should be removed for tpcds_duckdb"
+    );
+    assert!(
+        planned[0]
+            .assertions
+            .iter()
+            .any(|assertion| matches!(assertion, CaseAssertion::SchemaHash(_))),
+        "schema hash should remain for tpcds_duckdb"
+    );
+
+    let cases = run_planned_cases(temp.path(), &planned, "sf1", 0, 1, &storage)
+        .await
+        .expect("planned run should execute");
+    assert_eq!(cases.len(), 1);
+    let only = &cases[0];
+    assert!(!only.success, "schema hash mismatch should fail");
+    let failure = only.failure.as_ref().expect("failure payload");
+    assert!(
+        failure.message.contains("schema hash mismatch"),
+        "unexpected failure payload: {}",
+        failure.message
+    );
+}
+
+fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("env lock poisoned")
+}
+
+async fn with_env_vars<F, Fut>(entries: &[(&str, &str)], f: F)
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let _restore_guard = EnvVarRestoreGuard::set(entries);
+    f().await;
+}
+
+struct EnvVarRestoreGuard {
+    previous: Vec<(String, Option<std::ffi::OsString>)>,
+}
+
+impl EnvVarRestoreGuard {
+    fn set(entries: &[(&str, &str)]) -> Self {
+        let previous = entries
+            .iter()
+            .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
+            .collect::<Vec<_>>();
+        for (key, value) in entries {
+            std::env::set_var(key, value);
+        }
+        Self { previous }
+    }
+}
+
+impl Drop for EnvVarRestoreGuard {
+    fn drop(&mut self) {
+        for (key, value) in self.previous.drain(..) {
+            if let Some(value) = value {
+                std::env::set_var(&key, value);
+            } else {
+                std::env::remove_var(&key);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn with_env_vars_restores_values_when_closure_panics() {
+    let _env_lock = env_lock();
+    let key = "DELTA_BENCH_TEST_ENV_PANIC_RESTORE";
+    let original = std::env::var_os(key);
+
+    let join = tokio::spawn(async move {
+        with_env_vars(&[(key, "panic-value")], || async {
+            panic!("intentional panic for env restore");
+        })
+        .await;
+    })
+    .await;
+
+    let err = join.expect_err("task should panic");
+    assert!(err.is_panic(), "unexpected join error: {err}");
+    assert_eq!(
+        std::env::var_os(key),
+        original,
+        "env var should be restored even when closure panics"
+    );
 }

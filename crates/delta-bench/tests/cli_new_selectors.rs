@@ -55,6 +55,28 @@ fn data_command_accepts_dataset_id() {
 }
 
 #[test]
+fn run_command_accepts_tpcds_duckdb_dataset_id() {
+    let args = Args::parse_from([
+        "delta-bench",
+        "run",
+        "--dataset-id",
+        "tpcds_duckdb",
+        "--target",
+        "tpcds",
+    ]);
+
+    match args.command {
+        Command::Run {
+            dataset_id, target, ..
+        } => {
+            assert_eq!(dataset_id.as_deref(), Some("tpcds_duckdb"));
+            assert_eq!(target, "tpcds");
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
 fn run_command_defaults_runner_to_all() {
     let args = Args::parse_from(["delta-bench", "run"]);
     match args.command {

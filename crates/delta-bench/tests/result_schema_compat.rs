@@ -11,7 +11,7 @@ fn schema_v2_fields_parse_and_round_trip() {
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
     "host": "test-host",
-    "suite": "merge_dml",
+    "suite": "merge",
     "scale": "sf1",
     "iterations": 1,
     "warmup": 1,
@@ -100,7 +100,7 @@ fn schema_v1_payload_is_rejected() {
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
     "host": "test-host",
-    "suite": "read_scan",
+    "suite": "scan",
     "scale": "sf1",
     "iterations": 1,
     "warmup": 1
@@ -127,7 +127,7 @@ fn missing_case_classification_is_rejected() {
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
     "host": "test-host",
-    "suite": "merge_dml",
+    "suite": "merge",
     "scale": "sf1",
     "iterations": 1,
     "warmup": 1
@@ -162,7 +162,7 @@ fn unknown_case_classification_is_rejected() {
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
     "host": "test-host",
-    "suite": "merge_dml",
+    "suite": "merge",
     "scale": "sf1",
     "iterations": 1,
     "warmup": 1
@@ -185,4 +185,61 @@ fn unknown_case_classification_is_rejected() {
         err.to_string().contains("classification"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn schema_v2_elapsed_stats_parse_when_present() {
+    let payload = r#"
+{
+  "schema_version": 2,
+  "context": {
+    "schema_version": 2,
+    "label": "v2-run",
+    "git_sha": "abc123",
+    "created_at": "2026-02-27T22:48:22.208400Z",
+    "host": "test-host",
+    "suite": "scan",
+    "scale": "sf1",
+    "iterations": 3,
+    "warmup": 1
+  },
+  "cases": [
+    {
+      "case": "scan_full_narrow",
+      "success": true,
+      "classification": "supported",
+      "samples": [
+        {
+          "elapsed_ms": 9.9,
+          "rows": 12,
+          "bytes": null,
+          "metrics": null
+        }
+      ],
+      "elapsed_stats": {
+        "min_ms": 9.9,
+        "max_ms": 12.1,
+        "mean_ms": 10.5,
+        "median_ms": 10.2,
+        "stddev_ms": 0.9,
+        "cv_pct": 8.57
+      },
+      "failure": null
+    }
+  ]
+}
+"#;
+
+    let parsed: BenchRunResult =
+        serde_json::from_str(payload).expect("schema v2 with elapsed_stats should parse");
+    let elapsed_stats = parsed.cases[0]
+        .elapsed_stats
+        .as_ref()
+        .expect("elapsed_stats should be present");
+    assert_eq!(elapsed_stats.min_ms, 9.9);
+    assert_eq!(elapsed_stats.max_ms, 12.1);
+    assert_eq!(elapsed_stats.mean_ms, 10.5);
+    assert_eq!(elapsed_stats.median_ms, 10.2);
+    assert_eq!(elapsed_stats.stddev_ms, 0.9);
+    assert_eq!(elapsed_stats.cv_pct, Some(8.57));
 }

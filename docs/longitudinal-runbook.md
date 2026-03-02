@@ -12,7 +12,7 @@ This runbook covers execution-plane operation of nightly longitudinal benchmarks
 
 Control-plane authorization, queueing, and PR-bot orchestration are intentionally out of scope for this repository.
 
-## Nightly workflow
+## Nightly commit-window workflow
 
 Workflow file: `.github/workflows/longitudinal-nightly.yml`
 
@@ -30,6 +30,25 @@ Nightly stages:
 5. `report` (markdown summary + HTML trends, optional significance checks)
 6. `prune` (retention policies for artifacts + store growth)
 7. upload artifacts (`longitudinal/` subtree)
+
+## Release-tag history workflow
+
+Workflow file: `.github/workflows/longitudinal-release-history.yml`
+
+Trigger modes:
+
+- scheduled: weekly at `04:30 UTC` on Monday
+- manual: `workflow_dispatch` with optional `baseline_window`
+
+Release-history stages (run separately for `rust-v*` and `python-v*` tags):
+
+1. `select-revisions` (`release-tags` strategy with lane-specific regex)
+2. `build-artifacts` (build missing release revisions only)
+3. `run-matrix` (suite/scale matrix, retry + timeout + resume state)
+4. `ingest-results` (append-safe normalized rows with run-id dedupe)
+5. `report` (markdown summary + HTML trends against release-history baseline)
+6. `prune` (retention policies for release-history artifacts + store growth)
+7. upload artifacts (`longitudinal/releases/<lane>/` subtree)
 
 ## State and artifacts
 
@@ -116,7 +135,7 @@ Idempotency behavior:
   --artifacts-dir longitudinal/artifacts \
   --state-path longitudinal/state/matrix-state.json \
   --results-dir results \
-  --suite read_scan --suite write --suite delete_update_dml --suite merge_dml --suite metadata --suite optimize_vacuum \
+  --suite scan --suite write --suite delete_update --suite merge --suite metadata --suite optimize_vacuum \
   --scale sf1 \
   --timeout-seconds 3600 \
   --max-retries 2

@@ -5,8 +5,8 @@ use serde::Deserialize;
 use crate::assertions::CaseAssertion;
 use crate::error::{BenchError, BenchResult};
 
-pub const DEFAULT_RUST_MANIFEST_PATH: &str = "bench/manifests/p0-rust.yaml";
-pub const DEFAULT_PYTHON_MANIFEST_PATH: &str = "bench/manifests/p0-python.yaml";
+pub const DEFAULT_RUST_MANIFEST_PATH: &str = "bench/manifests/core_rust.yaml";
+pub const DEFAULT_PYTHON_MANIFEST_PATH: &str = "bench/manifests/core_python.yaml";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct BenchmarkManifest {
@@ -64,6 +64,7 @@ pub enum DatasetId {
     MediumSelective,
     SmallFiles,
     ManyVersions,
+    TpcdsDuckdb,
 }
 
 impl DatasetId {
@@ -73,8 +74,9 @@ impl DatasetId {
             "medium_selective" => Ok(Self::MediumSelective),
             "small_files" => Ok(Self::SmallFiles),
             "many_versions" => Ok(Self::ManyVersions),
+            "tpcds_duckdb" => Ok(Self::TpcdsDuckdb),
             other => Err(BenchError::InvalidArgument(format!(
-                "unknown dataset_id '{other}' (expected one of: tiny_smoke, medium_selective, small_files, many_versions)"
+                "unknown dataset_id '{other}' (expected one of: tiny_smoke, medium_selective, small_files, many_versions, tpcds_duckdb)"
             ))),
         }
     }
@@ -85,6 +87,7 @@ impl DatasetId {
             Self::MediumSelective => "medium_selective",
             Self::SmallFiles => "small_files",
             Self::ManyVersions => "many_versions",
+            Self::TpcdsDuckdb => "tpcds_duckdb",
         }
     }
 
@@ -95,6 +98,15 @@ impl DatasetId {
             // P0 maps these scenario IDs to the currently supported scale; suites derive shape.
             Self::SmallFiles => "sf1",
             Self::ManyVersions => "sf1",
+            Self::TpcdsDuckdb => "sf1",
+        }
+    }
+
+    pub const fn fixture_profile(self) -> &'static str {
+        match self {
+            Self::ManyVersions => "many_versions",
+            Self::TpcdsDuckdb => "tpcds_duckdb",
+            Self::TinySmoke | Self::MediumSelective | Self::SmallFiles => "standard",
         }
     }
 }

@@ -45,6 +45,7 @@ pub(crate) fn fixture_error_cases(case_names: Vec<String>, message: &str) -> Vec
             success: false,
             classification: "supported".to_string(),
             samples: Vec::new(),
+            elapsed_stats: None,
             failure: Some(CaseFailure {
                 message: format!("fixture load failed: {message}"),
             }),
@@ -52,12 +53,12 @@ pub(crate) fn fixture_error_cases(case_names: Vec<String>, message: &str) -> Vec
         .collect()
 }
 
-pub mod delete_update_dml;
+pub mod delete_update;
 pub mod interop_py;
-pub mod merge_dml;
+pub mod merge;
 pub mod metadata;
 pub mod optimize_vacuum;
-pub mod read_scan;
+pub mod scan;
 mod scan_metrics;
 pub mod tpcds;
 pub mod write;
@@ -65,10 +66,10 @@ pub mod write;
 /// Single source of truth for suite names. Adding a new suite requires updating
 /// this array, `list_cases_for_target`, and `run_target`.
 const SUITE_NAMES: [&str; 8] = [
-    "read_scan",
+    "scan",
     "write",
-    "delete_update_dml",
-    "merge_dml",
+    "delete_update",
+    "merge",
     "metadata",
     "optimize_vacuum",
     "tpcds",
@@ -93,20 +94,31 @@ pub fn plan_run_cases(
     runner: RunnerMode,
     case_filter: Option<&str>,
 ) -> BenchResult<Vec<PlannedCase>> {
-    validate_runner_target(runner, target)?;
-    let mut planned = plan_cases_from_manifest(target, runner)?;
+    let canonical_target = canonical_suite_target(target);
+    validate_runner_target(runner, canonical_target)?;
+    let mut planned = plan_cases_from_manifest(canonical_target, runner)?;
 
     if let Some(filter) = case_filter.map(str::trim).filter(|value| !value.is_empty()) {
         planned.retain(|case| case.id.contains(filter));
     }
     if planned.is_empty() {
         return Err(BenchError::InvalidArgument(format!(
-            "case filter matched no cases for target='{target}' and runner='{}'",
+            "case filter matched no cases for target='{target}' (canonical='{canonical_target}') and runner='{}'",
             runner.as_str()
         )));
     }
     reject_duplicate_planned_case_ids(&planned)?;
     Ok(planned)
+}
+
+pub fn apply_dataset_assertion_policy(planned: &mut [PlannedCase], dataset_id: Option<&str>) {
+    if dataset_id != Some("tpcds_duckdb") {
+        return;
+    }
+    for case in planned.iter_mut().filter(|case| case.target == "tpcds") {
+        case.assertions
+            .retain(|assertion| !matches!(assertion, CaseAssertion::ExactResultHash(_)));
+    }
 }
 
 pub async fn run_planned_cases(
@@ -159,11 +171,12 @@ pub async fn run_planned_cases(
 }
 
 pub fn list_cases_for_target(target: &str) -> BenchResult<Vec<String>> {
-    match target {
-        "read_scan" => Ok(read_scan::case_names()),
+    let canonical_target = canonical_suite_target(target);
+    match canonical_target {
+        "scan" => Ok(scan::case_names()),
         "write" => Ok(write::case_names()),
-        "delete_update_dml" => Ok(delete_update_dml::case_names()),
-        "merge_dml" => Ok(merge_dml::case_names()),
+        "delete_update" => Ok(delete_update::case_names()),
+        "merge" => Ok(merge::case_names()),
         "metadata" => Ok(metadata::case_names()),
         "optimize_vacuum" => Ok(optimize_vacuum::case_names()),
         "tpcds" => Ok(tpcds::case_names()),
@@ -178,6 +191,15 @@ pub fn list_cases_for_target(target: &str) -> BenchResult<Vec<String>> {
         other => Err(BenchError::InvalidArgument(format!(
             "unknown suite target: {other}"
         ))),
+    }
+}
+
+fn canonical_suite_target(target: &str) -> &str {
+    match target {
+        "read_scan" => "scan",
+        "delete_update_dml" => "delete_update",
+        "merge_dml" => "merge",
+        other => other,
     }
 }
 
@@ -295,12 +317,12 @@ async fn run_single_suite(
     storage: &StorageConfig,
 ) -> BenchResult<Vec<CaseResult>> {
     match suite {
-        "read_scan" => read_scan::run(fixtures_dir, scale, warmup, iterations, storage).await,
+        "scan" => scan::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "write" => write::run(fixtures_dir, scale, warmup, iterations, storage).await,
-        "delete_update_dml" => {
-            delete_update_dml::run(fixtures_dir, scale, warmup, iterations, storage).await
+        "delete_update" => {
+            delete_update::run(fixtures_dir, scale, warmup, iterations, storage).await
         }
-        "merge_dml" => merge_dml::run(fixtures_dir, scale, warmup, iterations, storage).await,
+        "merge" => merge::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "metadata" => metadata::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "optimize_vacuum" => {
             optimize_vacuum::run(fixtures_dir, scale, warmup, iterations, storage).await
@@ -321,13 +343,22 @@ pub async fn run_target(
     iterations: u32,
     storage: &StorageConfig,
 ) -> BenchResult<Vec<CaseResult>> {
-    if target == "all" {
+    let canonical_target = canonical_suite_target(target);
+    if canonical_target == "all" {
         return Err(BenchError::InvalidArgument(
             "target=all requires manifest planning; use plan_run_cases + run_planned_cases"
                 .to_string(),
         ));
     }
-    run_single_suite(fixtures_dir, target, scale, warmup, iterations, storage).await
+    run_single_suite(
+        fixtures_dir,
+        canonical_target,
+        scale,
+        warmup,
+        iterations,
+        storage,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -359,7 +390,7 @@ mod tests {
         fs::write(&rust_manifest, "not: [valid").expect("write invalid rust manifest");
         fs::write(
             &python_manifest,
-            "id: p0-python\ndescription: test\ncases: []\n",
+            "id: core-python\ndescription: test\ncases: []\n",
         )
         .expect("write valid python manifest");
 

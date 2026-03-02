@@ -5,10 +5,15 @@ pub struct SampleStats {
     pub max_ms: f64,
     pub mean_ms: f64,
     pub median_ms: f64,
+    pub stddev_ms: f64,
+    pub cv_pct: Option<f64>,
 }
 
 pub fn compute_stats(samples_ms: &[f64]) -> Option<SampleStats> {
     if samples_ms.is_empty() {
+        return None;
+    }
+    if samples_ms.iter().any(|value| value.is_nan()) {
         return None;
     }
 
@@ -17,17 +22,34 @@ pub fn compute_stats(samples_ms: &[f64]) -> Option<SampleStats> {
 
     let len = values.len();
     let sum: f64 = values.iter().sum();
+    let mean_ms = sum / (len as f64);
     let median_ms = if len.is_multiple_of(2) {
         (values[(len / 2) - 1] + values[len / 2]) / 2.0
     } else {
         values[len / 2]
     };
+    let variance = values
+        .iter()
+        .map(|value| {
+            let delta = *value - mean_ms;
+            delta * delta
+        })
+        .sum::<f64>()
+        / (len as f64);
+    let stddev_ms = variance.sqrt();
+    let cv_pct = if mean_ms.abs() > f64::EPSILON {
+        Some((stddev_ms / mean_ms.abs()) * 100.0)
+    } else {
+        None
+    };
 
     Some(SampleStats {
         min_ms: *values.first().unwrap_or(&0.0),
         max_ms: *values.last().unwrap_or(&0.0),
-        mean_ms: sum / (len as f64),
+        mean_ms,
         median_ms,
+        stddev_ms,
+        cv_pct,
     })
 }
 
@@ -47,6 +69,8 @@ mod tests {
         assert_eq!(stats.max_ms, 42.0);
         assert_eq!(stats.mean_ms, 42.0);
         assert_eq!(stats.median_ms, 42.0);
+        assert_eq!(stats.stddev_ms, 0.0);
+        assert_eq!(stats.cv_pct, Some(0.0));
     }
 
     #[test]
@@ -56,6 +80,8 @@ mod tests {
         assert_eq!(stats.max_ms, 20.0);
         assert_eq!(stats.mean_ms, 15.0);
         assert_eq!(stats.median_ms, 15.0);
+        assert!(stats.stddev_ms > 0.0);
+        assert!(stats.cv_pct.unwrap_or(0.0) > 0.0);
     }
 
     #[test]
@@ -83,11 +109,8 @@ mod tests {
     }
 
     #[test]
-    fn nan_input_produces_nan_stats() {
-        // NaN samples are pathological — document that the function still
-        // returns Some (it doesn't panic) but the values are meaningless.
-        let stats = compute_stats(&[f64::NAN, 1.0, 2.0]).unwrap();
-        assert!(stats.mean_ms.is_nan());
+    fn nan_input_returns_none() {
+        assert_eq!(compute_stats(&[f64::NAN, 1.0, 2.0]), None);
     }
 
     #[test]

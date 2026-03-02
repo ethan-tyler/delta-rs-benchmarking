@@ -12,6 +12,8 @@ SRC_BACKEND_PROFILES="${ROOT_DIR}/backends"
 DEST_BACKEND_PROFILES="${DELTA_RS_DIR}/backends"
 SRC_INTEROP_PY="${ROOT_DIR}/python/delta_bench_interop"
 DEST_INTEROP_PY="${DELTA_RS_DIR}/python/delta_bench_interop"
+SRC_TPCDS_PY="${ROOT_DIR}/python/delta_bench_tpcds"
+DEST_TPCDS_PY="${DELTA_RS_DIR}/python/delta_bench_tpcds"
 
 if [[ ! -d "${DELTA_RS_DIR}/.git" ]]; then
   echo "delta-rs checkout not found at ${DELTA_RS_DIR}. Run ./scripts/prepare_delta_rs.sh first."
@@ -35,5 +37,8 @@ rsync -a --delete "${SRC_BACKEND_PROFILES}/" "${DEST_BACKEND_PROFILES}/"
 
 mkdir -p "${DEST_INTEROP_PY}"
 rsync -a --delete "${SRC_INTEROP_PY}/" "${DEST_INTEROP_PY}/"
+
+mkdir -p "${DEST_TPCDS_PY}"
+rsync -a --delete "${SRC_TPCDS_PY}/" "${DEST_TPCDS_PY}/"
 
 echo "synced harness to ${DEST_CRATE}"

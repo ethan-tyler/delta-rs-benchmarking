@@ -9,10 +9,10 @@ fn list_targets_includes_optimize_vacuum() {
 }
 
 #[test]
-fn list_targets_includes_delete_update_dml() {
+fn list_targets_includes_delete_update() {
     assert!(
-        list_targets().contains(&"delete_update_dml"),
-        "delete_update_dml target missing from list_targets"
+        list_targets().contains(&"delete_update"),
+        "delete_update target missing from list_targets"
     );
 }
 
@@ -48,33 +48,33 @@ fn optimize_vacuum_case_list_is_exact() {
 }
 
 #[test]
-fn read_scan_case_list_is_exact() {
-    let cases = list_cases_for_target("read_scan").expect("known target should work");
+fn scan_case_list_is_exact() {
+    let cases = list_cases_for_target("scan").expect("known target should work");
     assert_eq!(
         cases,
         vec![
-            "read_full_scan_narrow".to_string(),
-            "read_projection_region".to_string(),
-            "read_filter_flag_true".to_string(),
-            "read_partition_pruning_hit".to_string(),
-            "read_partition_pruning_miss".to_string(),
+            "scan_full_narrow".to_string(),
+            "scan_projection_region".to_string(),
+            "scan_filter_flag".to_string(),
+            "scan_pruning_hit".to_string(),
+            "scan_pruning_miss".to_string(),
         ]
     );
 }
 
 #[test]
-fn delete_update_dml_case_list_is_exact() {
-    let cases = list_cases_for_target("delete_update_dml").expect("known target should work");
+fn delete_update_case_list_is_exact() {
+    let cases = list_cases_for_target("delete_update").expect("known target should work");
     assert_eq!(
         cases,
         vec![
-            "delete_rowsMatchedFraction_0.01_partition_localized".to_string(),
-            "delete_rowsMatchedFraction_0.05_scattered".to_string(),
-            "delete_rowsMatchedFraction_0.50_broad".to_string(),
-            "update_literal_rowsMatchedFraction_0.01_partition_localized".to_string(),
-            "update_literal_rowsMatchedFraction_0.05_scattered".to_string(),
-            "update_expression_rowsMatchedFraction_0.50_broad".to_string(),
-            "update_all_rows_expression".to_string(),
+            "delete_1pct_localized".to_string(),
+            "delete_5pct_scattered".to_string(),
+            "delete_50pct_broad".to_string(),
+            "update_literal_1pct_localized".to_string(),
+            "update_literal_5pct_scattered".to_string(),
+            "update_expr_50pct_broad".to_string(),
+            "update_all_rows_expr".to_string(),
         ]
     );
 }
@@ -123,4 +123,26 @@ fn unknown_target_returns_error() {
         err.to_string().contains("unknown suite target"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn legacy_scan_target_alias_resolves_to_scan_cases() {
+    let canonical = list_cases_for_target("scan").expect("canonical target should work");
+    let legacy = list_cases_for_target("read_scan").expect("legacy target alias should work");
+    assert_eq!(legacy, canonical);
+}
+
+#[test]
+fn legacy_delete_update_target_alias_resolves_to_delete_update_cases() {
+    let canonical = list_cases_for_target("delete_update").expect("canonical target should work");
+    let legacy =
+        list_cases_for_target("delete_update_dml").expect("legacy target alias should work");
+    assert_eq!(legacy, canonical);
+}
+
+#[test]
+fn legacy_merge_target_alias_resolves_to_merge_cases() {
+    let canonical = list_cases_for_target("merge").expect("canonical target should work");
+    let legacy = list_cases_for_target("merge_dml").expect("legacy target alias should work");
+    assert_eq!(legacy, canonical);
 }

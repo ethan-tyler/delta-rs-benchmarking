@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use deltalake_core::datafusion::logical_expr::col;
 use deltalake_core::datafusion::prelude::{DataFrame, SessionContext};
+use serde_json::json;
 use url::Url;
 
 use super::{copy_dir_all, fixture_error_cases, into_case_result};
@@ -12,7 +13,8 @@ use crate::data::fixtures::{
     write_delta_table, write_delta_table_partitioned_small_files,
 };
 use crate::error::{BenchError, BenchResult};
-use crate::results::{CaseResult, SampleMetrics};
+use crate::fingerprint::hash_json;
+use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
 use crate::runner::{run_case_async_with_async_setup, run_case_async_with_setup};
 use crate::storage::StorageConfig;
 
@@ -45,7 +47,7 @@ struct MergeIterationSetup {
 
 const MERGE_CASES: [MergeCase; 6] = [
     MergeCase {
-        name: "delete_only_filesMatchedFraction_0.05_rowsMatchedFraction_0.05",
+        name: "merge_delete_5pct",
         match_ratio: 0.05,
         mode: MergeMode::Delete,
         target_profile: MergeTargetProfile::Standard,
@@ -53,7 +55,7 @@ const MERGE_CASES: [MergeCase; 6] = [
         include_partition_predicate: false,
     },
     MergeCase {
-        name: "upsert_filesMatchedFraction_0.05_rowsMatchedFraction_0.1_rowsNotMatchedFraction_0.1",
+        name: "merge_upsert_10pct_insert_10pct",
         match_ratio: 0.1,
         mode: MergeMode::Upsert,
         target_profile: MergeTargetProfile::Standard,
@@ -85,7 +87,7 @@ const MERGE_CASES: [MergeCase; 6] = [
         include_partition_predicate: false,
     },
     MergeCase {
-        name: "merge_partition_localized_1pct",
+        name: "merge_localized_1pct",
         match_ratio: 0.01,
         mode: MergeMode::Upsert,
         target_profile: MergeTargetProfile::Partitioned,
@@ -272,19 +274,41 @@ async fn run_merge_case(
         }
     };
 
-    Ok(SampleMetrics::base(
-        Some(source_rows as u64),
-        None,
-        Some(1),
-        table.version().map(|v| v as u64),
+    let table_version = table.version().map(|v| v as u64);
+    let result_hash = hash_json(&json!({
+        "source_rows": source_rows as u64,
+        "table_version": table_version,
+        "target_files_scanned": merge_metrics.num_target_files_scanned as u64,
+        "target_files_pruned": merge_metrics.num_target_files_skipped_during_scan as u64,
+    }))?;
+    let schema_hash = hash_json(&json!([
+        "source_rows:u64",
+        "table_version:u64",
+        "target_files_scanned:u64",
+        "target_files_pruned:u64",
+    ]))?;
+
+    Ok(
+        SampleMetrics::base(Some(source_rows as u64), None, Some(1), table_version)
+            .with_scan_rewrite(ScanRewriteMetrics {
+                files_scanned: Some(merge_metrics.num_target_files_scanned as u64),
+                files_pruned: Some(merge_metrics.num_target_files_skipped_during_scan as u64),
+                bytes_scanned: None,
+                scan_time_ms: Some(merge_metrics.scan_time_ms),
+                rewrite_time_ms: Some(merge_metrics.rewrite_time_ms),
+            })
+            .with_runtime_io(RuntimeIOMetrics {
+                peak_rss_mb: None,
+                cpu_time_ms: None,
+                bytes_read: None,
+                bytes_written: None,
+                files_touched: None,
+                files_skipped: None,
+                spill_bytes: None,
+                result_hash: Some(result_hash),
+                schema_hash: Some(schema_hash),
+            }),
     )
-    .with_scan_rewrite_metrics(
-        Some(merge_metrics.num_target_files_scanned as u64),
-        Some(merge_metrics.num_target_files_skipped_during_scan as u64),
-        None,
-        Some(merge_metrics.scan_time_ms),
-        Some(merge_metrics.rewrite_time_ms),
-    ))
 }
 
 async fn seed_merge_target_table(

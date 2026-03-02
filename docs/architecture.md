@@ -5,6 +5,7 @@
 - `crates/delta-bench`: Rust CLI + benchmark execution engine.
 - `python/delta_bench_compare`: result comparison and rendering.
 - `python/delta_bench_interop`: targeted Python interop benchmark cases (`pandas`, `polars`, `pyarrow`).
+- `python/delta_bench_tpcds`: DuckDB-backed `store_sales` fixture generation script for `tpcds_duckdb`.
 - `bench/manifests/*.yaml`: required benchmark catalogs used as the only execution planning source.
 - `backends/*.env`: backend profile defaults (provider-specific and custom profiles).
 - `scripts/prepare_delta_rs.sh`: manages local checkout at `.delta-rs-under-test`.
@@ -18,14 +19,17 @@
 ## Data flow
 
 1. `delta-bench data` generates deterministic fixtures under `fixtures/<scale>/`.
-2. Fixture generation writes both JSON row snapshots and concrete Delta tables (`narrow_sales_delta`, `merge_target_delta`, `read_partitioned_delta`, `merge_partitioned_target_delta`, `optimize_small_files_delta`, `optimize_compacted_delta`, `vacuum_ready_delta`).
-3. `delta-bench run` resolves runner mode (`rust|python|all`) from manifest-planned cases and executes:
+2. Fixture generation writes both JSON row snapshots and concrete Delta tables (`narrow_sales_delta`, `merge_target_delta`, `read_partitioned_delta`, `merge_partitioned_target_delta`, `optimize_small_files_delta`, `optimize_compacted_delta`, `vacuum_ready_delta`, `tpcds/store_sales`).
+3. For `dataset_id=tpcds_duckdb`, `tpcds/store_sales` is sourced from DuckDB `tpcds` (`INSTALL tpcds; LOAD tpcds; CALL dsdgen(...)`) and exported through CSV before Delta write.
+4. `delta-bench run` resolves runner mode (`rust|python|all`) from manifest-planned cases and executes:
    - Rust suites against `deltalake-core`
    - Python interoperability suite through `python/delta_bench_interop/run_case.py`
-4. Results are written as schema v2 JSON to `results/<label>/<suite>.json`.
-5. `compare.py` reads baseline/candidate result JSON (schema v2 only) and classifies per-case changes.
-6. `security_check.sh` runs before benchmark execution to validate security/fidelity invariants.
-7. Manual compare script prints markdown output suitable for PR comments.
+5. Results are written as schema v2 JSON to `results/<label>/<suite>.json`.
+6. `compare.py` reads baseline/candidate result JSON (schema v2 only) and classifies per-case changes.
+7. `security_check.sh` runs before benchmark execution to validate security/fidelity invariants.
+8. Manual compare script prints markdown output suitable for PR comments.
+
+Marketplace datasets are currently a document-only path: place externally provisioned Delta tables under the expected `fixtures/<scale>/...` roots; no automated ingestion pipeline exists in-repo yet.
 
 ## Result schema v2
 
@@ -53,22 +57,23 @@
 - Samples: `elapsed_ms` plus normalized `metrics`:
   - Base fields: `rows_processed`, `bytes_processed`, `operations`, `table_version`
   - Optional scan/rewrite fields: `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`, `rewrite_time_ms`
-  - Optional runtime/io/result fields: `peak_rss_mb`, `cpu_time_ms`, `bytes_read`, `bytes_written`, `files_touched`, `files_skipped`, `spill_bytes`, `result_hash`
+  - Optional runtime/io/result fields: `peak_rss_mb`, `cpu_time_ms`, `bytes_read`, `bytes_written`, `files_touched`, `files_skipped`, `spill_bytes`, `result_hash`, `schema_hash`
+  - Optional case-level elapsed aggregates: `min_ms`, `max_ms`, `mean_ms`, `median_ms`, `stddev_ms`, `cv_pct`
   - Source mapping:
-    - `read_scan`: DataFusion/Delta physical-plan metrics (`files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`)
-    - `merge_dml`: `MergeMetrics` (`files_scanned`, `files_pruned`, `scan_time_ms`, `rewrite_time_ms`)
+    - `scan`: DataFusion/Delta physical-plan metrics (`files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`)
+    - `merge`: `MergeMetrics` (`files_scanned`, `files_pruned`, `scan_time_ms`, `rewrite_time_ms`)
     - `optimize_vacuum` optimize cases: considered/skipped counts (`files_scanned`, `files_pruned`)
 
 ## Benchmark coverage additions
 
-- `read_scan` includes partition-pruning contrast cases (`read_partition_pruning_hit`, `read_partition_pruning_miss`).
-- `merge_dml` includes localized partition-aware case (`merge_partition_localized_1pct`) using target/source region alignment and partition predicate.
+- `scan` includes partition-pruning contrast cases (`scan_pruning_hit`, `scan_pruning_miss`).
+- `merge` includes localized partition-aware case (`merge_localized_1pct`) using target/source region alignment and partition predicate.
 - `optimize_vacuum` includes explicit noop-vs-heavy compaction cases (`optimize_noop_already_compact`, `optimize_heavy_compaction`).
 
 ## Reproducibility controls
 
 - Deterministic seed-based fixture generation
-- Deterministic manifest ordering for P0 (`p0-rust`, `p0-python`)
+- Deterministic manifest ordering for core lanes (`core-rust`, `core-python`)
 - Single-machine sequential branch comparisons
 - Stable default threshold (`0.05`) for no-change classification
 - Explicit benchmark run mode to suppress update/scan/log-noise during timed runs

@@ -1,6 +1,6 @@
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{merge_dml, metadata, write};
+use delta_bench::suites::{merge, metadata, write};
 
 #[tokio::test]
 async fn write_samples_include_normalized_metrics() {
@@ -54,14 +54,12 @@ async fn merge_samples_include_merge_scan_and_rewrite_metrics() {
         .await
         .expect("generate fixtures");
 
-    let cases = merge_dml::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = merge::run(temp.path(), "sf1", 0, 1, &storage)
         .await
         .expect("run merge suite");
     assert!(
-        cases
-            .iter()
-            .any(|case| case.case == "merge_partition_localized_1pct"),
-        "expected merge_partition_localized_1pct case; cases={:?}",
+        cases.iter().any(|case| case.case == "merge_localized_1pct"),
+        "expected merge_localized_1pct case; cases={:?}",
         cases.iter().map(|case| &case.case).collect::<Vec<_>>()
     );
     let sample_metrics = cases

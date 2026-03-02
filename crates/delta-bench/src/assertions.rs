@@ -49,7 +49,7 @@ fn assert_schema_hash(case: &mut CaseResult, expected: &str) {
         .samples
         .iter()
         .filter_map(|sample| sample.metrics.as_ref())
-        .find_map(|metrics| metrics.result_hash.as_deref());
+        .find_map(|metrics| metrics.schema_hash.as_deref());
     if found != Some(expected) {
         fail_case(
             case,

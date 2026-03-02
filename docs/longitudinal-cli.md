@@ -35,7 +35,7 @@ Operational recovery and nightly-job behavior are documented in [longitudinal-ru
   --max-parallel 2 \
   --max-load-per-cpu 0.75 \
   --load-check-interval-seconds 10 \
-  --suite read_scan \
+  --suite scan \
   --suite metadata \
   --scale sf1 \
   --timeout-seconds 3600 \
@@ -76,10 +76,10 @@ Operational recovery and nightly-job behavior are documented in [longitudinal-ru
   --store-dir longitudinal/store \
   --markdown-path longitudinal/reports/summary.md \
   --html-path longitudinal/reports/trends.html \
-  --suite read_scan \
+  --suite scan \
   --suite write \
-  --suite delete_update_dml \
-  --suite merge_dml \
+  --suite delete_update \
+  --suite merge \
   --suite metadata \
   --suite optimize_vacuum \
   --scale sf1
@@ -90,6 +90,11 @@ Operational recovery and nightly-job behavior are documented in [longitudinal-ru
 - `release-tags`: semantic version tags (`vX.Y.Z` by default)
 - `date-window`: all commits in an inclusive date range
 - `one-per-day`: latest commit per day in an inclusive date range
+
+Release-tag examples for `delta-rs` tracks:
+
+- Rust releases: `--release-tag-pattern '^rust-v\d+\.\d+\.\d+([+-].+)?$'`
+- Python releases: `--release-tag-pattern '^python-v\d+\.\d+\.\d+([+-].+)?$'`
 
 ## Parallel and load-guard controls
 

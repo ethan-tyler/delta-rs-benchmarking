@@ -1,20 +1,20 @@
-use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
 use chrono::Duration as ChronoDuration;
+use serde_json::json;
 use url::Url;
 
+use super::{copy_dir_all, fixture_error_cases, into_case_result};
 use crate::data::fixtures::{
     load_rows, optimize_compacted_table_path, optimize_small_files_table_path,
     vacuum_ready_table_path, write_delta_table, write_delta_table_small_files,
     write_vacuum_ready_table,
 };
 use crate::error::{BenchError, BenchResult};
-use crate::results::{CaseFailure, CaseResult, SampleMetrics};
-use crate::runner::{
-    run_case_async_with_async_setup, run_case_async_with_setup, CaseExecutionResult,
-};
+use crate::fingerprint::hash_json;
+use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
+use crate::runner::{run_case_async_with_async_setup, run_case_async_with_setup};
 use crate::storage::StorageConfig;
 
 const OPTIMIZE_COMPACT_TARGET_SIZE: u64 = 1_000_000;
@@ -52,6 +52,7 @@ pub async fn run(
             || !vacuum_source.exists()
         {
             return Ok(fixture_error_cases(
+                case_names(),
                 "missing optimize/vacuum fixture tables; run bench data first",
             ));
         }
@@ -158,7 +159,7 @@ pub async fn run(
 
     let rows = match load_rows(fixtures_dir, scale) {
         Ok(rows) => Arc::new(rows),
-        Err(e) => return Ok(fixture_error_cases(&e.to_string())),
+        Err(e) => return Ok(fixture_error_cases(case_names(), &e.to_string())),
     };
     let optimize_seed_rows = Arc::new(
         rows.iter()
@@ -341,19 +342,49 @@ async fn run_optimize_case(
 ) -> BenchResult<SampleMetrics> {
     let table = storage.open_table(table_url).await?;
     let (table, metrics) = table.optimize().with_target_size(target_size).await?;
+    let table_version = table.version().map(|v| v as u64);
+    let result_hash = hash_json(&json!({
+        "operation": "optimize",
+        "target_size": target_size,
+        "files_considered": metrics.total_considered_files as u64,
+        "files_skipped": metrics.total_files_skipped as u64,
+        "files_added": metrics.num_files_added,
+        "files_removed": metrics.num_files_removed,
+        "table_version": table_version,
+    }))?;
+    let schema_hash = hash_json(&json!([
+        "operation:string",
+        "target_size:u64",
+        "files_considered:u64",
+        "files_skipped:u64",
+        "files_added:u64",
+        "files_removed:u64",
+        "table_version:u64",
+    ]))?;
     Ok(SampleMetrics::base(
         Some(metrics.total_considered_files as u64),
         None,
         Some(metrics.num_files_added + metrics.num_files_removed),
-        table.version().map(|v| v as u64),
+        table_version,
     )
-    .with_scan_rewrite_metrics(
-        Some(metrics.total_considered_files as u64),
-        Some(metrics.total_files_skipped as u64),
-        None,
-        None,
-        None,
-    ))
+    .with_scan_rewrite(ScanRewriteMetrics {
+        files_scanned: Some(metrics.total_considered_files as u64),
+        files_pruned: Some(metrics.total_files_skipped as u64),
+        bytes_scanned: None,
+        scan_time_ms: None,
+        rewrite_time_ms: None,
+    })
+    .with_runtime_io(RuntimeIOMetrics {
+        peak_rss_mb: None,
+        cpu_time_ms: None,
+        bytes_read: None,
+        bytes_written: None,
+        files_touched: None,
+        files_skipped: None,
+        spill_bytes: None,
+        result_hash: Some(result_hash),
+        schema_hash: Some(schema_hash),
+    }))
 }
 
 async fn run_vacuum_case(
@@ -368,12 +399,36 @@ async fn run_vacuum_case(
         .with_retention_period(ChronoDuration::seconds(0))
         .with_enforce_retention_duration(false)
         .await?;
+    let table_version = table.version().map(|v| v as u64);
+    let result_hash = hash_json(&json!({
+        "operation": "vacuum",
+        "dry_run": dry_run,
+        "files_deleted": metrics.files_deleted.len() as u64,
+        "table_version": table_version,
+    }))?;
+    let schema_hash = hash_json(&json!([
+        "operation:string",
+        "dry_run:bool",
+        "files_deleted:u64",
+        "table_version:u64",
+    ]))?;
     Ok(SampleMetrics::base(
         Some(metrics.files_deleted.len() as u64),
         None,
         Some(1),
-        table.version().map(|v| v as u64),
-    ))
+        table_version,
+    )
+    .with_runtime_io(RuntimeIOMetrics {
+        peak_rss_mb: None,
+        cpu_time_ms: None,
+        bytes_read: None,
+        bytes_written: None,
+        files_touched: None,
+        files_skipped: None,
+        spill_bytes: None,
+        result_hash: Some(result_hash),
+        schema_hash: Some(schema_hash),
+    }))
 }
 
 fn prepare_iteration(source_table_path: &Path) -> BenchResult<IterationSetup> {
@@ -390,46 +445,4 @@ fn prepare_iteration(source_table_path: &Path) -> BenchResult<IterationSetup> {
         _temp: temp,
         table_url,
     })
-}
-
-fn copy_dir_all(src: &Path, dst: &Path) -> BenchResult<()> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        if file_type.is_symlink() {
-            return Err(BenchError::InvalidArgument(format!(
-                "symlinks are not allowed in fixture tree: {}",
-                entry.path().display()
-            )));
-        }
-        let to = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_all(&entry.path(), &to)?;
-        } else {
-            fs::copy(entry.path(), to)?;
-        }
-    }
-    Ok(())
-}
-
-fn into_case_result(result: CaseExecutionResult) -> CaseResult {
-    match result {
-        CaseExecutionResult::Success(c) | CaseExecutionResult::Failure(c) => c,
-    }
-}
-
-fn fixture_error_cases(message: &str) -> Vec<CaseResult> {
-    case_names()
-        .into_iter()
-        .map(|case| CaseResult {
-            case,
-            success: false,
-            classification: "supported".to_string(),
-            samples: Vec::new(),
-            failure: Some(CaseFailure {
-                message: format!("fixture load failed: {message}"),
-            }),
-        })
-        .collect()
 }

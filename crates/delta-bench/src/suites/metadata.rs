@@ -1,11 +1,13 @@
 use std::path::Path;
 
+use serde_json::json;
 use url::Url;
 
 use super::{copy_dir_all, into_case_result};
 use crate::data::fixtures::{narrow_sales_table_path, narrow_sales_table_url};
 use crate::error::{BenchError, BenchResult};
-use crate::results::{CaseResult, SampleMetrics};
+use crate::fingerprint::hash_json;
+use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics};
 use crate::runner::{run_case_async, run_case_async_with_setup};
 use crate::storage::StorageConfig;
 
@@ -16,7 +18,7 @@ struct MetadataIterationSetup {
 
 pub fn case_names() -> Vec<String> {
     vec![
-        "metadata_table_load".to_string(),
+        "metadata_load".to_string(),
         "metadata_time_travel_v0".to_string(),
     ]
 }
@@ -33,7 +35,7 @@ pub async fn run(
         let mut out = Vec::new();
 
         let c1 = run_case_async_with_setup(
-            "metadata_table_load",
+            "metadata_load",
             warmup,
             iterations,
             || prepare_metadata_iteration(&table_path).map_err(|e| e.to_string()),
@@ -46,12 +48,29 @@ pub async fn run(
                         .open_table(table_url)
                         .await
                         .map_err(|e| e.to_string())?;
-                    Ok::<SampleMetrics, String>(SampleMetrics::base(
-                        None,
-                        None,
-                        Some(1),
-                        table.version().map(|v| v as u64),
-                    ))
+                    let table_version = table.version().map(|v| v as u64);
+                    let result_hash = hash_json(&json!({
+                        "operation": "metadata_load",
+                        "table_version": table_version,
+                    }))
+                    .map_err(|e| e.to_string())?;
+                    let schema_hash = hash_json(&json!(["operation:string", "table_version:u64",]))
+                        .map_err(|e| e.to_string())?;
+                    Ok::<SampleMetrics, String>(
+                        SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(
+                            RuntimeIOMetrics {
+                                peak_rss_mb: None,
+                                cpu_time_ms: None,
+                                bytes_read: None,
+                                bytes_written: None,
+                                files_touched: None,
+                                files_skipped: None,
+                                spill_bytes: None,
+                                result_hash: Some(result_hash),
+                                schema_hash: Some(schema_hash),
+                            },
+                        ),
+                    )
                 }
             },
         )
@@ -73,12 +92,29 @@ pub async fn run(
                         .await
                         .map_err(|e| e.to_string())?;
                     table.load_version(0).await.map_err(|e| e.to_string())?;
-                    Ok::<SampleMetrics, String>(SampleMetrics::base(
-                        None,
-                        None,
-                        Some(1),
-                        table.version().map(|v| v as u64),
-                    ))
+                    let table_version = table.version().map(|v| v as u64);
+                    let result_hash = hash_json(&json!({
+                        "operation": "metadata_time_travel_v0",
+                        "table_version": table_version,
+                    }))
+                    .map_err(|e| e.to_string())?;
+                    let schema_hash = hash_json(&json!(["operation:string", "table_version:u64",]))
+                        .map_err(|e| e.to_string())?;
+                    Ok::<SampleMetrics, String>(
+                        SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(
+                            RuntimeIOMetrics {
+                                peak_rss_mb: None,
+                                cpu_time_ms: None,
+                                bytes_read: None,
+                                bytes_written: None,
+                                files_touched: None,
+                                files_skipped: None,
+                                spill_bytes: None,
+                                result_hash: Some(result_hash),
+                                schema_hash: Some(schema_hash),
+                            },
+                        ),
+                    )
                 }
             },
         )
@@ -91,7 +127,7 @@ pub async fn run(
     let table_url = narrow_sales_table_url(fixtures_dir, scale, storage)?;
     let mut out = Vec::new();
 
-    let c1 = run_case_async("metadata_table_load", warmup, iterations, || {
+    let c1 = run_case_async("metadata_load", warmup, iterations, || {
         let storage = storage.clone();
         let table_url = table_url.clone();
         async move {
@@ -99,12 +135,29 @@ pub async fn run(
                 .open_table(table_url)
                 .await
                 .map_err(|e| e.to_string())?;
-            Ok::<SampleMetrics, String>(SampleMetrics::base(
-                None,
-                None,
-                Some(1),
-                table.version().map(|v| v as u64),
-            ))
+            let table_version = table.version().map(|v| v as u64);
+            let result_hash = hash_json(&json!({
+                "operation": "metadata_load",
+                "table_version": table_version,
+            }))
+            .map_err(|e| e.to_string())?;
+            let schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))
+                .map_err(|e| e.to_string())?;
+            Ok::<SampleMetrics, String>(
+                SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(
+                    RuntimeIOMetrics {
+                        peak_rss_mb: None,
+                        cpu_time_ms: None,
+                        bytes_read: None,
+                        bytes_written: None,
+                        files_touched: None,
+                        files_skipped: None,
+                        spill_bytes: None,
+                        result_hash: Some(result_hash),
+                        schema_hash: Some(schema_hash),
+                    },
+                ),
+            )
         }
     })
     .await;
@@ -119,12 +172,29 @@ pub async fn run(
                 .await
                 .map_err(|e| e.to_string())?;
             table.load_version(0).await.map_err(|e| e.to_string())?;
-            Ok::<SampleMetrics, String>(SampleMetrics::base(
-                None,
-                None,
-                Some(1),
-                table.version().map(|v| v as u64),
-            ))
+            let table_version = table.version().map(|v| v as u64);
+            let result_hash = hash_json(&json!({
+                "operation": "metadata_time_travel_v0",
+                "table_version": table_version,
+            }))
+            .map_err(|e| e.to_string())?;
+            let schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))
+                .map_err(|e| e.to_string())?;
+            Ok::<SampleMetrics, String>(
+                SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(
+                    RuntimeIOMetrics {
+                        peak_rss_mb: None,
+                        cpu_time_ms: None,
+                        bytes_read: None,
+                        bytes_written: None,
+                        files_touched: None,
+                        files_skipped: None,
+                        spill_bytes: None,
+                        result_hash: Some(result_hash),
+                        schema_hash: Some(schema_hash),
+                    },
+                ),
+            )
         }
     })
     .await;

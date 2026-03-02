@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+fn default_fixture_profile() -> String {
+    "standard".to_string()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NarrowSaleRow {
     pub id: i64,
@@ -15,4 +19,6 @@ pub struct FixtureManifest {
     pub seed: u64,
     pub scale: String,
     pub rows: usize,
+    #[serde(default = "default_fixture_profile")]
+    pub profile: String,
 }

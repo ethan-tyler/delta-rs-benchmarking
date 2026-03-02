@@ -114,6 +114,30 @@ pub struct SampleMetrics {
     pub spill_bytes: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanRewriteMetrics {
+    pub files_scanned: Option<u64>,
+    pub files_pruned: Option<u64>,
+    pub bytes_scanned: Option<u64>,
+    pub scan_time_ms: Option<u64>,
+    pub rewrite_time_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RuntimeIOMetrics {
+    pub peak_rss_mb: Option<u64>,
+    pub cpu_time_ms: Option<u64>,
+    pub bytes_read: Option<u64>,
+    pub bytes_written: Option<u64>,
+    pub files_touched: Option<u64>,
+    pub files_skipped: Option<u64>,
+    pub spill_bytes: Option<u64>,
+    pub result_hash: Option<String>,
+    pub schema_hash: Option<String>,
 }
 
 impl SampleMetrics {
@@ -141,28 +165,52 @@ impl SampleMetrics {
             files_skipped: None,
             spill_bytes: None,
             result_hash: None,
+            schema_hash: None,
         }
     }
 
+    pub fn with_scan_rewrite(mut self, metrics: ScanRewriteMetrics) -> Self {
+        self.files_scanned = metrics.files_scanned;
+        self.files_pruned = metrics.files_pruned;
+        self.bytes_scanned = metrics.bytes_scanned;
+        self.scan_time_ms = metrics.scan_time_ms;
+        self.rewrite_time_ms = metrics.rewrite_time_ms;
+        self
+    }
+
     pub fn with_scan_rewrite_metrics(
-        mut self,
+        self,
         files_scanned: Option<u64>,
         files_pruned: Option<u64>,
         bytes_scanned: Option<u64>,
         scan_time_ms: Option<u64>,
         rewrite_time_ms: Option<u64>,
     ) -> Self {
-        self.files_scanned = files_scanned;
-        self.files_pruned = files_pruned;
-        self.bytes_scanned = bytes_scanned;
-        self.scan_time_ms = scan_time_ms;
-        self.rewrite_time_ms = rewrite_time_ms;
+        self.with_scan_rewrite(ScanRewriteMetrics {
+            files_scanned,
+            files_pruned,
+            bytes_scanned,
+            scan_time_ms,
+            rewrite_time_ms,
+        })
+    }
+
+    pub fn with_runtime_io(mut self, metrics: RuntimeIOMetrics) -> Self {
+        self.peak_rss_mb = metrics.peak_rss_mb;
+        self.cpu_time_ms = metrics.cpu_time_ms;
+        self.bytes_read = metrics.bytes_read;
+        self.bytes_written = metrics.bytes_written;
+        self.files_touched = metrics.files_touched;
+        self.files_skipped = metrics.files_skipped;
+        self.spill_bytes = metrics.spill_bytes;
+        self.result_hash = metrics.result_hash;
+        self.schema_hash = metrics.schema_hash;
         self
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn with_runtime_io_metrics(
-        mut self,
+        self,
         peak_rss_mb: Option<u64>,
         cpu_time_ms: Option<u64>,
         bytes_read: Option<u64>,
@@ -171,16 +219,19 @@ impl SampleMetrics {
         files_skipped: Option<u64>,
         spill_bytes: Option<u64>,
         result_hash: Option<String>,
+        schema_hash: Option<String>,
     ) -> Self {
-        self.peak_rss_mb = peak_rss_mb;
-        self.cpu_time_ms = cpu_time_ms;
-        self.bytes_read = bytes_read;
-        self.bytes_written = bytes_written;
-        self.files_touched = files_touched;
-        self.files_skipped = files_skipped;
-        self.spill_bytes = spill_bytes;
-        self.result_hash = result_hash;
-        self
+        self.with_runtime_io(RuntimeIOMetrics {
+            peak_rss_mb,
+            cpu_time_ms,
+            bytes_read,
+            bytes_written,
+            files_touched,
+            files_skipped,
+            spill_bytes,
+            result_hash,
+            schema_hash,
+        })
     }
 }
 
@@ -204,6 +255,17 @@ pub struct CaseFailure {
     pub message: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ElapsedStats {
+    pub min_ms: f64,
+    pub max_ms: f64,
+    pub mean_ms: f64,
+    pub median_ms: f64,
+    pub stddev_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cv_pct: Option<f64>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CaseResult {
     pub case: String,
@@ -211,6 +273,8 @@ pub struct CaseResult {
     #[serde(deserialize_with = "deserialize_case_classification")]
     pub classification: String,
     pub samples: Vec<IterationSample>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_stats: Option<ElapsedStats>,
     pub failure: Option<CaseFailure>,
 }
 

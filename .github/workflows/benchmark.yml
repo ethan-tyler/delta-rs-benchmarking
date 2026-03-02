@@ -26,14 +26,25 @@ jobs:
             const body = (context.payload.comment?.body || "").trim();
             const firstLine = body.split(/\r?\n/)[0].trim();
             const allowedSuites = new Set([
+              "scan",
               "read_scan",
               "write",
+              "delete_update",
+              "delete_update_dml",
+              "merge",
               "merge_dml",
               "metadata",
               "optimize_vacuum",
+              "tpcds",
               "interop_py",
               "all",
             ]);
+            const canonicalSuite = (suite) => {
+              if (suite === "read_scan") return "scan";
+              if (suite === "delete_update_dml") return "delete_update";
+              if (suite === "merge_dml") return "merge";
+              return suite;
+            };
 
             let mode = "ignore";
             let suite = "";
@@ -46,6 +57,7 @@ jobs:
               if (match) {
                 suite = match[1].toLowerCase();
                 if (allowedSuites.has(suite)) {
+                  suite = canonicalSuite(suite);
                   mode = "run";
                 } else {
                   mode = "invalid";
@@ -211,7 +223,7 @@ jobs:
           if [[ "${status}" -eq 0 ]]; then
             echo "status_label=PASS" >> "$GITHUB_OUTPUT"
           else
-            echo "status_label=ADVISORY-ERROR" >> "$GITHUB_OUTPUT"
+            echo "status_label=FAIL" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Post benchmark result
@@ -233,7 +245,7 @@ jobs:
             }
 
             const body = [
-              `### Benchmark Advisory ${status}: ${suite}`,
+              `### Benchmark ${status}: ${suite}`,
               `Exit code: ${exitCode}`,
               "",
               "<details><summary>compare_branch.sh output</summary>",

@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::tpcds;
 use deltalake_core::arrow::array::{Float64Array, Int64Array};
@@ -28,6 +29,27 @@ async fn enabled_queries_execute_and_emit_successful_cases() {
     assert!(
         enabled.iter().all(|case| case.success),
         "enabled queries should succeed: {enabled:#?}"
+    );
+}
+
+#[tokio::test]
+async fn generated_fixtures_provide_required_tpcds_tables() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let cases = tpcds::run(temp.path(), "sf1", 0, 1, &storage)
+        .await
+        .expect("run tpcds");
+    let enabled = cases
+        .iter()
+        .filter(|case| case.case != "tpcds_q72")
+        .collect::<Vec<_>>();
+    assert!(
+        enabled.iter().all(|case| case.success),
+        "generated fixtures should satisfy enabled TPC-DS cases: {enabled:#?}"
     );
 }
 

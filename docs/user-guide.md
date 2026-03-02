@@ -27,6 +27,36 @@ Run benchmark suites:
 
 Outputs are written to `results/<label>/<suite>.json`.
 
+## DuckDB-backed TPC-DS fixture profile (`tpcds_duckdb`)
+
+Use this dataset selector when you want `fixtures/<scale>/tpcds/store_sales` generated from
+DuckDB `tpcds` extension data (`dsdgen`) instead of synthetic mapping.
+
+Requirements:
+
+- `python3`
+- `duckdb` Python package (`pip install duckdb`)
+
+Example:
+
+```bash
+./scripts/bench.sh data --dataset-id tpcds_duckdb --seed 42
+./scripts/bench.sh run --suite tpcds --runner rust --dataset-id tpcds_duckdb --warmup 1 --iters 1 --label tpcds-duckdb-smoke
+```
+
+Runtime knobs:
+
+- `DELTA_BENCH_DUCKDB_PYTHON` (default: `python3`)
+- `DELTA_BENCH_TPCDS_DUCKDB_SCRIPT` (optional script override, useful for smoke tests)
+- `DELTA_BENCH_TPCDS_DUCKDB_TIMEOUT_MS` (default: `600000`)
+
+## Marketplace datasets (document-only path)
+
+For externally provisioned Delta tables (for example Marketplace-delivered TPC-DS data), place or
+copy those tables under the fixture roots expected by suite registration (for TPC-DS this is
+`fixtures/<scale>/tpcds/<table_name>`). This repository does not currently automate Marketplace
+ingestion.
+
 ## Compare two branches
 
 Run sequential base-vs-candidate comparison:
@@ -49,6 +79,7 @@ Useful tuning options:
 - `BENCH_RETRY_ATTEMPTS` (default `2`) retries transient failures.
 - `BENCH_RETRY_DELAY_SECONDS` (default `5`) sets retry delay.
 - `--noise-threshold` controls compare sensitivity.
+- `--aggregation` controls representative sample selection (`min`, `median`, `p95`; default `median`).
 - `cd python && python3 -m delta_bench_compare.compare ... --include-metrics` appends per-case metric columns.
 
 ## Object-store mode
@@ -79,8 +110,8 @@ Notes:
 
 - For non-local backends, `--storage-option table_root=...` is required.
 - Local fixture cache (`fixtures/<scale>/rows.jsonl` and `fixtures/<scale>/manifest.json`) is unchanged.
-- The `write` suite keeps local temp table behavior in cloud mode.
-- The `delete_update_dml` suite seeds isolated remote tables per iteration to keep DML benchmark runs independent.
+- The `write` suite currently supports only local storage; non-local backends return explicit case failures.
+- The `delete_update` suite seeds isolated remote tables per iteration to keep DML benchmark runs independent.
 
 Workflow mode storage configuration:
 
@@ -132,6 +163,17 @@ Optional (suite-dependent):
 - `bytes_scanned`
 - `scan_time_ms`
 - `rewrite_time_ms`
+- `result_hash`
+- `schema_hash`
+
+Optional case-level elapsed aggregates (`cases[].elapsed_stats`):
+
+- `min_ms`
+- `max_ms`
+- `mean_ms`
+- `median_ms`
+- `stddev_ms`
+- `cv_pct`
 
 See [architecture.md](architecture.md) for schema details and execution context.
 
@@ -142,6 +184,7 @@ cargo run -p delta-bench -- --help
 cargo run -p delta-bench -- list all
 cargo run -p delta-bench -- data --dataset-id tiny_smoke --seed 42
 cargo run -p delta-bench -- run --target all --runner all --dataset-id tiny_smoke --warmup 1 --iterations 5
+cargo run -p delta-bench -- data --dataset-id tpcds_duckdb --seed 42
 cargo run -p delta-bench -- doctor
 ```
 

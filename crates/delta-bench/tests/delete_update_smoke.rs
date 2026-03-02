@@ -12,13 +12,13 @@ async fn run_delete_update_suite_once() -> Vec<CaseResult> {
         .await
         .expect("fixtures should be generated");
 
-    run_target(&fixtures_dir, "delete_update_dml", "sf1", 0, 1, &storage)
+    run_target(&fixtures_dir, "delete_update", "sf1", 0, 1, &storage)
         .await
-        .expect("delete_update_dml suite should run")
+        .expect("delete_update suite should run")
 }
 
 #[tokio::test]
-async fn delete_update_dml_delete_family_smoke() {
+async fn delete_update_delete_family_smoke() {
     let cases = run_delete_update_suite_once().await;
     let delete_cases: Vec<&CaseResult> = cases
         .iter()
@@ -26,7 +26,7 @@ async fn delete_update_dml_delete_family_smoke() {
         .collect();
     assert!(
         !delete_cases.is_empty(),
-        "expected at least one delete case in delete_update_dml suite"
+        "expected at least one delete case in delete_update suite"
     );
     for case in delete_cases {
         assert!(
@@ -38,7 +38,7 @@ async fn delete_update_dml_delete_family_smoke() {
 }
 
 #[tokio::test]
-async fn delete_update_dml_update_family_smoke() {
+async fn delete_update_update_family_smoke() {
     let cases = run_delete_update_suite_once().await;
     let update_cases: Vec<&CaseResult> = cases
         .iter()
@@ -46,7 +46,7 @@ async fn delete_update_dml_update_family_smoke() {
         .collect();
     assert!(
         !update_cases.is_empty(),
-        "expected at least one update case in delete_update_dml suite"
+        "expected at least one update case in delete_update suite"
     );
     for case in update_cases {
         assert!(
@@ -58,7 +58,7 @@ async fn delete_update_dml_update_family_smoke() {
 }
 
 #[tokio::test]
-async fn delete_update_dml_does_not_depend_on_merge_partitioned_fixture() {
+async fn delete_update_does_not_depend_on_merge_partitioned_fixture() {
     let temp = tempfile::tempdir().expect("tempdir should be created");
     let fixtures_dir = temp.path().join("fixtures");
     let storage = StorageConfig::local();
@@ -72,12 +72,12 @@ async fn delete_update_dml_does_not_depend_on_merge_partitioned_fixture() {
         .join("merge_partitioned_target_delta");
     std::fs::remove_dir_all(&merge_partitioned).expect("remove merge fixture dir");
 
-    let cases = run_target(&fixtures_dir, "delete_update_dml", "sf1", 0, 1, &storage)
+    let cases = run_target(&fixtures_dir, "delete_update", "sf1", 0, 1, &storage)
         .await
-        .expect("delete_update_dml suite should run");
+        .expect("delete_update suite should run");
     assert!(
         !cases.is_empty(),
-        "expected delete_update_dml suite to return cases"
+        "expected delete_update suite to return cases"
     );
     for case in cases {
         assert!(

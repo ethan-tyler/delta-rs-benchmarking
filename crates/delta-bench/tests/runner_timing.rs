@@ -2,8 +2,8 @@ use std::thread;
 use std::time::Duration;
 
 use delta_bench::runner::{
-    run_case, run_case_async, run_case_async_with_async_setup, run_case_async_with_setup,
-    CaseExecutionResult,
+    run_case, run_case_async, run_case_async_custom_timing, run_case_async_with_async_setup,
+    run_case_async_with_async_setup_custom_timing, run_case_async_with_setup, CaseExecutionResult,
 };
 
 #[tokio::test]
@@ -241,5 +241,51 @@ async fn warmup_setup_failure_in_async_async_setup_runner_is_reported_as_case_fa
     assert!(
         message.contains("warmup"),
         "failure should mention warmup phase, got: {message}"
+    );
+}
+
+#[tokio::test]
+async fn custom_timing_override_controls_elapsed_for_async_case() {
+    let result = run_case_async_custom_timing("timing_override_async", 0, 1, || async {
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        Ok::<(u64, Option<f64>), String>((1, Some(1.25)))
+    })
+    .await;
+
+    let case = match result {
+        CaseExecutionResult::Success(case) => case,
+        CaseExecutionResult::Failure(case) => panic!("unexpected failure: {:?}", case.failure),
+    };
+    assert_eq!(case.samples.len(), 1);
+    assert!(
+        (case.samples[0].elapsed_ms - 1.25).abs() < 0.001,
+        "expected override elapsed value 1.25 ms, got {} ms",
+        case.samples[0].elapsed_ms
+    );
+}
+
+#[tokio::test]
+async fn custom_timing_override_controls_elapsed_for_async_setup_case() {
+    let result = run_case_async_with_async_setup_custom_timing(
+        "timing_override_async_setup",
+        0,
+        1,
+        || async { Ok::<(), String>(()) },
+        |_| async {
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            Ok::<(u64, Option<f64>), String>((1, Some(2.5)))
+        },
+    )
+    .await;
+
+    let case = match result {
+        CaseExecutionResult::Success(case) => case,
+        CaseExecutionResult::Failure(case) => panic!("unexpected failure: {:?}", case.failure),
+    };
+    assert_eq!(case.samples.len(), 1);
+    assert!(
+        (case.samples[0].elapsed_ms - 2.5).abs() < 0.001,
+        "expected override elapsed value 2.5 ms, got {} ms",
+        case.samples[0].elapsed_ms
     );
 }

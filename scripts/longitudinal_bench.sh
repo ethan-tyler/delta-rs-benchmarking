@@ -21,7 +21,7 @@ Commands:
 
 Examples:
   ./scripts/longitudinal_bench.sh select-revisions --repository .delta-rs-under-test --strategy one-per-day --start-date 2026-01-01 --end-date 2026-01-31 --output longitudinal/manifests/jan.json
-  ./scripts/longitudinal_bench.sh orchestrate --manifest longitudinal/manifests/jan.json --artifacts-dir longitudinal/artifacts --results-dir results --state-path longitudinal/state/matrix.json --store-dir longitudinal/store --markdown-path longitudinal/reports/summary.md --html-path longitudinal/reports/report.html --suite read_scan --scale sf1
+  ./scripts/longitudinal_bench.sh orchestrate --manifest longitudinal/manifests/jan.json --artifacts-dir longitudinal/artifacts --results-dir results --state-path longitudinal/state/matrix.json --store-dir longitudinal/store --markdown-path longitudinal/reports/summary.md --html-path longitudinal/reports/report.html --suite scan --scale sf1
 EOF
 }
 

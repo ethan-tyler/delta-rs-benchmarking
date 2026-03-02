@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use serde_json::json;
 use url::Url;
 
 use super::{copy_dir_all, fixture_error_cases, into_case_result};
@@ -9,7 +10,8 @@ use crate::data::fixtures::{
     write_delta_table_partitioned_small_files,
 };
 use crate::error::{BenchError, BenchResult};
-use crate::results::{CaseResult, SampleMetrics};
+use crate::fingerprint::hash_json;
+use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
 use crate::runner::{run_case_async_with_async_setup, run_case_async_with_setup};
 use crate::storage::StorageConfig;
 
@@ -37,49 +39,49 @@ struct IterationSetup {
 
 const DELETE_UPDATE_CASES: [DeleteUpdateCase; 7] = [
     DeleteUpdateCase {
-        name: "delete_rowsMatchedFraction_0.01_partition_localized",
+        name: "delete_1pct_localized",
         operation: DmlOperation::Delete,
         rows_matched_fraction: Some(0.01),
         partition_localized: true,
         small_files_seed: false,
     },
     DeleteUpdateCase {
-        name: "delete_rowsMatchedFraction_0.05_scattered",
+        name: "delete_5pct_scattered",
         operation: DmlOperation::Delete,
         rows_matched_fraction: Some(0.05),
         partition_localized: false,
         small_files_seed: true,
     },
     DeleteUpdateCase {
-        name: "delete_rowsMatchedFraction_0.50_broad",
+        name: "delete_50pct_broad",
         operation: DmlOperation::Delete,
         rows_matched_fraction: Some(0.50),
         partition_localized: false,
         small_files_seed: false,
     },
     DeleteUpdateCase {
-        name: "update_literal_rowsMatchedFraction_0.01_partition_localized",
+        name: "update_literal_1pct_localized",
         operation: DmlOperation::UpdateLiteral,
         rows_matched_fraction: Some(0.01),
         partition_localized: true,
         small_files_seed: false,
     },
     DeleteUpdateCase {
-        name: "update_literal_rowsMatchedFraction_0.05_scattered",
+        name: "update_literal_5pct_scattered",
         operation: DmlOperation::UpdateLiteral,
         rows_matched_fraction: Some(0.05),
         partition_localized: false,
         small_files_seed: true,
     },
     DeleteUpdateCase {
-        name: "update_expression_rowsMatchedFraction_0.50_broad",
+        name: "update_expr_50pct_broad",
         operation: DmlOperation::UpdateExpression,
         rows_matched_fraction: Some(0.50),
         partition_localized: false,
         small_files_seed: false,
     },
     DeleteUpdateCase {
-        name: "update_all_rows_expression",
+        name: "update_all_rows_expr",
         operation: DmlOperation::UpdateAllExpression,
         rows_matched_fraction: None,
         partition_localized: false,
@@ -206,19 +208,46 @@ async fn run_delete_update_case(
                 BenchError::InvalidArgument(format!("missing predicate for {}", case.name))
             })?;
             let (table, metrics) = table.delete().with_predicate(predicate.as_str()).await?;
-            Ok(SampleMetrics::base(
+            let table_version = table.version().map(|v| v as u64);
+            let result_hash = hash_json(&json!({
+                "operation": "delete",
+                "rows_affected": metrics.num_deleted_rows as u64,
+                "files_added": metrics.num_added_files as u64,
+                "files_removed": metrics.num_removed_files as u64,
+                "table_version": table_version,
+            }))?;
+            let schema_hash = hash_json(&json!([
+                "operation:string",
+                "rows_affected:u64",
+                "files_added:u64",
+                "files_removed:u64",
+                "table_version:u64",
+            ]))?;
+            let sample = SampleMetrics::base(
                 Some(metrics.num_deleted_rows as u64),
                 None,
                 Some((metrics.num_added_files + metrics.num_removed_files) as u64),
-                table.version().map(|v| v as u64),
+                table_version,
             )
-            .with_scan_rewrite_metrics(
-                None,
-                None,
-                None,
-                Some(metrics.scan_time_ms),
-                Some(metrics.rewrite_time_ms),
-            ))
+            .with_scan_rewrite(ScanRewriteMetrics {
+                files_scanned: None,
+                files_pruned: None,
+                bytes_scanned: None,
+                scan_time_ms: Some(metrics.scan_time_ms),
+                rewrite_time_ms: Some(metrics.rewrite_time_ms),
+            })
+            .with_runtime_io(RuntimeIOMetrics {
+                peak_rss_mb: None,
+                cpu_time_ms: None,
+                bytes_read: None,
+                bytes_written: None,
+                files_touched: None,
+                files_skipped: None,
+                spill_bytes: None,
+                result_hash: Some(result_hash),
+                schema_hash: Some(schema_hash),
+            });
+            Ok(sample)
         }
         DmlOperation::UpdateLiteral => {
             let predicate = case_predicate(case).ok_or_else(|| {
@@ -229,19 +258,46 @@ async fn run_delete_update_case(
                 .with_predicate(predicate.as_str())
                 .with_update("value_i64", "7")
                 .await?;
-            Ok(SampleMetrics::base(
+            let table_version = table.version().map(|v| v as u64);
+            let result_hash = hash_json(&json!({
+                "operation": "update_literal",
+                "rows_affected": metrics.num_updated_rows as u64,
+                "files_added": metrics.num_added_files as u64,
+                "files_removed": metrics.num_removed_files as u64,
+                "table_version": table_version,
+            }))?;
+            let schema_hash = hash_json(&json!([
+                "operation:string",
+                "rows_affected:u64",
+                "files_added:u64",
+                "files_removed:u64",
+                "table_version:u64",
+            ]))?;
+            let sample = SampleMetrics::base(
                 Some(metrics.num_updated_rows as u64),
                 None,
                 Some((metrics.num_added_files + metrics.num_removed_files) as u64),
-                table.version().map(|v| v as u64),
+                table_version,
             )
-            .with_scan_rewrite_metrics(
-                None,
-                None,
-                None,
-                Some(metrics.scan_time_ms),
-                None,
-            ))
+            .with_scan_rewrite(ScanRewriteMetrics {
+                files_scanned: None,
+                files_pruned: None,
+                bytes_scanned: None,
+                scan_time_ms: Some(metrics.scan_time_ms),
+                rewrite_time_ms: None,
+            })
+            .with_runtime_io(RuntimeIOMetrics {
+                peak_rss_mb: None,
+                cpu_time_ms: None,
+                bytes_read: None,
+                bytes_written: None,
+                files_touched: None,
+                files_skipped: None,
+                spill_bytes: None,
+                result_hash: Some(result_hash),
+                schema_hash: Some(schema_hash),
+            });
+            Ok(sample)
         }
         DmlOperation::UpdateExpression => {
             let predicate = case_predicate(case).ok_or_else(|| {
@@ -252,38 +308,92 @@ async fn run_delete_update_case(
                 .with_predicate(predicate.as_str())
                 .with_update("value_i64", "value_i64 + 1")
                 .await?;
-            Ok(SampleMetrics::base(
+            let table_version = table.version().map(|v| v as u64);
+            let result_hash = hash_json(&json!({
+                "operation": "update_expression",
+                "rows_affected": metrics.num_updated_rows as u64,
+                "files_added": metrics.num_added_files as u64,
+                "files_removed": metrics.num_removed_files as u64,
+                "table_version": table_version,
+            }))?;
+            let schema_hash = hash_json(&json!([
+                "operation:string",
+                "rows_affected:u64",
+                "files_added:u64",
+                "files_removed:u64",
+                "table_version:u64",
+            ]))?;
+            let sample = SampleMetrics::base(
                 Some(metrics.num_updated_rows as u64),
                 None,
                 Some((metrics.num_added_files + metrics.num_removed_files) as u64),
-                table.version().map(|v| v as u64),
+                table_version,
             )
-            .with_scan_rewrite_metrics(
-                None,
-                None,
-                None,
-                Some(metrics.scan_time_ms),
-                None,
-            ))
+            .with_scan_rewrite(ScanRewriteMetrics {
+                files_scanned: None,
+                files_pruned: None,
+                bytes_scanned: None,
+                scan_time_ms: Some(metrics.scan_time_ms),
+                rewrite_time_ms: None,
+            })
+            .with_runtime_io(RuntimeIOMetrics {
+                peak_rss_mb: None,
+                cpu_time_ms: None,
+                bytes_read: None,
+                bytes_written: None,
+                files_touched: None,
+                files_skipped: None,
+                spill_bytes: None,
+                result_hash: Some(result_hash),
+                schema_hash: Some(schema_hash),
+            });
+            Ok(sample)
         }
         DmlOperation::UpdateAllExpression => {
             let (table, metrics) = table
                 .update()
                 .with_update("value_i64", "value_i64 + 10")
                 .await?;
-            Ok(SampleMetrics::base(
+            let table_version = table.version().map(|v| v as u64);
+            let result_hash = hash_json(&json!({
+                "operation": "update_all_expression",
+                "rows_affected": metrics.num_updated_rows as u64,
+                "files_added": metrics.num_added_files as u64,
+                "files_removed": metrics.num_removed_files as u64,
+                "table_version": table_version,
+            }))?;
+            let schema_hash = hash_json(&json!([
+                "operation:string",
+                "rows_affected:u64",
+                "files_added:u64",
+                "files_removed:u64",
+                "table_version:u64",
+            ]))?;
+            let sample = SampleMetrics::base(
                 Some(metrics.num_updated_rows as u64),
                 None,
                 Some((metrics.num_added_files + metrics.num_removed_files) as u64),
-                table.version().map(|v| v as u64),
+                table_version,
             )
-            .with_scan_rewrite_metrics(
-                None,
-                None,
-                None,
-                Some(metrics.scan_time_ms),
-                None,
-            ))
+            .with_scan_rewrite(ScanRewriteMetrics {
+                files_scanned: None,
+                files_pruned: None,
+                bytes_scanned: None,
+                scan_time_ms: Some(metrics.scan_time_ms),
+                rewrite_time_ms: None,
+            })
+            .with_runtime_io(RuntimeIOMetrics {
+                peak_rss_mb: None,
+                cpu_time_ms: None,
+                bytes_read: None,
+                bytes_written: None,
+                files_touched: None,
+                files_skipped: None,
+                spill_bytes: None,
+                result_hash: Some(result_hash),
+                schema_hash: Some(schema_hash),
+            });
+            Ok(sample)
         }
     }
 }

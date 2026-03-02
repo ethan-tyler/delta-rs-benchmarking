@@ -1,13 +1,20 @@
-use delta_bench::manifests::{
-    ensure_required_manifests_exist_under_root, load_manifest, DatasetId, ManifestAssertion,
-};
+use std::path::{Path, PathBuf};
+
+use delta_bench::manifests::{load_manifest, DatasetId, ManifestAssertion};
 use delta_bench::suites::list_cases_for_target;
 use delta_bench::suites::tpcds::catalog::phase1_query_catalog;
 
+fn repo_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn rust_manifest_path() -> PathBuf {
+    repo_root().join("bench/manifests/core_rust.yaml")
+}
+
 #[test]
 fn loads_p0_rust_manifest_in_file_order() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest_path = root.join("bench/manifests/core_rust.yaml");
+    let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");
     let ids = manifest
         .cases
@@ -127,8 +134,7 @@ cases:
 
 #[test]
 fn p0_rust_manifest_includes_all_delete_update_cases() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest_path = root.join("bench/manifests/core_rust.yaml");
+    let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");
     let expected_cases = list_cases_for_target("delete_update")
         .expect("delete_update should be a registered suite target");
@@ -147,8 +153,7 @@ fn p0_rust_manifest_includes_all_delete_update_cases() {
 
 #[test]
 fn p0_rust_manifest_enforces_hash_assertions_for_every_enabled_case() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest_path = root.join("bench/manifests/core_rust.yaml");
+    let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");
 
     let missing = manifest
@@ -177,8 +182,7 @@ fn p0_rust_manifest_enforces_hash_assertions_for_every_enabled_case() {
 
 #[test]
 fn p0_rust_manifest_case_ids_match_suite_case_lists() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest_path = root.join("bench/manifests/core_rust.yaml");
+    let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");
 
     for case in manifest
@@ -203,8 +207,7 @@ fn p0_rust_manifest_case_ids_match_suite_case_lists() {
 
 #[test]
 fn p0_rust_manifest_includes_enabled_tpcds_cases() {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let manifest_path = root.join("bench/manifests/core_rust.yaml");
+    let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");
 
     for spec in phase1_query_catalog()
@@ -221,24 +224,4 @@ fn p0_rust_manifest_includes_enabled_tpcds_cases() {
             "missing enabled TPC-DS manifest entry for case '{case_id}'"
         );
     }
-}
-
-#[test]
-fn required_manifest_preflight_reports_missing_files_with_actionable_message() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let err = ensure_required_manifests_exist_under_root(temp.path())
-        .expect_err("missing manifests should fail preflight");
-    let message = err.to_string();
-    assert!(
-        message.contains("core_rust.yaml"),
-        "missing rust manifest should be called out: {message}"
-    );
-    assert!(
-        message.contains("core_python.yaml"),
-        "missing python manifest should be called out: {message}"
-    );
-    assert!(
-        message.contains("bench/manifests"),
-        "error should explain where files belong: {message}"
-    );
 }

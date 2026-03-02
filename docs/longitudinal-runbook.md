@@ -48,8 +48,7 @@ Release-history stages (run separately for `rust-v*` and `python-v*` tags):
 4. `ingest-results` (append-safe normalized rows with run-id dedupe)
 5. `report` (markdown summary + HTML trends against release-history baseline)
 6. `prune` (retention policies for release-history artifacts + store growth)
-7. commit `state/store/reports` back to repo (`longitudinal/releases/<lane>/...`)
-8. upload artifacts (`longitudinal/releases/<lane>/` subtree)
+7. upload artifacts (`longitudinal/releases/<lane>/` subtree)
 
 Refresh the committed release manifests when new upstream tags should be included:
 
@@ -66,14 +65,6 @@ Refresh the committed release manifests when new upstream tags should be include
 - `longitudinal/store/index.json`: ingested run-id dedupe index
 - `longitudinal/reports/summary.md`: CI markdown summary
 - `longitudinal/reports/trends.html`: HTML trend report
-
-For release-history lanes, persisted in-repo outputs are:
-
-- `longitudinal/releases/<lane>/state/matrix-state.json`
-- `longitudinal/releases/<lane>/store/rows.jsonl`
-- `longitudinal/releases/<lane>/store/index.json`
-- `longitudinal/releases/<lane>/reports/summary.md`
-- `longitudinal/releases/<lane>/reports/trends.html`
 
 ## Performance guardrails
 

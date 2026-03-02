@@ -66,4 +66,3 @@ Show CLI help:
 - Manual branch-to-branch comparison with result reporting
 - Longitudinal revision benchmarking pipeline with resumable execution
 - Release-tag longitudinal history for `rust-v*` and `python-v*` tracks
-- Longitudinal release-history `state/store/reports` persisted under `longitudinal/releases/<lane>/`

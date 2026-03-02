@@ -208,6 +208,7 @@ impl SampleMetrics {
         self
     }
 
+    // Builder ergonomics: this mirrors JSON schema fields to keep callsites explicit.
     #[allow(clippy::too_many_arguments)]
     pub fn with_runtime_io_metrics(
         self,

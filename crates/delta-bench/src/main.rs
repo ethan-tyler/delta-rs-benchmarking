@@ -238,12 +238,10 @@ fn resolve_fixture_profile(dataset_id: Option<&str>) -> BenchResult<FixtureProfi
         return Ok(FixtureProfile::Standard);
     };
     let dataset = DatasetId::parse(dataset_id)?;
-    Ok(match dataset {
-        DatasetId::ManyVersions => FixtureProfile::ManyVersions,
-        DatasetId::TpcdsDuckdb => FixtureProfile::TpcdsDuckdb,
-        DatasetId::TinySmoke | DatasetId::MediumSelective | DatasetId::SmallFiles => {
-            FixtureProfile::Standard
-        }
+    Ok(match dataset.fixture_profile() {
+        "many_versions" => FixtureProfile::ManyVersions,
+        "tpcds_duckdb" => FixtureProfile::TpcdsDuckdb,
+        _ => FixtureProfile::Standard,
     })
 }
 

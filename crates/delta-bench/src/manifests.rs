@@ -81,16 +81,6 @@ impl DatasetId {
         }
     }
 
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::TinySmoke => "tiny_smoke",
-            Self::MediumSelective => "medium_selective",
-            Self::SmallFiles => "small_files",
-            Self::ManyVersions => "many_versions",
-            Self::TpcdsDuckdb => "tpcds_duckdb",
-        }
-    }
-
     pub const fn scale(self) -> &'static str {
         match self {
             Self::TinySmoke => "sf1",
@@ -119,15 +109,17 @@ pub fn load_manifest(path: impl AsRef<Path>) -> BenchResult<BenchmarkManifest> {
     })
 }
 
-pub fn benchmark_repo_root() -> PathBuf {
+pub(crate) fn benchmark_repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
+/// Preflight check for `list`/`run` commands to fail fast when required
+/// manifests are missing from the benchmark repository.
 pub fn ensure_required_manifests_exist() -> BenchResult<()> {
     ensure_required_manifests_exist_under_root(&benchmark_repo_root())
 }
 
-pub fn ensure_required_manifests_exist_under_root(root: &Path) -> BenchResult<()> {
+pub(crate) fn ensure_required_manifests_exist_under_root(root: &Path) -> BenchResult<()> {
     let required = [DEFAULT_RUST_MANIFEST_PATH, DEFAULT_PYTHON_MANIFEST_PATH];
     let mut missing = Vec::new();
     for relative in required {
@@ -150,4 +142,29 @@ pub fn ensure_required_manifests_exist_under_root(root: &Path) -> BenchResult<()
         "manifest preflight failed for delta-bench `list`/`run` commands:\n{details}\n\
          ensure manifest files are present under `bench/manifests`."
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ensure_required_manifests_exist_under_root;
+
+    #[test]
+    fn required_manifest_preflight_reports_missing_files_with_actionable_message() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let err = ensure_required_manifests_exist_under_root(temp.path())
+            .expect_err("missing manifests should fail preflight");
+        let message = err.to_string();
+        assert!(
+            message.contains("core_rust.yaml"),
+            "missing rust manifest should be called out: {message}"
+        );
+        assert!(
+            message.contains("core_python.yaml"),
+            "missing python manifest should be called out: {message}"
+        );
+        assert!(
+            message.contains("bench/manifests"),
+            "error should explain where files belong: {message}"
+        );
+    }
 }

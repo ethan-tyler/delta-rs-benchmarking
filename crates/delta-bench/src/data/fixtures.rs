@@ -64,29 +64,6 @@ pub fn scale_to_row_count(scale: &str) -> BenchResult<usize> {
     }
 }
 
-pub fn validate_scale(scale: &str) -> BenchResult<()> {
-    if scale.is_empty() {
-        return Err(BenchError::InvalidArgument(
-            "scale must not be empty".to_string(),
-        ));
-    }
-    if matches!(scale, "." | "..") {
-        return Err(BenchError::InvalidArgument(format!(
-            "scale '{scale}' is not allowed"
-        )));
-    }
-    if !scale
-        .bytes()
-        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
-    {
-        return Err(BenchError::InvalidArgument(
-            "scale contains invalid characters; allowed: [A-Za-z0-9._-]".to_string(),
-        ));
-    }
-    let _ = scale_to_row_count(scale)?;
-    Ok(())
-}
-
 pub fn fixture_root(fixtures_dir: &Path, scale: &str) -> PathBuf {
     fixtures_dir.join(scale)
 }

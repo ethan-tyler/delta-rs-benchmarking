@@ -230,7 +230,6 @@ fn p0_rust_manifest_includes_enabled_tpcds_cases() {
         );
     }
 }
-
 #[test]
 fn p0_rust_manifest_includes_all_concurrency_cases() {
     let manifest_path = rust_manifest_path();

@@ -11,7 +11,7 @@ on:
         default: "7"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   release-history:
@@ -147,6 +147,28 @@ jobs:
             --max-run-age-days "${LONGITUDINAL_RETENTION_RUN_DAYS}" \
             --max-runs "${LONGITUDINAL_RETENTION_MAX_RUNS}" \
             --apply
+
+      - name: Commit release-history results to repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A \
+            "longitudinal/releases/${{ matrix.lane.id }}/state" \
+            "longitudinal/releases/${{ matrix.lane.id }}/store" \
+            "longitudinal/releases/${{ matrix.lane.id }}/reports"
+
+          if git diff --cached --quiet; then
+            echo "No release-history result changes to commit for lane ${LABEL_PREFIX}."
+            exit 0
+          fi
+
+          git commit -m "chore(longitudinal): update ${LABEL_PREFIX} [skip ci]"
+          git fetch origin "${GITHUB_REF_NAME}"
+          git rebase "origin/${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
       - name: Upload release-history artifacts
         uses: actions/upload-artifact@v4

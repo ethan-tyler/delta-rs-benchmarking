@@ -11,3 +11,4 @@ delta-bench-longitudinal = "delta_bench_longitudinal.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]

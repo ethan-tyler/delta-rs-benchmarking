@@ -42,13 +42,19 @@ Trigger modes:
 
 Release-history stages (run separately for `rust-v*` and `python-v*` tags):
 
-1. `select-revisions` (`release-tags` strategy with lane-specific regex)
+1. load committed manifest (`longitudinal/manifests/release-history-rust.json` or `release-history-python.json`)
 2. `build-artifacts` (build missing release revisions only)
 3. `run-matrix` (suite/scale matrix, retry + timeout + resume state)
 4. `ingest-results` (append-safe normalized rows with run-id dedupe)
 5. `report` (markdown summary + HTML trends against release-history baseline)
 6. `prune` (retention policies for release-history artifacts + store growth)
 7. upload artifacts (`longitudinal/releases/<lane>/` subtree)
+
+Refresh the committed release manifests when new upstream tags should be included:
+
+```bash
+./scripts/update_release_history_manifests.sh
+```
 
 ## State and artifacts
 

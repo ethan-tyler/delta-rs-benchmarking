@@ -96,6 +96,12 @@ Release-tag examples for `delta-rs` tracks:
 - Rust releases: `--release-tag-pattern '^rust-v\d+\.\d+\.\d+([+-].+)?$'`
 - Python releases: `--release-tag-pattern '^python-v\d+\.\d+\.\d+([+-].+)?$'`
 
+Repository-managed manifests for reusable release benchmarks:
+
+- `longitudinal/manifests/release-history-rust.json`
+- `longitudinal/manifests/release-history-python.json`
+- Refresh command: `./scripts/update_release_history_manifests.sh`
+
 ## Parallel and load-guard controls
 
 - `run-matrix --max-parallel N`: concurrent suite/scale cells (default `1`)

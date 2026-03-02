@@ -1,0 +1,160 @@
+name: Longitudinal Release History Benchmark
+
+on:
+  schedule:
+    - cron: '30 4 * * 1'
+  workflow_dispatch:
+    inputs:
+      baseline_window:
+        description: "Baseline window size for regression reporting"
+        required: false
+        default: "7"
+
+permissions:
+  contents: read
+
+jobs:
+  release-history:
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 480
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        lane:
+          - id: rust
+          - id: python
+    concurrency:
+      group: delta-bench-longitudinal-release-history-${{ matrix.lane.id }}
+      cancel-in-progress: false
+    env:
+      MANIFEST_PATH: longitudinal/manifests/release-history-${{ matrix.lane.id }}.json
+      ARTIFACTS_DIR: longitudinal/releases/${{ matrix.lane.id }}/artifacts
+      MATRIX_STATE_PATH: longitudinal/releases/${{ matrix.lane.id }}/state/matrix-state.json
+      STORE_DIR: longitudinal/releases/${{ matrix.lane.id }}/store
+      REPORT_MD: longitudinal/releases/${{ matrix.lane.id }}/reports/summary.md
+      REPORT_HTML: longitudinal/releases/${{ matrix.lane.id }}/reports/trends.html
+      RESULTS_DIR: results
+      LABEL_PREFIX: longitudinal-release-${{ matrix.lane.id }}
+      BASELINE_WINDOW: ${{ github.event.inputs.baseline_window || '7' }}
+      LONGITUDINAL_MAX_PARALLEL: ${{ vars.LONGITUDINAL_MAX_PARALLEL || '2' }}
+      LONGITUDINAL_MAX_LOAD_PER_CPU: ${{ vars.LONGITUDINAL_MAX_LOAD_PER_CPU || '0.75' }}
+      LONGITUDINAL_LOAD_CHECK_INTERVAL_SECONDS: ${{ vars.LONGITUDINAL_LOAD_CHECK_INTERVAL_SECONDS || '10' }}
+      LONGITUDINAL_SIGNIFICANCE_METHOD: ${{ vars.LONGITUDINAL_SIGNIFICANCE_METHOD || 'none' }}
+      LONGITUDINAL_SIGNIFICANCE_ALPHA: ${{ vars.LONGITUDINAL_SIGNIFICANCE_ALPHA || '0.05' }}
+      LONGITUDINAL_RETENTION_ARTIFACT_DAYS: ${{ vars.LONGITUDINAL_RETENTION_ARTIFACT_DAYS || '90' }}
+      LONGITUDINAL_RETENTION_MAX_ARTIFACTS: ${{ vars.LONGITUDINAL_RETENTION_MAX_ARTIFACTS || '300' }}
+      LONGITUDINAL_RETENTION_RUN_DAYS: ${{ vars.LONGITUDINAL_RETENTION_RUN_DAYS || '180' }}
+      LONGITUDINAL_RETENTION_MAX_RUNS: ${{ vars.LONGITUDINAL_RETENTION_MAX_RUNS || '500' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare delta-rs checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/prepare_delta_rs.sh
+
+      - name: Validate committed release manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${MANIFEST_PATH}"
+          python3 - "${MANIFEST_PATH}" <<'PY'
+          import json, sys
+          path = sys.argv[1]
+          with open(path, encoding="utf-8") as fh:
+              payload = json.load(fh)
+          revisions = payload.get("revisions", [])
+          if not revisions:
+              raise SystemExit(f"manifest has no revisions: {path}")
+          repository = payload.get("repository")
+          if repository != ".delta-rs-under-test":
+              raise SystemExit(
+                  f"manifest repository must be .delta-rs-under-test, got: {repository!r}"
+              )
+          print(f"{path}: revisions={len(revisions)}")
+          PY
+
+      - name: Build missing artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh build-artifacts \
+            --manifest "${MANIFEST_PATH}" \
+            --artifacts-dir "${ARTIFACTS_DIR}"
+
+      - name: Run release matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh run-matrix \
+            --manifest "${MANIFEST_PATH}" \
+            --artifacts-dir "${ARTIFACTS_DIR}" \
+            --state-path "${MATRIX_STATE_PATH}" \
+            --results-dir "${RESULTS_DIR}" \
+            --label-prefix "${LABEL_PREFIX}" \
+            --timeout-seconds 3600 \
+            --max-retries 2 \
+            --max-parallel "${LONGITUDINAL_MAX_PARALLEL}" \
+            --max-load-per-cpu "${LONGITUDINAL_MAX_LOAD_PER_CPU}" \
+            --load-check-interval-seconds "${LONGITUDINAL_LOAD_CHECK_INTERVAL_SECONDS}" \
+            --suite scan \
+            --suite write \
+            --suite delete_update \
+            --suite merge \
+            --suite metadata \
+            --suite optimize_vacuum \
+            --scale sf1
+
+      - name: Ingest normalized rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh ingest-results \
+            --manifest "${MANIFEST_PATH}" \
+            --state-path "${MATRIX_STATE_PATH}" \
+            --results-dir "${RESULTS_DIR}" \
+            --store-dir "${STORE_DIR}" \
+            --label-prefix "${LABEL_PREFIX}"
+
+      - name: Generate trend reports
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh report \
+            --store-dir "${STORE_DIR}" \
+            --markdown-path "${REPORT_MD}" \
+            --html-path "${REPORT_HTML}" \
+            --baseline-window "${BASELINE_WINDOW}" \
+            --regression-threshold 0.05 \
+            --significance-method "${LONGITUDINAL_SIGNIFICANCE_METHOD}" \
+            --significance-alpha "${LONGITUDINAL_SIGNIFICANCE_ALPHA}"
+
+      - name: Prune retention targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/longitudinal_bench.sh prune \
+            --artifacts-dir "${ARTIFACTS_DIR}" \
+            --store-dir "${STORE_DIR}" \
+            --max-artifact-age-days "${LONGITUDINAL_RETENTION_ARTIFACT_DAYS}" \
+            --max-artifacts "${LONGITUDINAL_RETENTION_MAX_ARTIFACTS}" \
+            --max-run-age-days "${LONGITUDINAL_RETENTION_RUN_DAYS}" \
+            --max-runs "${LONGITUDINAL_RETENTION_MAX_RUNS}" \
+            --apply
+
+      - name: Upload release-history artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: longitudinal-release-history-${{ matrix.lane.id }}
+          path: |
+            ${{ env.MANIFEST_PATH }}
+            longitudinal/releases/${{ matrix.lane.id }}/artifacts/
+            longitudinal/releases/${{ matrix.lane.id }}/state/
+            longitudinal/releases/${{ matrix.lane.id }}/store/
+            longitudinal/releases/${{ matrix.lane.id }}/reports/

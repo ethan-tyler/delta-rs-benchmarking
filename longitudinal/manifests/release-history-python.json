@@ -1,0 +1,651 @@
+{
+  "generated_at": "2026-03-02T17:01:14.601043+00:00",
+  "ref": null,
+  "repository": ".delta-rs-under-test",
+  "revisions": [
+    {
+      "commit": "0631f2586606b0bb123818f1909623bd42b78c5d",
+      "commit_timestamp": "2020-12-27T14:15:31-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.1.0"
+    },
+    {
+      "commit": "e9f279c09bb700281fd2df8c4308d29962fb4cb0",
+      "commit_timestamp": "2020-12-27T20:19:04-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.1.1"
+    },
+    {
+      "commit": "d3462d65ad34e79eca4081c7ae88ba45a2666e33",
+      "commit_timestamp": "2021-01-05T11:41:03-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.1.2"
+    },
+    {
+      "commit": "7cbd9eef3c10b8b067a7603a35ac113c4942a6d7",
+      "commit_timestamp": "2021-01-05T12:06:49-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.1.3"
+    },
+    {
+      "commit": "14228bec6a44f5679da1908020a5146424dab261",
+      "commit_timestamp": "2021-01-10T22:47:20-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.1.4"
+    },
+    {
+      "commit": "60afb063bf1f4dc25ffbcfe049bc34580827a346",
+      "commit_timestamp": "2021-01-15T09:34:43-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.2.0"
+    },
+    {
+      "commit": "1fa0cc416055e61f16c012fcf4ddbb0886b6fab4",
+      "commit_timestamp": "2021-01-18T11:53:49-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.2.1"
+    },
+    {
+      "commit": "c785cf69620082b9babd8cf24592d80bdd4ffbfb",
+      "commit_timestamp": "2021-03-01T20:15:10-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.3.0"
+    },
+    {
+      "commit": "f0bfb662eb8c08086d305894447e5bb46f2d3839",
+      "commit_timestamp": "2021-03-10T00:32:48-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.4.0"
+    },
+    {
+      "commit": "e3d7038b48dde9a4e59f39f0e28ecd403dfd2eec",
+      "commit_timestamp": "2021-03-17T11:16:44-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.4.1"
+    },
+    {
+      "commit": "7ae4f69ab58b0bd07c91c327edf001db6d3dfb75",
+      "commit_timestamp": "2021-03-19T12:17:26-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.4.2"
+    },
+    {
+      "commit": "ca40a6bfb6de625da1483185cc53afcf5d758e27",
+      "commit_timestamp": "2021-03-21T13:46:11-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.4.3"
+    },
+    {
+      "commit": "38be44cdc8e330a21d9ba31017c29429c2082411",
+      "commit_timestamp": "2021-03-23T13:45:08-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.4.4"
+    },
+    {
+      "commit": "c6d49ae943d62429d367e5108ef4a9d13aafa898",
+      "commit_timestamp": "2021-04-05T22:49:18+02:00",
+      "source": "release-tags",
+      "tag": "python-v0.4.5"
+    },
+    {
+      "commit": "8aa955182c79756f71e3b7f60d3f35fc77ef9bdb",
+      "commit_timestamp": "2021-04-15T17:50:58+02:00",
+      "source": "release-tags",
+      "tag": "python-v0.4.6"
+    },
+    {
+      "commit": "e9dc51babf53a9e0951cb234fabdf1519804737a",
+      "commit_timestamp": "2021-04-28T18:51:27Z",
+      "source": "release-tags",
+      "tag": "python-v0.4.7"
+    },
+    {
+      "commit": "a3b27b3893f7caedc8944a4ca05919385ec28b19",
+      "commit_timestamp": "2021-05-10T09:28:55+02:00",
+      "source": "release-tags",
+      "tag": "python-v0.4.8"
+    },
+    {
+      "commit": "d922b311b4ff697f5e0c964ddc7572324d2d3c01",
+      "commit_timestamp": "2021-06-01T17:35:04-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.5.0"
+    },
+    {
+      "commit": "5ad31d03450ea0919a39585e4d441893b5a73915",
+      "commit_timestamp": "2021-07-19T09:40:26-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.5.1"
+    },
+    {
+      "commit": "7dc0c6ce4f77502132262a4915fb402dd1820876",
+      "commit_timestamp": "2021-08-09T09:34:23+02:00",
+      "source": "release-tags",
+      "tag": "python-v0.5.2"
+    },
+    {
+      "commit": "40d3d904124fcd401dbb8862ed4105a6a11090ed",
+      "commit_timestamp": "2021-09-21T08:15:24Z",
+      "source": "release-tags",
+      "tag": "python-v0.5.3"
+    },
+    {
+      "commit": "8a0475ce14841296b3d68bb962a8cbe5e0fcf2ec",
+      "commit_timestamp": "2021-11-16T10:52:38+02:00",
+      "source": "release-tags",
+      "tag": "python-v0.5.4"
+    },
+    {
+      "commit": "8fb45b292e0050e419652ea10b127bf53d128897",
+      "commit_timestamp": "2022-01-24T09:05:27-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.5.5"
+    },
+    {
+      "commit": "2fa81c611e74235c13e5d27813d2e9d815d10ad9",
+      "commit_timestamp": "2022-02-04T18:57:08-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.5.6"
+    },
+    {
+      "commit": "4aad6aa53df89513fb25d53a5805c55ea0b07693",
+      "commit_timestamp": "2022-04-19T15:49:27-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.5.7"
+    },
+    {
+      "commit": "27c0cbb6ad404a4176e0e13f8d30914430f9dc53",
+      "commit_timestamp": "2022-06-23T09:19:03-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.5.8"
+    },
+    {
+      "commit": "174cf848118c440a540d3e6c30de5407936f5c20",
+      "commit_timestamp": "2022-08-31T18:29:59+02:00",
+      "source": "release-tags",
+      "tag": "python-v0.6.0"
+    },
+    {
+      "commit": "45a0404287287ead94005740dad90b67922e0ec9",
+      "commit_timestamp": "2022-09-06T17:51:44+02:00",
+      "source": "release-tags",
+      "tag": "python-v0.6.1"
+    },
+    {
+      "commit": "5ce4a40662e3490cab9956eacf76bfd7fff889af",
+      "commit_timestamp": "2022-10-10T21:44:08-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.6.2"
+    },
+    {
+      "commit": "760b30aa29f632ad108629febe74bb880fde6d5c",
+      "commit_timestamp": "2022-11-09T17:17:25Z",
+      "source": "release-tags",
+      "tag": "python-v0.6.3"
+    },
+    {
+      "commit": "0a6ce466659efa3076bfde9df2bf2573dbada2fa",
+      "commit_timestamp": "2022-11-28T18:02:38Z",
+      "source": "release-tags",
+      "tag": "python-v0.6.4"
+    },
+    {
+      "commit": "cc922a65c722d8813b9d4323996b0c99d0a9bf7b",
+      "commit_timestamp": "2023-01-25T17:46:53-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.7.0"
+    },
+    {
+      "commit": "6e96d8bc72bc506692195ec1a0c321334b4630f0",
+      "commit_timestamp": "2023-03-11T18:07:42-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.8.0"
+    },
+    {
+      "commit": "8b854694d7eca2ef563601aac03f167fb7f0449c",
+      "commit_timestamp": "2023-03-13T15:41:35-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.8.1"
+    },
+    {
+      "commit": "395d48b47ea638b70415899dc035cc895b220e55",
+      "commit_timestamp": "2023-05-06T23:11:12Z",
+      "source": "release-tags",
+      "tag": "python-v0.9.0"
+    },
+    {
+      "commit": "155ca4cd88e5fc6614df1e6cf7d87168f899aca5",
+      "commit_timestamp": "2023-06-09T11:13:17-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.10.0"
+    },
+    {
+      "commit": "012ca7f8f7fc5a1bad925b80e3694bba7271bfde",
+      "commit_timestamp": "2023-07-27T08:27:55-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.10.1"
+    },
+    {
+      "commit": "9d1857da7e94c237aa50953813e0216d937159f7",
+      "commit_timestamp": "2023-09-11T03:47:23Z",
+      "source": "release-tags",
+      "tag": "python-v0.10.2"
+    },
+    {
+      "commit": "b4479347801e06d950ab3afc841201d2c691904f",
+      "commit_timestamp": "2023-09-25T20:43:28-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.11.0"
+    },
+    {
+      "commit": "3bcc428ca8e8d338de669d3d5d2a242c8a93474a",
+      "commit_timestamp": "2023-10-17T22:20:11-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.12.0"
+    },
+    {
+      "commit": "a5e2e3b47d51bdc22fe3f6193e3dcc3cc08e1e94",
+      "commit_timestamp": "2023-11-05T00:38:50Z",
+      "source": "release-tags",
+      "tag": "python-v0.13.0"
+    },
+    {
+      "commit": "8f5c41dbed69284233e4d0d4498cbefd43ea5ce5",
+      "commit_timestamp": "2023-12-05T17:18:26Z",
+      "source": "release-tags",
+      "tag": "python-v0.14.0"
+    },
+    {
+      "commit": "093a7569549fa839eb095805d3e22d460c10c35c",
+      "commit_timestamp": "2024-01-02T07:02:26-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.15.0"
+    },
+    {
+      "commit": "180b35bc9414929ba45e3b981632233f770dc210",
+      "commit_timestamp": "2024-01-07T21:28:48Z",
+      "source": "release-tags",
+      "tag": "python-v0.15.1"
+    },
+    {
+      "commit": "105fb5dfb2fb63caf8aad04d4a921648b6143015",
+      "commit_timestamp": "2024-02-05T04:27:02-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.15.2"
+    },
+    {
+      "commit": "7b668aa5ff3bbe9ee04ab900f030b1246bbbd23c",
+      "commit_timestamp": "2024-02-06T10:42:56-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.15.3"
+    },
+    {
+      "commit": "d8366cfdc9eda68aa7ef1cd4ef5ff5c6ea55d5de",
+      "commit_timestamp": "2024-03-05T20:03:08Z",
+      "source": "release-tags",
+      "tag": "python-v0.16.0"
+    },
+    {
+      "commit": "dadf2645712c0301d7fe1f055dee92c3b5393fc4",
+      "commit_timestamp": "2024-03-18T18:52:49Z",
+      "source": "release-tags",
+      "tag": "python-v0.16.1"
+    },
+    {
+      "commit": "6a51971d630f8c303cd1460669958c86a2d97286",
+      "commit_timestamp": "2024-03-21T10:24:53+01:00",
+      "source": "release-tags",
+      "tag": "python-v0.16.2"
+    },
+    {
+      "commit": "abafd2d0cb8dde32ffa990dc30fb97a5581688ec",
+      "commit_timestamp": "2024-03-24T20:04:30-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.16.3"
+    },
+    {
+      "commit": "dcd6be04f347e4bba72a2152d3adff3e8057b0c3",
+      "commit_timestamp": "2024-04-01T16:38:40Z",
+      "source": "release-tags",
+      "tag": "python-v0.16.4"
+    },
+    {
+      "commit": "15abe448dca22bf0847894f7bc30fd0e0f57ec62",
+      "commit_timestamp": "2024-04-22T17:24:31Z",
+      "source": "release-tags",
+      "tag": "python-v0.17.0"
+    },
+    {
+      "commit": "dd358ef8e84d556d047d1b31c9ec070d43aa3284",
+      "commit_timestamp": "2024-04-23T16:23:52Z",
+      "source": "release-tags",
+      "tag": "python-v0.17.1"
+    },
+    {
+      "commit": "6a7c684d9b76e1dc4851096912fbb2ebf3c6a806",
+      "commit_timestamp": "2024-04-25T06:37:31-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.17.2"
+    },
+    {
+      "commit": "85089b1c7462561e364d8695866b34cdcea6e5f4",
+      "commit_timestamp": "2024-05-01T23:09:01-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.17.3"
+    },
+    {
+      "commit": "353e08be0202c45334dcdceee65a8679f35de710",
+      "commit_timestamp": "2024-05-11T06:43:23Z",
+      "source": "release-tags",
+      "tag": "python-v0.17.4"
+    },
+    {
+      "commit": "f23c92dc596c3b0edda059d832e6087e5028289b",
+      "commit_timestamp": "2024-06-05T10:23:44Z",
+      "source": "release-tags",
+      "tag": "python-v0.18.0"
+    },
+    {
+      "commit": "f0416921a3814a33ea1b3796a2a1468f8c76ca3d",
+      "commit_timestamp": "2024-06-12T08:46:40-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.18.1"
+    },
+    {
+      "commit": "00cde11e3cb35adddc1f118b10502820592fbdc1",
+      "commit_timestamp": "2024-07-01T07:20:12-07:00",
+      "source": "release-tags",
+      "tag": "python-v0.18.2"
+    },
+    {
+      "commit": "d3a796709a4bc9ee8a0fdc4ea16f8c607c0daf19",
+      "commit_timestamp": "2024-08-14T20:38:31Z",
+      "source": "release-tags",
+      "tag": "python-v0.19.0"
+    },
+    {
+      "commit": "000349f0153f767a19c8ebbeb10cc522d1021121",
+      "commit_timestamp": "2024-08-15T16:52:39Z",
+      "source": "release-tags",
+      "tag": "python-v0.19.0+1"
+    },
+    {
+      "commit": "f02e045a328f6a4b4b3aea4a8ca74df9829abd51",
+      "commit_timestamp": "2024-08-19T18:27:51Z",
+      "source": "release-tags",
+      "tag": "python-v0.19.1"
+    },
+    {
+      "commit": "d81103c77f53bb31cd8381796a6dc16d5a875635",
+      "commit_timestamp": "2024-09-05T13:53:36Z",
+      "source": "release-tags",
+      "tag": "python-v0.19.2"
+    },
+    {
+      "commit": "fcc02becaf9959505603f08a3a6e9c73b6d8858c",
+      "commit_timestamp": "2024-09-06T13:32:26Z",
+      "source": "release-tags",
+      "tag": "python-v0.19.2+1"
+    },
+    {
+      "commit": "67060cc53edc18f92d7c3b523ddd0bf652d4a065",
+      "commit_timestamp": "2024-09-06T13:44:15Z",
+      "source": "release-tags",
+      "tag": "python-v0.19.2+2"
+    },
+    {
+      "commit": "dbc928fd0ae75abe11168070761a848d3254ec81",
+      "commit_timestamp": "2024-09-06T13:52:58Z",
+      "source": "release-tags",
+      "tag": "python-v0.19.2+3"
+    },
+    {
+      "commit": "dd8d56494e254e51ba35b6f3c528e8deea8981ea",
+      "commit_timestamp": "2024-09-06T22:54:08Z",
+      "source": "release-tags",
+      "tag": "python-v0.19.2+4"
+    },
+    {
+      "commit": "550553dfeac89fed052be53efa545c529b1c6d0a",
+      "commit_timestamp": "2024-09-18T02:08:18Z",
+      "source": "release-tags",
+      "tag": "python-v0.20.0"
+    },
+    {
+      "commit": "528192eed70e98cbbebbb22cfa719c46da17dcfa",
+      "commit_timestamp": "2024-09-27T16:23:01Z",
+      "source": "release-tags",
+      "tag": "python-v0.20.1"
+    },
+    {
+      "commit": "6581026c8cec06d0263368a82d38db48d7f66dfb",
+      "commit_timestamp": "2024-10-08T16:21:42Z",
+      "source": "release-tags",
+      "tag": "python-v0.20.2"
+    },
+    {
+      "commit": "ca9f56c6c69712daa73690dfdd55ba9de52f4bbc",
+      "commit_timestamp": "2024-10-30T14:52:10Z",
+      "source": "release-tags",
+      "tag": "python-v0.21.0"
+    },
+    {
+      "commit": "dfeadd325bfdd9c63554ed0601ce076478151b8f",
+      "commit_timestamp": "2024-11-23T21:35:20Z",
+      "source": "release-tags",
+      "tag": "python-v0.22.0"
+    },
+    {
+      "commit": "1083c8c1b9b97bf3276b59329ebf4255b81b5968",
+      "commit_timestamp": "2024-11-29T06:30:07Z",
+      "source": "release-tags",
+      "tag": "python-v0.22.1"
+    },
+    {
+      "commit": "e83edcf500db54bacf613731bb42179ef5cafaf2",
+      "commit_timestamp": "2024-11-30T17:15:27Z",
+      "source": "release-tags",
+      "tag": "python-v0.22.2"
+    },
+    {
+      "commit": "98f8b0baca4d7f03e248510b37814cbfd9ab93a4",
+      "commit_timestamp": "2024-12-04T13:25:08-08:00",
+      "source": "release-tags",
+      "tag": "python-v0.22.3"
+    },
+    {
+      "commit": "21efab318c9a1007b40ef8783edc7a19ee6bd5ac",
+      "commit_timestamp": "2025-01-01T19:13:15Z",
+      "source": "release-tags",
+      "tag": "python-v0.23.0"
+    },
+    {
+      "commit": "9e35c067dfca6ee20511f39ab9fe9f43d956a655",
+      "commit_timestamp": "2025-01-02T14:13:40Z",
+      "source": "release-tags",
+      "tag": "python-v0.23.1"
+    },
+    {
+      "commit": "513185051061adb97d72f71f85b495c331dda090",
+      "commit_timestamp": "2025-01-04T23:29:39Z",
+      "source": "release-tags",
+      "tag": "python-v0.23.2"
+    },
+    {
+      "commit": "d73a9af39d03769f604230c176f3c9498feee12c",
+      "commit_timestamp": "2025-01-15T03:43:00Z",
+      "source": "release-tags",
+      "tag": "python-v0.24.0"
+    },
+    {
+      "commit": "6882899a5b63d15baa3caa0123aee920277510fc",
+      "commit_timestamp": "2025-02-20T16:53:29Z",
+      "source": "release-tags",
+      "tag": "python-v0.25.0"
+    },
+    {
+      "commit": "c1cf280493c6c0ea052d58ca5a7bf3bc10620016",
+      "commit_timestamp": "2025-02-21T14:30:16Z",
+      "source": "release-tags",
+      "tag": "python-v0.25.1"
+    },
+    {
+      "commit": "3a981430d7058e2b328ba9c0d747e8849b0986de",
+      "commit_timestamp": "2025-02-25T19:25:34Z",
+      "source": "release-tags",
+      "tag": "python-v0.25.2"
+    },
+    {
+      "commit": "365070c9841779c225c0854565057d4bc040a31a",
+      "commit_timestamp": "2025-03-02T14:42:11Z",
+      "source": "release-tags",
+      "tag": "python-v0.25.3"
+    },
+    {
+      "commit": "a5136049473edadf732bd419003850e12e05e893",
+      "commit_timestamp": "2025-03-02T15:43:45Z",
+      "source": "release-tags",
+      "tag": "python-v0.25.4"
+    },
+    {
+      "commit": "3e13d43b89b9911049cddc26f13a4e574b401724",
+      "commit_timestamp": "2025-04-01T16:33:57+02:00",
+      "source": "release-tags",
+      "tag": "python-v0.25.5"
+    },
+    {
+      "commit": "5ea3d15195f55ea9f3e85a3357b2db4e5e6e4700",
+      "commit_timestamp": "2025-05-28T18:59:42Z",
+      "source": "release-tags",
+      "tag": "python-v1.0.0"
+    },
+    {
+      "commit": "1912991aabe3bcf07fde02489cb5a7a2c0ffc4d7",
+      "commit_timestamp": "2025-05-28T19:38:05Z",
+      "source": "release-tags",
+      "tag": "python-v1.0.0-rerun"
+    },
+    {
+      "commit": "2f990fec7954002a06de8f7b11bc559e7cb17c80",
+      "commit_timestamp": "2025-05-30T18:47:20Z",
+      "source": "release-tags",
+      "tag": "python-v1.0.1"
+    },
+    {
+      "commit": "f8dcef31d878e206c02a343f0f5caace399956b1",
+      "commit_timestamp": "2025-06-01T12:04:01Z",
+      "source": "release-tags",
+      "tag": "python-v1.0.2"
+    },
+    {
+      "commit": "0f9c2036f5d8310c0a224e921d8d034acd5e411f",
+      "commit_timestamp": "2025-07-14T06:04:37Z",
+      "source": "release-tags",
+      "tag": "python-v1.1.0"
+    },
+    {
+      "commit": "c8c304af6cc24f2d1d85ded3dc5259ab47d01931",
+      "commit_timestamp": "2025-07-24T16:54:06Z",
+      "source": "release-tags",
+      "tag": "python-v1.1.1"
+    },
+    {
+      "commit": "284608107f49a62ac3655567837345d3d7ad7749",
+      "commit_timestamp": "2025-07-24T20:33:17Z",
+      "source": "release-tags",
+      "tag": "python-v1.1.2"
+    },
+    {
+      "commit": "1b3d8ca7d10935d79e65f00b3535708c6c921253",
+      "commit_timestamp": "2025-07-28T17:36:12Z",
+      "source": "release-tags",
+      "tag": "python-v1.1.3"
+    },
+    {
+      "commit": "2920177ac5215e192e0182bed93c42c0b4a98b6f",
+      "commit_timestamp": "2025-08-08T08:15:41Z",
+      "source": "release-tags",
+      "tag": "python-v1.1.4"
+    },
+    {
+      "commit": "9f67f9f86e2330a61db885acffd765defa217a62",
+      "commit_timestamp": "2025-10-13T19:34:36+02:00",
+      "source": "release-tags",
+      "tag": "python-v1.2.0"
+    },
+    {
+      "commit": "cb672ac0e359dfccc4129396590d5bfdaabacca6",
+      "commit_timestamp": "2025-10-20T08:37:22+02:00",
+      "source": "release-tags",
+      "tag": "python-v1.2.1"
+    },
+    {
+      "commit": "98b1335070ac4cf7df138c47035cad30e176d117",
+      "commit_timestamp": "2025-12-31T10:03:47Z",
+      "source": "release-tags",
+      "tag": "python-v1.3.0"
+    },
+    {
+      "commit": "5402a1d325a8cff1fc09756bfc972762eab53244",
+      "commit_timestamp": "2025-12-31T18:52:49Z",
+      "source": "release-tags",
+      "tag": "python-v1.3.0-1"
+    },
+    {
+      "commit": "642febb05f566e0d31bad2b152d02dce3b0e7322",
+      "commit_timestamp": "2026-01-09T13:19:48-08:00",
+      "source": "release-tags",
+      "tag": "python-v1.3.1"
+    },
+    {
+      "commit": "7e44ab424bdba4261fb84520aa40736f64f072a9",
+      "commit_timestamp": "2026-01-10T14:40:30Z",
+      "source": "release-tags",
+      "tag": "python-v1.3.1-1"
+    },
+    {
+      "commit": "29ed5dd8f68ced991383fa3607632dec4ee8c26a",
+      "commit_timestamp": "2026-01-11T13:34:06Z",
+      "source": "release-tags",
+      "tag": "python-v1.3.1-2"
+    },
+    {
+      "commit": "e5c4f9c076734cb93f96451d2f5c8f7bb611ff97",
+      "commit_timestamp": "2026-01-13T15:41:55+01:00",
+      "source": "release-tags",
+      "tag": "python-v1.3.1-3"
+    },
+    {
+      "commit": "f5ed490c9010adf037d3b499d3933372665443a2",
+      "commit_timestamp": "2026-01-13T23:56:47+01:00",
+      "source": "release-tags",
+      "tag": "python-v1.3.2"
+    },
+    {
+      "commit": "225656154081d06224408d533cc1c09ec5e404dc",
+      "commit_timestamp": "2026-01-26T07:20:53-08:00",
+      "source": "release-tags",
+      "tag": "python-v1.4.0"
+    },
+    {
+      "commit": "a7f718d7debe3b8f3b97a07be93dcd7f726cd0b2",
+      "commit_timestamp": "2026-01-28T14:37:52Z",
+      "source": "release-tags",
+      "tag": "python-v1.4.1"
+    },
+    {
+      "commit": "27a6fb6bc94ee57faba8fb4ffc727ff74734d435",
+      "commit_timestamp": "2026-02-09T11:42:44+09:00",
+      "source": "release-tags",
+      "tag": "python-v1.4.2"
+    },
+    {
+      "commit": "6f685aed91d2ec150aa743421a02691abb52f83a",
+      "commit_timestamp": "2026-02-16T12:53:27+01:00",
+      "source": "release-tags",
+      "tag": "python-v1.3.3"
+    }
+  ],
+  "schema_version": 1,
+  "strategy": "release-tags"
+}

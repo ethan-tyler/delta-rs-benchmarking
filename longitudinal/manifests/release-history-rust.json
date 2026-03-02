@@ -1,0 +1,333 @@
+{
+  "generated_at": "2026-03-02T17:01:12.119949+00:00",
+  "ref": null,
+  "repository": ".delta-rs-under-test",
+  "revisions": [
+    {
+      "commit": "6c9f18c8297630d50119f455be1a89bc615cea4e",
+      "commit_timestamp": "2021-05-07T10:31:03-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.3.0"
+    },
+    {
+      "commit": "6c9f18c8297630d50119f455be1a89bc615cea4e",
+      "commit_timestamp": "2021-05-07T10:31:03-07:00",
+      "source": "release-tags",
+      "tag": "rust-v3.0.0"
+    },
+    {
+      "commit": "5bb3e81b37dac007137bd455919a76e55ed3f97b",
+      "commit_timestamp": "2021-07-18T14:12:50-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.4.0"
+    },
+    {
+      "commit": "cf8488693f6dd003d2fb1fb4046f297ecdbd74e7",
+      "commit_timestamp": "2022-11-28T08:36:28+01:00",
+      "source": "release-tags",
+      "tag": "rust-v0.5.0"
+    },
+    {
+      "commit": "4096466354650f4b8344545e55915302a1b0c724",
+      "commit_timestamp": "2022-12-19T09:38:37-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.6.0"
+    },
+    {
+      "commit": "48f99ba88c42948fc772754b5b3ddfa73026b89b",
+      "commit_timestamp": "2023-02-12T19:45:13Z",
+      "source": "release-tags",
+      "tag": "rust-v0.7.0"
+    },
+    {
+      "commit": "6e96d8bc72bc506692195ec1a0c321334b4630f0",
+      "commit_timestamp": "2023-03-11T18:07:42-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.8.0"
+    },
+    {
+      "commit": "d7eb60b6c0fb80222af36595d9f92076c72bef7e",
+      "commit_timestamp": "2023-04-14T10:39:22-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.9.0"
+    },
+    {
+      "commit": "edf1355cc7da5e5e256f9638f3a0c0a80d7002de",
+      "commit_timestamp": "2023-05-02T08:30:36-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.10.0"
+    },
+    {
+      "commit": "6b6911bc43ee5cee77ed8d3e267c4f44844fa5bb",
+      "commit_timestamp": "2023-05-12T17:10:24-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.11.0"
+    },
+    {
+      "commit": "df985871250fdc988cb5a6cad047708e3b2f60cf",
+      "commit_timestamp": "2023-05-30T08:43:39-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.12.0"
+    },
+    {
+      "commit": "da101273635224a703ff7e1abd435d985b879f8c",
+      "commit_timestamp": "2023-07-14T23:50:31-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.13.0"
+    },
+    {
+      "commit": "2f9a67f79f3d06367108925424609dfa1d24786e",
+      "commit_timestamp": "2023-07-31T22:44:12-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.14.0"
+    },
+    {
+      "commit": "fd2207bd8dd1ebe5f9395c26d77f6e3ea4345650",
+      "commit_timestamp": "2023-09-05T22:38:08-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.15.0"
+    },
+    {
+      "commit": "55a309d3fafe06141f4a42c7da828940779286f4",
+      "commit_timestamp": "2023-09-27T08:30:23-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.16.0"
+    },
+    {
+      "commit": "c3776afe5d9583102217b605611370af3bf4477d",
+      "commit_timestamp": "2023-10-21T07:59:57-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.16.1"
+    },
+    {
+      "commit": "f729beab6d80575c1d42d8f31afdf5441aa4e311",
+      "commit_timestamp": "2023-10-21T10:22:21-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.16.2"
+    },
+    {
+      "commit": "5722a38ea67f5e6bebc86b45facf7666069ff954",
+      "commit_timestamp": "2023-11-07T17:09:11-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.16.3"
+    },
+    {
+      "commit": "2fdc32ac1d708db87c7757cb14894407ae8b58d1",
+      "commit_timestamp": "2023-11-12T13:23:47-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.16.4"
+    },
+    {
+      "commit": "93d8babc28baec6b825f757635c5983925745c80",
+      "commit_timestamp": "2023-11-15T07:32:34-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.16.5"
+    },
+    {
+      "commit": "ce34881510d97b81dfad49dd98470c6a6110fd52",
+      "commit_timestamp": "2024-02-06T09:46:19-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.17.0"
+    },
+    {
+      "commit": "7c1bc35fa7a35a7dfe516975ab0f9aa85c859f10",
+      "commit_timestamp": "2024-03-06T20:15:02Z",
+      "source": "release-tags",
+      "tag": "rust-v0.17.1"
+    },
+    {
+      "commit": "964c6b3b87819737bf2c4995937ff8c698266f8f",
+      "commit_timestamp": "2024-05-01T20:25:25Z",
+      "source": "release-tags",
+      "tag": "rust-v0.17.3"
+    },
+    {
+      "commit": "f0416921a3814a33ea1b3796a2a1468f8c76ca3d",
+      "commit_timestamp": "2024-06-12T08:46:40-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.18.0"
+    },
+    {
+      "commit": "d17ed97b5bda0cadbc0df959f8fb38e275570c87",
+      "commit_timestamp": "2024-06-21T06:21:45Z",
+      "source": "release-tags",
+      "tag": "rust-v0.18.1"
+    },
+    {
+      "commit": "aa28d730e1d69ed419f2dc22404c5bbab8e98647",
+      "commit_timestamp": "2024-08-07T01:01:24Z",
+      "source": "release-tags",
+      "tag": "rust-v0.18.2"
+    },
+    {
+      "commit": "d3a796709a4bc9ee8a0fdc4ea16f8c607c0daf19",
+      "commit_timestamp": "2024-08-14T20:38:31Z",
+      "source": "release-tags",
+      "tag": "rust-v0.19.0"
+    },
+    {
+      "commit": "8ea45c3a0d0ba7dda22264b12a3be636ba456881",
+      "commit_timestamp": "2024-09-11T00:53:43Z",
+      "source": "release-tags",
+      "tag": "rust-v0.19.1"
+    },
+    {
+      "commit": "b3b23be91b8eb8207473785d4b0c20c5d2c174b2",
+      "commit_timestamp": "2024-09-18T00:27:56Z",
+      "source": "release-tags",
+      "tag": "rust-v0.20.0"
+    },
+    {
+      "commit": "6a770f04761e674703b4a799904d9e955391ca55",
+      "commit_timestamp": "2024-09-27T21:40:26Z",
+      "source": "release-tags",
+      "tag": "rust-v0.20.1"
+    },
+    {
+      "commit": "bd7dc5cba1c19bbadff87a55a6c6a6966b087948",
+      "commit_timestamp": "2024-10-25T18:28:18Z",
+      "source": "release-tags",
+      "tag": "rust-v0.21.0"
+    },
+    {
+      "commit": "46967d38988bc8ac86a184cfc801215c83ab4315",
+      "commit_timestamp": "2024-11-30T18:05:16Z",
+      "source": "release-tags",
+      "tag": "rust-v0.22.2"
+    },
+    {
+      "commit": "98f8b0baca4d7f03e248510b37814cbfd9ab93a4",
+      "commit_timestamp": "2024-12-04T13:25:08-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.22.3"
+    },
+    {
+      "commit": "21efab318c9a1007b40ef8783edc7a19ee6bd5ac",
+      "commit_timestamp": "2025-01-01T19:13:15Z",
+      "source": "release-tags",
+      "tag": "rust-v0.23.0"
+    },
+    {
+      "commit": "fb75965fb23df87fb3ca20b735f3b9a3a717a4ef",
+      "commit_timestamp": "2025-01-10T14:30:33Z",
+      "source": "release-tags",
+      "tag": "rust-v0.23.1"
+    },
+    {
+      "commit": "95f96552e4be2a806f981da21e9f7df8b06a726c",
+      "commit_timestamp": "2025-01-12T16:41:12Z",
+      "source": "release-tags",
+      "tag": "rust-v0.23.2"
+    },
+    {
+      "commit": "f026c9c3cf5828b6a5d96c6a8d8203801300800f",
+      "commit_timestamp": "2025-01-24T15:25:11Z",
+      "source": "release-tags",
+      "tag": "rust-v0.24.0"
+    },
+    {
+      "commit": "c14950282f56c2c1218aaaad180760249f4e10e2",
+      "commit_timestamp": "2025-03-09T13:38:54Z",
+      "source": "release-tags",
+      "tag": "rust-v0.25.0"
+    },
+    {
+      "commit": "f8d001638e4d51c8cd3d30ee06d55a505efd4505",
+      "commit_timestamp": "2025-05-03T16:05:32Z",
+      "source": "release-tags",
+      "tag": "rust-v0.26.0"
+    },
+    {
+      "commit": "cf18c906ef379277913899c8b4f87090b87a564c",
+      "commit_timestamp": "2025-05-05T16:56:16Z",
+      "source": "release-tags",
+      "tag": "rust-v0.26.1"
+    },
+    {
+      "commit": "57c1ae6e99a43e4b906437f6cdbb385538fbedb7",
+      "commit_timestamp": "2025-05-15T13:01:35Z",
+      "source": "release-tags",
+      "tag": "rust-v0.26.2"
+    },
+    {
+      "commit": "d56c1429620d01690537ba1755a4a954b1843ab8",
+      "commit_timestamp": "2025-07-11T06:14:06Z",
+      "source": "release-tags",
+      "tag": "rust-v0.26.3"
+    },
+    {
+      "commit": "3607c314cbdd2ad06c6ee0677b92a29f695c71f3",
+      "commit_timestamp": "2025-07-12T16:51:33Z",
+      "source": "release-tags",
+      "tag": "rust-v0.27.0"
+    },
+    {
+      "commit": "1c5b77d1599da42f7197084391860b459b2456f2",
+      "commit_timestamp": "2025-08-27T07:23:15-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.28.0"
+    },
+    {
+      "commit": "74d09c4bd02ceca98e9ada71a15d5604636724b8",
+      "commit_timestamp": "2025-08-29T17:06:04-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.28.1"
+    },
+    {
+      "commit": "f1727c90373ce03644933e706cbf90aa47025516",
+      "commit_timestamp": "2025-10-10T08:36:33-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.29.0"
+    },
+    {
+      "commit": "dfe4cfc074e1d88215ef0db36d1d629153490285",
+      "commit_timestamp": "2025-10-18T07:43:09-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.29.1"
+    },
+    {
+      "commit": "a22a97e7e7d2665f3138853ab9e76805839e9516",
+      "commit_timestamp": "2025-10-24T10:20:50-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.29.2"
+    },
+    {
+      "commit": "2e5f7b0f307d23a4c102fe9666ad7ad04a566300",
+      "commit_timestamp": "2025-10-31T09:12:27-07:00",
+      "source": "release-tags",
+      "tag": "rust-v0.29.3"
+    },
+    {
+      "commit": "84d954ae4aef3a404c03854d7d06ea40a1245274",
+      "commit_timestamp": "2025-11-15T07:22:23-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.29.4"
+    },
+    {
+      "commit": "cbc99f699488a65f680de4de48c572a3d37486b8",
+      "commit_timestamp": "2025-12-31T03:46:11Z",
+      "source": "release-tags",
+      "tag": "rust-v0.30.0"
+    },
+    {
+      "commit": "296a8d8ebe9897dcc8afc3d2e02cf550ce12bd06",
+      "commit_timestamp": "2026-01-12T00:18:05-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.30.1"
+    },
+    {
+      "commit": "cd031ef825d0f8a834cb9009fde07e7352a0395f",
+      "commit_timestamp": "2026-02-04T14:26:21Z",
+      "source": "release-tags",
+      "tag": "rust-v0.30.2"
+    },
+    {
+      "commit": "b5bd6ace69fb562ea8d3cae5563723add09c7d92",
+      "commit_timestamp": "2026-02-17T13:46:49-08:00",
+      "source": "release-tags",
+      "tag": "rust-v0.31.0"
+    }
+  ],
+  "schema_version": 1,
+  "strategy": "release-tags"
+}

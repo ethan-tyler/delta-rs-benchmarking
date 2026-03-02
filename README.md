@@ -31,6 +31,12 @@ Compare two branches:
 ./scripts/compare_branch.sh main candidate-branch all
 ```
 
+Refresh committed release-history benchmark manifests:
+
+```bash
+./scripts/update_release_history_manifests.sh
+```
+
 Show CLI help:
 
 ```bash

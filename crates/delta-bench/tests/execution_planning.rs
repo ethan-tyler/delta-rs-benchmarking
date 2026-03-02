@@ -2,7 +2,9 @@ use delta_bench::assertions::CaseAssertion;
 use delta_bench::cli::RunnerMode;
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{plan_run_cases, run_planned_cases, run_target, PlannedCase};
+use delta_bench::suites::{
+    apply_dataset_assertion_policy, plan_run_cases, run_planned_cases, run_target, PlannedCase,
+};
 
 #[test]
 fn case_filter_requires_at_least_one_matching_case() {
@@ -35,7 +37,7 @@ fn all_runner_plan_is_manifest_ordered() {
     let ids = plan.iter().map(|case| case.id.as_str()).collect::<Vec<_>>();
     let rust_idx = ids
         .iter()
-        .position(|id| *id == "read_full_scan_narrow")
+        .position(|id| *id == "scan_full_narrow")
         .expect("rust case missing");
     let py_idx = ids
         .iter()
@@ -56,7 +58,7 @@ async fn run_planned_cases_applies_assertions_and_can_fail_case() {
         .expect("generate fixtures");
 
     let planned = vec![PlannedCase {
-        id: "write_append_small_batches".to_string(),
+        id: "write_append_small".to_string(),
         target: "write".to_string(),
         assertions: vec![CaseAssertion::ExactResultHash(
             "sha256:not-real".to_string(),
@@ -83,7 +85,7 @@ async fn run_planned_cases_applies_expected_failure_reclassification() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
     let planned = vec![PlannedCase {
-        id: "write_append_small_batches".to_string(),
+        id: "write_append_small".to_string(),
         target: "write".to_string(),
         assertions: vec![CaseAssertion::ExpectedErrorContains(
             "fixture load failed".to_string(),
@@ -99,6 +101,33 @@ async fn run_planned_cases_applies_expected_failure_reclassification() {
 }
 
 #[tokio::test]
+async fn manifest_hash_assertions_pass_for_write_case() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let planned = plan_run_cases("write", RunnerMode::Rust, Some("write_append_small"))
+        .expect("plan should include write case with assertions");
+    assert_eq!(planned.len(), 1);
+    assert!(
+        planned[0].assertions.len() >= 2,
+        "expected exact_result_hash and schema_hash assertions from manifest"
+    );
+
+    let cases = run_planned_cases(temp.path(), &planned, "sf1", 0, 1, &storage)
+        .await
+        .expect("planned run should execute");
+    let only = &cases[0];
+    assert!(
+        only.success,
+        "manifest-based hash assertions should pass for write case: {:?}",
+        only.failure
+    );
+}
+
+#[tokio::test]
 async fn run_target_all_requires_manifest_planning_api() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
@@ -109,4 +138,65 @@ async fn run_target_all_requires_manifest_planning_api() {
         err.to_string().contains("plan_run_cases"),
         "unexpected error: {err}"
     );
+}
+
+#[test]
+fn tpcds_duckdb_dataset_skips_tpcds_hash_assertions() {
+    let mut planned = vec![PlannedCase {
+        id: "tpcds_q03".to_string(),
+        target: "tpcds".to_string(),
+        assertions: vec![
+            CaseAssertion::ExactResultHash("sha256:expected".to_string()),
+            CaseAssertion::SchemaHash("sha256:schema".to_string()),
+            CaseAssertion::ExpectedErrorContains("fixture load failed".to_string()),
+        ],
+    }];
+
+    apply_dataset_assertion_policy(&mut planned, Some("tpcds_duckdb"));
+
+    assert_eq!(planned.len(), 1);
+    assert_eq!(planned[0].assertions.len(), 2);
+    assert!(
+        planned[0]
+            .assertions
+            .iter()
+            .all(|assertion| !matches!(assertion, CaseAssertion::ExactResultHash(_))),
+        "exact result hash assertions should be dropped for tpcds_duckdb"
+    );
+    assert!(
+        planned[0]
+            .assertions
+            .iter()
+            .any(|assertion| matches!(assertion, CaseAssertion::SchemaHash(_))),
+        "schema hash assertions must remain enabled for tpcds_duckdb"
+    );
+    assert!(planned[0]
+        .assertions
+        .iter()
+        .any(|assertion| matches!(assertion, CaseAssertion::ExpectedErrorContains(_))));
+}
+
+#[test]
+fn tpcds_duckdb_dataset_policy_does_not_modify_non_tpcds_cases() {
+    let mut planned = vec![PlannedCase {
+        id: "write_append_small".to_string(),
+        target: "write".to_string(),
+        assertions: vec![
+            CaseAssertion::ExactResultHash("sha256:expected".to_string()),
+            CaseAssertion::SchemaHash("sha256:schema".to_string()),
+        ],
+    }];
+
+    apply_dataset_assertion_policy(&mut planned, Some("tpcds_duckdb"));
+
+    assert_eq!(planned.len(), 1);
+    assert_eq!(planned[0].assertions.len(), 2);
+    assert!(matches!(
+        planned[0].assertions[0],
+        CaseAssertion::ExactResultHash(_)
+    ));
+    assert!(matches!(
+        planned[0].assertions[1],
+        CaseAssertion::SchemaHash(_)
+    ));
 }

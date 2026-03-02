@@ -4,12 +4,14 @@ use chrono::Utc;
 use clap::Parser;
 
 use delta_bench::cli::{parse_storage_options, validate_label, Args, Command, RunnerMode};
-use delta_bench::data::fixtures::generate_fixtures;
+use delta_bench::data::fixtures::{generate_fixtures_with_profile, FixtureProfile};
 use delta_bench::error::BenchResult;
 use delta_bench::manifests::DatasetId;
 use delta_bench::results::{BenchContext, BenchRunResult};
 use delta_bench::storage::{load_backend_profile_options, StorageConfig};
-use delta_bench::suites::{list_targets, plan_run_cases, run_planned_cases};
+use delta_bench::suites::{
+    apply_dataset_assertion_policy, list_targets, plan_run_cases, run_planned_cases,
+};
 use delta_bench::system::{
     benchmark_fidelity_info, delta_rs_checkout_info, host_name, FidelityEnvOverrides,
 };
@@ -41,11 +43,13 @@ async fn main() -> BenchResult<()> {
             force,
         } => {
             let effective_scale = resolve_scale(&scale, dataset_id.as_deref())?;
-            generate_fixtures(
+            let profile = resolve_fixture_profile(dataset_id.as_deref())?;
+            generate_fixtures_with_profile(
                 &args.fixtures_dir,
                 effective_scale.as_str(),
                 seed,
                 force,
+                profile,
                 &storage,
             )
             .await?;
@@ -67,7 +71,8 @@ async fn main() -> BenchResult<()> {
             let effective_scale = resolve_scale(&scale, dataset_id.as_deref())?;
             validate_label(&args.label)?;
             fs::create_dir_all(&args.results_dir)?;
-            let run_plan = plan_run_cases(&target, runner, case_filter.as_deref())?;
+            let mut run_plan = plan_run_cases(&target, runner, case_filter.as_deref())?;
+            apply_dataset_assertion_policy(&mut run_plan, dataset_id.as_deref());
             let cases = run_planned_cases(
                 &args.fixtures_dir,
                 &run_plan,
@@ -223,4 +228,18 @@ fn resolve_scale(scale: &str, dataset_id: Option<&str>) -> BenchResult<String> {
     };
     let dataset = DatasetId::parse(dataset_id)?;
     Ok(dataset.scale().to_string())
+}
+
+fn resolve_fixture_profile(dataset_id: Option<&str>) -> BenchResult<FixtureProfile> {
+    let Some(dataset_id) = dataset_id else {
+        return Ok(FixtureProfile::Standard);
+    };
+    let dataset = DatasetId::parse(dataset_id)?;
+    Ok(match dataset {
+        DatasetId::ManyVersions => FixtureProfile::ManyVersions,
+        DatasetId::TpcdsDuckdb => FixtureProfile::TpcdsDuckdb,
+        DatasetId::TinySmoke | DatasetId::MediumSelective | DatasetId::SmallFiles => {
+            FixtureProfile::Standard
+        }
+    })
 }

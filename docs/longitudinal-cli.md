@@ -1,19 +1,26 @@
 # Longitudinal CLI Guide
 
-This guide covers the command-line workflow for over-time benchmarking across `delta-rs` revisions.
+Command cookbook for running over-time benchmarks across `delta-rs` revisions.
+Use [longitudinal-runbook.md](longitudinal-runbook.md) for failure recovery and workflow operations.
 
-Operational recovery and nightly-job behavior are documented in [longitudinal-runbook.md](longitudinal-runbook.md).
+## Prerequisites
 
-## Pipeline stages
+- prepared repository checkout (`./scripts/prepare_delta_rs.sh`)
+- Python 3 environment able to run `python/delta_bench_longitudinal`
+- revision manifest path under `longitudinal/manifests/`
 
-1. Select revisions.
-2. Build per-revision artifacts.
-3. Run resumable suite/scale matrix.
-4. Ingest normalized rows (strictly validated benchmark schema v2 payloads only).
-5. Generate markdown and HTML reports.
-6. Optionally prune old artifacts and runs.
+Pipeline stages executed by this CLI:
 
-## Step-by-step commands
+1. select revisions
+2. build per-revision artifacts
+3. run resumable suite/scale matrix
+4. ingest normalized rows (schema v2 only)
+5. generate markdown and HTML reports
+6. optionally prune old artifacts/runs
+
+## Happy-Path Pipeline
+
+Run the full staged sequence:
 
 ```bash
 ./scripts/longitudinal_bench.sh select-revisions \
@@ -30,7 +37,7 @@ Operational recovery and nightly-job behavior are documented in [longitudinal-ru
 ./scripts/longitudinal_bench.sh run-matrix \
   --manifest longitudinal/manifests/jan.json \
   --artifacts-dir longitudinal/artifacts \
-  --state-path longitudinal/state/matrix.json \
+  --state-path longitudinal/state/matrix-state.json \
   --results-dir results \
   --max-parallel 2 \
   --max-load-per-cpu 0.75 \
@@ -43,7 +50,7 @@ Operational recovery and nightly-job behavior are documented in [longitudinal-ru
 
 ./scripts/longitudinal_bench.sh ingest-results \
   --manifest longitudinal/manifests/jan.json \
-  --state-path longitudinal/state/matrix.json \
+  --state-path longitudinal/state/matrix-state.json \
   --results-dir results \
   --store-dir longitudinal/store
 
@@ -65,14 +72,18 @@ Operational recovery and nightly-job behavior are documented in [longitudinal-ru
   --max-runs 200
 ```
 
-## End-to-end orchestration
+`prune` is dry-run by default; add `--apply` to make retention changes.
+
+## End-to-End Orchestration
+
+Use orchestrate when you want one command for build -> run -> ingest -> report:
 
 ```bash
 ./scripts/longitudinal_bench.sh orchestrate \
   --manifest longitudinal/manifests/jan.json \
   --artifacts-dir longitudinal/artifacts \
   --results-dir results \
-  --state-path longitudinal/state/matrix.json \
+  --state-path longitudinal/state/matrix-state.json \
   --store-dir longitudinal/store \
   --markdown-path longitudinal/reports/summary.md \
   --html-path longitudinal/reports/trends.html \
@@ -85,54 +96,61 @@ Operational recovery and nightly-job behavior are documented in [longitudinal-ru
   --scale sf1
 ```
 
-## Revision selection strategies
+## Advanced Controls
 
-- `release-tags`: semantic version tags (`vX.Y.Z` by default)
-- `date-window`: all commits in an inclusive date range
-- `one-per-day`: latest commit per day in an inclusive date range
+### Revision selection strategies
 
-Release-tag examples for `delta-rs` tracks:
+- `release-tags`: semantic tags (`vX.Y.Z` by default)
+- `date-window`: all commits in inclusive date range
+- `one-per-day`: latest commit per day in inclusive range
+
+Release-tag patterns:
 
 - Rust releases: `--release-tag-pattern '^rust-v\d+\.\d+\.\d+([+-].+)?$'`
 - Python releases: `--release-tag-pattern '^python-v\d+\.\d+\.\d+([+-].+)?$'`
 
-Repository-managed manifests for reusable release benchmarks:
+Repository-managed release manifests:
 
 - `longitudinal/manifests/release-history-rust.json`
 - `longitudinal/manifests/release-history-python.json`
-- Refresh command: `./scripts/update_release_history_manifests.sh`
+- refresh command: `./scripts/update_release_history_manifests.sh`
 
-## Parallel and load-guard controls
+### Parallel and load guards
 
-- `run-matrix --max-parallel N`: concurrent suite/scale cells (default `1`)
-- `run-matrix --max-load-per-cpu X`: pause scheduling when `loadavg_1m / cpu_count > X`
-- `run-matrix --load-check-interval-seconds N`: polling interval while load guard is active
+- `run-matrix --max-parallel N`
+- `run-matrix --max-load-per-cpu X`
+- `run-matrix --load-check-interval-seconds N`
 
-Use conservative settings first, then raise parallelism only after confirming low cross-run interference.
+Start conservatively, then increase only after confirming low interference.
 
-## Statistical significance controls
+### Significance controls
 
 - `report --significance-method none|mann-whitney` (default `none`)
-- `report --significance-alpha 0.05` sets the p-value cutoff for significance labeling
+- `report --significance-alpha 0.05`
 
-Threshold deltas still apply; significance adds confidence signals for regression highlights.
+Threshold deltas still apply; significance adds confidence labels.
 
-## Retention pruning controls
+### Retention controls
 
-- `prune` is safe by default (dry-run)
-- pass `--apply` to perform deletion/rewrite actions
-- prune artifacts by age (`--max-artifact-age-days`) and/or count (`--max-artifacts`)
-- prune store runs by age (`--max-run-age-days`) and/or count (`--max-runs`)
+- `prune --max-artifact-age-days <days>` and/or `--max-artifacts <count>`
+- `prune --max-run-age-days <days>` and/or `--max-runs <count>`
+- add `--apply` to execute deletion/rewrite actions
 
-## Directory layout
+## Directory Layout
 
 ```text
 longitudinal/
-  manifests/           # revision manifests
-  artifacts/<sha>/     # built delta-bench binary + metadata.json per revision
-  state/matrix.json    # resumable matrix state (attempts/status/reasons)
-  store/rows.jsonl     # normalized append-safe time-series rows
-  store/index.json     # ingested run-id dedupe index
-  reports/summary.md   # CI-friendly markdown summary
-  reports/trends.html  # HTML trend report with inline charts
+  manifests/                  # revision manifests
+  artifacts/<sha>/            # built delta-bench binary + metadata.json
+  state/matrix-state.json     # resumable matrix status/attempts/reasons
+  store/rows.jsonl            # normalized append-safe time-series rows
+  store/index.json            # ingested run-id dedupe index
+  reports/summary.md          # CI-friendly markdown summary
+  reports/trends.html         # HTML trend report with inline charts
 ```
+
+## Related Guides
+
+- [Longitudinal Runbook](longitudinal-runbook.md)
+- [User Guide](user-guide.md)
+- [Architecture](architecture.md)

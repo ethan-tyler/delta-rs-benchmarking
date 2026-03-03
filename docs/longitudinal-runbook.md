@@ -1,18 +1,24 @@
 # Longitudinal Benchmarking Runbook
 
+Operations guide for scheduled longitudinal workflows and recovery.
+Use [longitudinal-cli.md](longitudinal-cli.md) for command-by-command normal execution.
+
 ## Scope
 
-This runbook covers execution-plane operation of nightly longitudinal benchmarks in this repo:
+This runbook covers execution-plane operation in this repository:
 
 - selecting revisions
-- building revision artifacts
-- running benchmark matrix with resume/idempotency
+- building artifacts
+- executing resumable matrix runs
 - ingesting normalized rows
 - generating trend reports
+- applying retention policies
 
-Control-plane authorization, queueing, and PR-bot orchestration are intentionally out of scope for this repository.
+Out of scope: control-plane authorization, queueing, and PR-bot orchestration.
 
-## Nightly commit-window workflow
+## Nightly and Release Workflows
+
+### Nightly commit-window workflow
 
 Workflow file: `.github/workflows/longitudinal-nightly.yml`
 
@@ -24,14 +30,14 @@ Trigger modes:
 Nightly stages:
 
 1. `select-revisions` (`one-per-day`, date window from `lookback_days`)
-2. `build-artifacts` (build missing revisions only, metadata persisted per revision)
-3. `run-matrix` (suite/scale matrix, retry + timeout + resume state)
-4. `ingest-results` (append-safe normalized rows with run-id dedupe)
-5. `report` (markdown summary + HTML trends, optional significance checks)
-6. `prune` (retention policies for artifacts + store growth)
-7. upload artifacts (`longitudinal/` subtree)
+2. `build-artifacts` (missing revisions only)
+3. `run-matrix` (retry + timeout + resume state)
+4. `ingest-results` (append-safe rows with run-id dedupe)
+5. `report` (markdown summary + HTML trends)
+6. `prune` (retention policies)
+7. upload `longitudinal/` artifacts
 
-## Release-tag history workflow
+### Release-tag history workflow
 
 Workflow file: `.github/workflows/longitudinal-release-history.yml`
 
@@ -40,96 +46,97 @@ Trigger modes:
 - scheduled: weekly at `04:30 UTC` on Monday
 - manual: `workflow_dispatch` with optional `baseline_window`
 
-Release-history stages (run separately for `rust-v*` and `python-v*` tags):
+Release lane stages (`rust` and `python` lanes run independently):
 
-1. load committed manifest (`longitudinal/manifests/release-history-rust.json` or `release-history-python.json`)
-2. `build-artifacts` (build missing release revisions only)
-3. `run-matrix` (suite/scale matrix, retry + timeout + resume state)
-4. `ingest-results` (append-safe normalized rows with run-id dedupe)
-5. `report` (markdown summary + HTML trends against release-history baseline)
-6. `prune` (retention policies for release-history artifacts + store growth)
-7. upload artifacts (`longitudinal/releases/<lane>/` subtree)
+1. load committed release manifest
+2. `build-artifacts` (missing revisions only)
+3. `run-matrix` (retry + timeout + resume state)
+4. `ingest-results` (append-safe rows with run-id dedupe)
+5. `report` (release-history baseline)
+6. `prune` (lane retention)
+7. upload `longitudinal/releases/<lane>/` artifacts
 
-Refresh the committed release manifests when new upstream tags should be included:
+Refresh committed release manifests when new tags must be included:
 
 ```bash
 ./scripts/update_release_history_manifests.sh
 ```
 
-## State and artifacts
+## State and Artifacts Reference
 
 - `longitudinal/manifests/*.json`: revision sets
-- `longitudinal/artifacts/<revision>/metadata.json`: build metadata, status, toolchain, timestamps
-- `longitudinal/state/matrix-state.json`: per-case status/attempt/failure reason
+- `longitudinal/artifacts/<revision>/metadata.json`: build metadata/status/toolchain/timestamps
+- `longitudinal/state/matrix-state.json`: nightly per-case status/attempt/failure reason
+- `longitudinal/releases/<lane>/state/matrix-state.json`: release-history lane state
 - `longitudinal/store/rows.jsonl`: normalized time-series rows
-- `longitudinal/store/index.json`: ingested run-id dedupe index
+- `longitudinal/store/index.json`: run-id dedupe index
 - `longitudinal/reports/summary.md`: CI markdown summary
 - `longitudinal/reports/trends.html`: HTML trend report
 
-## Performance guardrails
+## Performance Guardrails
 
-- `run-matrix --max-parallel` controls concurrent benchmark cells
-- `run-matrix --max-load-per-cpu` blocks new dispatches when host load is above threshold
-- `run-matrix --load-check-interval-seconds` controls load guard polling interval
+- `run-matrix --max-parallel`
+- `run-matrix --max-load-per-cpu`
+- `run-matrix --load-check-interval-seconds`
 
-Use conservative defaults first, then increase parallelism only after validating low benchmark interference.
+Use conservative defaults first, then increase parallelism only after validating low interference.
 
-## Failure recovery
+## Failure Recovery Playbooks
 
 ### Build failures
 
 Symptoms:
 
-- revision metadata status is `failure`
-- workflow step `build-artifacts` fails or only partially builds
+- revision metadata has `status: failure`
+- `build-artifacts` fails or only partially builds
 
 Actions:
 
-1. Inspect metadata file under `longitudinal/artifacts/<revision>/metadata.json`.
-2. Fix root cause (toolchain drift, checkout issue, harness sync issue).
-3. Re-run `build-artifacts` for the same manifest.
+1. inspect `longitudinal/artifacts/<revision>/metadata.json`
+2. fix root cause (toolchain drift, checkout issue, harness sync issue)
+3. rerun `build-artifacts` for the same manifest
 
 Idempotency behavior:
 
-- successful builds are skipped automatically
-- failed builds are retried on rerun
+- successful builds are skipped
+- failed builds are retried
 
-### Matrix failures/timeouts
+### Matrix failures or timeouts
 
 Symptoms:
 
-- `matrix-state.json` contains case entries with `status: failure`
-- `failure_reason` includes timeout or command error
+- matrix state has entries with `status: failure`
+- `failure_reason` shows timeout or command errors
 
 Actions:
 
-1. Inspect `longitudinal/state/matrix-state.json` for failing `(revision,suite,scale)` keys.
-2. Re-run `run-matrix` with the same manifest/state path after remediation.
-3. Increase timeout only when the benchmark case is legitimately long-running.
+1. inspect `longitudinal/state/matrix-state.json` for failing `(revision,suite,scale)` keys
+2. rerun `run-matrix` with same manifest and state path after remediation
+3. increase timeout only for legitimately long-running benchmark cases
 
 Idempotency behavior:
 
-- already successful cases are skipped
-- failed cases resume with bounded retry policy
+- successful cells are skipped
+- failed cells resume with bounded retry policy
 
-### Ingest/report gaps
+### Ingest or report gaps
 
 Symptoms:
 
-- no new rows in `rows.jsonl`
-- summary/report missing expected revisions
+- expected rows missing from `rows.jsonl`
+- report output missing expected revisions
 
 Actions:
 
-1. Verify expected result JSON exists at `results/<label-prefix>-<revision>/<suite>.json`.
-2. Re-run `ingest-results` with the same manifest/state path.
-3. Re-run `report`.
+1. verify expected result JSON exists at `results/<label-prefix>-<revision>/<suite>.json`
+2. rerun `ingest-results` with same manifest and state path
+3. rerun `report`
 
 Idempotency behavior:
 
-- duplicate ingests are deduped by run-id index; re-ingest is safe
+- duplicate ingests are deduped by run-id index
 
-## Manual recovery commands
+## Manual Recovery Commands
 
 ```bash
 ./scripts/longitudinal_bench.sh build-artifacts \
@@ -171,10 +178,15 @@ Idempotency behavior:
   --apply
 ```
 
-## Safety notes
+## Safety Notes
 
-- Inputs are validated in CLI and runner paths (strategy/date/token bounds).
-- Matrix execution uses subprocess argument arrays (no shell interpolation).
-- Retention deletion is gated by explicit `--apply`.
-- No destructive git reset/clean actions are performed.
-- Transient failures are retried with bounded attempts only.
+- inputs are validated in CLI and runner paths
+- matrix execution uses subprocess argument arrays (no shell interpolation)
+- retention deletion is gated by explicit `--apply`
+- no destructive git reset/clean actions are performed
+- transient failures are retried with bounded attempts only
+
+## Related Guides
+
+- [Longitudinal CLI Guide](longitudinal-cli.md)
+- [User Guide](user-guide.md)

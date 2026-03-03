@@ -13,6 +13,11 @@ REQUIRE_NO_PUBLIC_IPV4=0
 REQUIRE_EGRESS_POLICY=0
 NOISE_THRESHOLD="${BENCH_NOISE_THRESHOLD:-0.05}"
 AGGREGATION="${BENCH_AGGREGATION:-median}"
+BENCH_WARMUP="${BENCH_WARMUP:-2}"
+BENCH_ITERS="${BENCH_ITERS:-9}"
+BENCH_PREWARM_ITERS="${BENCH_PREWARM_ITERS:-1}"
+BENCH_COMPARE_RUNS="${BENCH_COMPARE_RUNS:-3}"
+BENCH_MEASURE_ORDER="${BENCH_MEASURE_ORDER:-alternate}"
 BASE_SHA_OVERRIDE=""
 CANDIDATE_SHA_OVERRIDE=""
 WORKING_VS_UPSTREAM_MAIN=0
@@ -31,6 +36,14 @@ sanitize_label() {
     sanitized="label"
   fi
   printf '%s' "${sanitized}"
+}
+
+is_positive_integer() {
+  [[ "${1:-}" =~ ^[1-9][0-9]*$ ]]
+}
+
+is_non_negative_integer() {
+  [[ "${1:-}" =~ ^[0-9]+$ ]]
 }
 
 TIMEOUT_BIN=""
@@ -54,6 +67,12 @@ Options:
   --require-egress-policy         Require nftables egress hash check during preflight (set DELTA_BENCH_EGRESS_POLICY_SHA256)
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
   --aggregation <min|median|p95>  Representative sample aggregation for compare.py (default: median)
+  --warmup <N>                    Warmup iterations per benchmark case (default: ${BENCH_WARMUP})
+  --iters <N>                     Measured iterations per benchmark case (default: ${BENCH_ITERS})
+  --prewarm-iters <N>             Unreported prewarm iterations per ref before measured runs (default: ${BENCH_PREWARM_ITERS})
+  --compare-runs <N>              Number of measured runs per ref before aggregation (default: ${BENCH_COMPARE_RUNS})
+  --measure-order <base-first|candidate-first|alternate>
+                                  Per-run execution order used for measured runs (default: ${BENCH_MEASURE_ORDER})
   --base-sha <sha>                Force immutable commit mode for the base revision
   --candidate-sha <sha>           Force immutable commit mode for the candidate revision
   --current-vs-main               Compare current HEAD commit against latest <remote>/main
@@ -96,6 +115,26 @@ while [[ $# -gt 0 ]]; do
       ;;
     --aggregation)
       AGGREGATION="$2"
+      shift 2
+      ;;
+    --warmup)
+      BENCH_WARMUP="$2"
+      shift 2
+      ;;
+    --iters)
+      BENCH_ITERS="$2"
+      shift 2
+      ;;
+    --prewarm-iters)
+      BENCH_PREWARM_ITERS="$2"
+      shift 2
+      ;;
+    --compare-runs)
+      BENCH_COMPARE_RUNS="$2"
+      shift 2
+      ;;
+    --measure-order)
+      BENCH_MEASURE_ORDER="$2"
       shift 2
       ;;
     --base-sha)
@@ -209,6 +248,35 @@ case "${AGGREGATION}" in
     ;;
   *)
     echo "invalid --aggregation '${AGGREGATION}'; expected one of: min, median, p95" >&2
+    exit 1
+    ;;
+esac
+
+if ! is_positive_integer "${BENCH_WARMUP}"; then
+  echo "invalid --warmup '${BENCH_WARMUP}'; expected positive integer" >&2
+  exit 1
+fi
+
+if ! is_positive_integer "${BENCH_ITERS}"; then
+  echo "invalid --iters '${BENCH_ITERS}'; expected positive integer" >&2
+  exit 1
+fi
+
+if ! is_non_negative_integer "${BENCH_PREWARM_ITERS}"; then
+  echo "invalid --prewarm-iters '${BENCH_PREWARM_ITERS}'; expected non-negative integer" >&2
+  exit 1
+fi
+
+if ! is_positive_integer "${BENCH_COMPARE_RUNS}"; then
+  echo "invalid --compare-runs '${BENCH_COMPARE_RUNS}'; expected positive integer" >&2
+  exit 1
+fi
+
+case "${BENCH_MEASURE_ORDER}" in
+  base-first|candidate-first|alternate)
+    ;;
+  *)
+    echo "invalid --measure-order '${BENCH_MEASURE_ORDER}'; expected base-first, candidate-first, or alternate" >&2
     exit 1
     ;;
 esac
@@ -401,6 +469,68 @@ run_security_check() {
   fi
 }
 
+run_benchmark_suite_for_ref() {
+  local ref="$1"
+  local mode="$2"
+  local label="$3"
+  local warmup="$4"
+  local iters="$5"
+  local no_summary_table="${6:-0}"
+
+  prepare_delta_rs_ref "${ref}" "${mode}"
+  run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
+  run_security_check
+
+  local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup "${warmup}" --iters "${iters}")
+  run_cmd+=("${storage_args[@]}")
+  if [[ ${#profile_args[@]} -gt 0 ]]; then
+    run_cmd+=("${profile_args[@]}")
+  fi
+  if (( no_summary_table != 0 )); then
+    run_cmd+=(--no-summary-table)
+  fi
+
+  run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${label}" "${run_cmd[@]}"
+}
+
+run_order_for_iteration() {
+  local idx="$1"
+  case "${BENCH_MEASURE_ORDER}" in
+    base-first)
+      printf 'base candidate\n'
+      ;;
+    candidate-first)
+      printf 'candidate base\n'
+      ;;
+    alternate)
+      if (( idx % 2 == 1 )); then
+        printf 'base candidate\n'
+      else
+        printf 'candidate base\n'
+      fi
+      ;;
+  esac
+}
+
+aggregate_run_labels() {
+  local out_label="$1"
+  shift
+  local labels=("$@")
+  if (( ${#labels[@]} == 0 )); then
+    echo "internal error: aggregate_run_labels called without labels for ${out_label}" >&2
+    exit 1
+  fi
+
+  local input_paths=()
+  local label
+  for label in "${labels[@]}"; do
+    input_paths+=("${RUNNER_RESULTS_DIR}/${label}/${suite}.json")
+  done
+
+  local out_json="${RUNNER_RESULTS_DIR}/${out_label}/${suite}.json"
+  run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.aggregate --output "${out_json}" --label "${out_label}" "${input_paths[@]}"
+}
+
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 
 base_label="base-$(sanitize_label "${base_ref}")"
@@ -413,12 +543,33 @@ prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
 run_security_check
 run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
-run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
-prepare_delta_rs_ref "${candidate_ref}" "${candidate_ref_mode}"
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-run_security_check
-run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${cand_label}" ./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup 1 --iters 5 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
+if (( BENCH_PREWARM_ITERS > 0 )); then
+  run_benchmark_suite_for_ref "${base_ref}" "${base_ref_mode}" "${base_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
+  run_benchmark_suite_for_ref "${candidate_ref}" "${candidate_ref_mode}" "${cand_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
+fi
+
+base_run_labels=()
+cand_run_labels=()
+run_idx=1
+while (( run_idx <= BENCH_COMPARE_RUNS )); do
+  order="$(run_order_for_iteration "${run_idx}")"
+  for side in ${order}; do
+    if [[ "${side}" == "base" ]]; then
+      run_label="${base_label}-r${run_idx}"
+      run_benchmark_suite_for_ref "${base_ref}" "${base_ref_mode}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 0
+      base_run_labels+=("${run_label}")
+    else
+      run_label="${cand_label}-r${run_idx}"
+      run_benchmark_suite_for_ref "${candidate_ref}" "${candidate_ref_mode}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 0
+      cand_run_labels+=("${run_label}")
+    fi
+  done
+  run_idx=$((run_idx + 1))
+done
+
+aggregate_run_labels "${base_label}" "${base_run_labels[@]}"
+aggregate_run_labels "${cand_label}" "${cand_run_labels[@]}"
 
 base_json="${RUNNER_RESULTS_DIR}/${base_label}/${suite}.json"
 cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"

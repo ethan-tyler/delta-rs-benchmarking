@@ -62,7 +62,7 @@ def test_compare_branch_supports_storage_backend_passthrough() -> None:
     )
     assert re.search(r"storage_args\+=\(--storage-option \"\$\{option\}\"\)", script)
     assert re.search(r"\./scripts/bench\.sh data .*\"\$\{storage_args\[@\]\}\"", script)
-    assert re.search(r"\./scripts/bench\.sh run .*\"\$\{storage_args\[@\]\}\"", script)
+    assert re.search(r"run_cmd\+=\(\"\\?\$\{storage_args\[@\]\}\"\)", script)
 
 
 def test_compare_branch_does_not_retry_benchmark_producing_steps() -> None:
@@ -72,13 +72,16 @@ def test_compare_branch_does_not_retry_benchmark_producing_steps() -> None:
         r"run_step_no_retry env .*?/scripts/bench\.sh data --scale sf1 --seed 42",
         script,
     )
-    assert len(re.findall(r"run_step_no_retry env .*?/scripts/bench\.sh run --scale sf1", script)) == 2
+    assert "run_benchmark_suite_for_ref" in script
+    assert "./scripts/bench.sh run --scale sf1" in script
 
 
 def test_compare_branch_cleans_untracked_harness_overlay_on_exit() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "cleanup_harness_overlay_untracked" in script
-    assert re.search(r"git -C \"\$\{DELTA_RS_DIR\}\" clean -fd -- \"\$\{path\}\"", script)
+    assert re.search(
+        r"git -C \"\$\{DELTA_RS_DIR\}\" clean -fd -- \"\$\{path\}\"", script
+    )
     assert "crates/delta-bench" in script
     assert "bench/manifests" in script
     assert "backends" in script
@@ -97,6 +100,23 @@ def test_compare_branch_supports_aggregation_passthrough() -> None:
     )
 
 
+def test_compare_branch_supports_reliable_multi_run_controls() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "--warmup <N>" in script
+    assert "--iters <N>" in script
+    assert "--prewarm-iters <N>" in script
+    assert "--compare-runs <N>" in script
+    assert "--measure-order <base-first|candidate-first|alternate>" in script
+    assert re.search(r'BENCH_WARMUP="\$\{BENCH_WARMUP:-\d+\}"', script)
+    assert re.search(r'BENCH_ITERS="\$\{BENCH_ITERS:-\d+\}"', script)
+    assert re.search(r'BENCH_PREWARM_ITERS="\$\{BENCH_PREWARM_ITERS:-\d+\}"', script)
+    assert re.search(r'BENCH_COMPARE_RUNS="\$\{BENCH_COMPARE_RUNS:-\d+\}"', script)
+    assert re.search(
+        r'BENCH_MEASURE_ORDER="\$\{BENCH_MEASURE_ORDER:-alternate\}"', script
+    )
+    assert "python3 -m delta_bench_compare.aggregate" in script
+
+
 def test_compare_branch_supports_explicit_sha_flags() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "--base-sha <sha>" in script
@@ -107,7 +127,7 @@ def test_compare_branch_supports_explicit_sha_flags() -> None:
         r"prepare_delta_rs_ref \"\$\{base_ref\}\" \"\$\{base_ref_mode\}\"", script
     )
     assert re.search(
-        r"prepare_delta_rs_ref \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"",
+        r"run_benchmark_suite_for_ref \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"",
         script,
     )
     assert re.search(r"if \[\[ \"\$\{mode\}\" == \"commit\" \]\]; then", script)
@@ -175,13 +195,18 @@ def test_prepare_delta_rs_supports_immutable_ref_checkout() -> None:
 def test_prepare_delta_rs_cleans_untracked_harness_overlay_before_checkout() -> None:
     script = PREPARE_DELTA_RS.read_text(encoding="utf-8")
     assert "cleanup_harness_overlay_untracked" in script
-    assert re.search(r"git -C \"\$\{DELTA_RS_DIR\}\" clean -fd -- \"\$\{path\}\"", script)
+    assert re.search(
+        r"git -C \"\$\{DELTA_RS_DIR\}\" clean -fd -- \"\$\{path\}\"", script
+    )
     assert "crates/delta-bench" in script
     assert "bench/manifests" in script
     assert "backends" in script
     assert "python/delta_bench_interop" in script
     assert "python/delta_bench_tpcds" in script
-    assert re.search(r"cleanup_harness_overlay_untracked\s+git -C \"\$\{DELTA_RS_DIR\}\" fetch origin", script)
+    assert re.search(
+        r"cleanup_harness_overlay_untracked\s+git -C \"\$\{DELTA_RS_DIR\}\" fetch origin",
+        script,
+    )
 
 
 def test_benchmark_workflow_accepts_optional_storage_configuration() -> None:
@@ -247,7 +272,7 @@ def test_bench_wrapper_suppresses_rust_warnings_by_default() -> None:
         r'DELTA_BENCH_SUPPRESS_RUST_WARNINGS="\$\{DELTA_BENCH_SUPPRESS_RUST_WARNINGS:-1\}"',
         script,
     )
-    assert "RUSTFLAGS=\"${RUSTFLAGS:-} -Awarnings\"" in script
+    assert 'RUSTFLAGS="${RUSTFLAGS:-} -Awarnings"' in script
     assert "--quiet -p delta-bench --" in script
 
 
@@ -267,6 +292,7 @@ def test_cleanup_local_help_lists_all_flags() -> None:
         "--results",
         "--fixtures",
         "--delta-rs-under-test",
+        "--allow-outside-root",
         "--keep-last <N>",
         "--older-than-days <N>",
         "--help",
@@ -325,7 +351,13 @@ def test_cleanup_local_requires_apply_for_deletion() -> None:
         assert marker.exists()
 
         apply_run = subprocess.run(
-            ["bash", str(LOCAL_CLEANUP), "--apply", "--results"],
+            [
+                "bash",
+                str(LOCAL_CLEANUP),
+                "--apply",
+                "--results",
+                "--allow-outside-root",
+            ],
             cwd=REPO_ROOT,
             env=env,
             check=False,
@@ -335,4 +367,103 @@ def test_cleanup_local_requires_apply_for_deletion() -> None:
         assert apply_run.returncode == 0
         assert "Mode: apply" in apply_run.stdout
         assert "APPLY: rm -rf" in apply_run.stdout
+        assert not label_dir.exists()
+
+
+def test_cleanup_local_empty_results_dir_is_noop() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        results_dir = Path(td) / "results"
+        results_dir.mkdir(parents=True)
+
+        env = os.environ.copy()
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        result = subprocess.run(
+            ["bash", str(LOCAL_CLEANUP), "--results"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0
+        assert "No matching artifacts to clean." in result.stdout
+
+
+def test_cleanup_local_older_than_days_no_matches_is_noop() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        results_dir = Path(td) / "results"
+        recent = results_dir / "recent-run"
+        recent.mkdir(parents=True)
+        (recent / "scan.json").write_text("{}", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        result = subprocess.run(
+            ["bash", str(LOCAL_CLEANUP), "--results", "--older-than-days", "3650"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0
+        assert "No matching artifacts to clean." in result.stdout
+
+
+def test_cleanup_local_apply_refuses_outside_repo_without_override() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        results_dir = Path(td) / "results"
+        label_dir = results_dir / "run-a"
+        label_dir.mkdir(parents=True)
+        (label_dir / "scan.json").write_text("{}", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        apply_run = subprocess.run(
+            ["bash", str(LOCAL_CLEANUP), "--apply", "--results"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert apply_run.returncode != 0
+        assert (
+            "outside repository root without --allow-outside-root" in apply_run.stderr
+        )
+        assert label_dir.exists()
+
+
+def test_cleanup_local_apply_allows_outside_repo_with_override() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        results_dir = Path(td) / "results"
+        label_dir = results_dir / "run-a"
+        label_dir.mkdir(parents=True)
+        (label_dir / "scan.json").write_text("{}", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        apply_run = subprocess.run(
+            [
+                "bash",
+                str(LOCAL_CLEANUP),
+                "--apply",
+                "--results",
+                "--allow-outside-root",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert apply_run.returncode == 0
         assert not label_dir.exists()

@@ -1,0 +1,34 @@
+name: Docs Quality
+
+on:
+  pull_request:
+    paths:
+      - README.md
+      - docs/**/*.md
+      - scripts/docs_check.sh
+      - python/tests/test_docs_contract.py
+      - .github/workflows/docs-quality.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docs-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run docs contract checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/docs_check.sh

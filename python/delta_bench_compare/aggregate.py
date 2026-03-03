@@ -11,7 +11,9 @@ from .schema import load_benchmark_payload
 
 
 def _compute_elapsed_stats(samples: list[dict[str, Any]]) -> dict[str, float] | None:
-    elapsed = [float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample]
+    elapsed = [
+        float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample
+    ]
     if not elapsed:
         return None
 
@@ -53,7 +55,9 @@ def aggregate_payloads(payloads: list[dict[str, Any]], label: str) -> dict[str, 
     for payload in payloads[1:]:
         if payload.get("schema_version") != first.get("schema_version"):
             raise ValueError("cannot aggregate payloads with different schema versions")
-        if payload.get("context", {}).get("suite") != first.get("context", {}).get("suite"):
+        if payload.get("context", {}).get("suite") != first.get("context", {}).get(
+            "suite"
+        ):
             raise ValueError("cannot aggregate payloads across different suites")
         payload_case_set = {case["case"] for case in payload.get("cases", [])}
         if payload_case_set != first_case_set:
@@ -75,7 +79,9 @@ def aggregate_payloads(payloads: list[dict[str, Any]], label: str) -> dict[str, 
         for payload in payloads:
             lookup = {case["case"]: case for case in payload.get("cases", [])}
             if case_name not in lookup:
-                raise ValueError(f"case '{case_name}' missing from one or more payloads")
+                raise ValueError(
+                    f"case '{case_name}' missing from one or more payloads"
+                )
             variants.append(lookup[case_name])
 
         merged = copy.deepcopy(variants[0])
@@ -86,7 +92,9 @@ def aggregate_payloads(payloads: list[dict[str, Any]], label: str) -> dict[str, 
         merged["samples"] = merged_samples
         merged["elapsed_stats"] = _compute_elapsed_stats(merged_samples)
 
-        classifications = {variant.get("classification", "supported") for variant in variants}
+        classifications = {
+            variant.get("classification", "supported") for variant in variants
+        }
         if len(classifications) != 1:
             raise ValueError(
                 f"case '{case_name}' has inconsistent classification across payloads: "

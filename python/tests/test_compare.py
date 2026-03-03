@@ -473,9 +473,21 @@ def test_render_text_include_metrics_outputs_metric_columns() -> None:
 def test_render_text_groups_cases_into_readable_sections() -> None:
     base = _run(
         [
-            {"case": "slower_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
-            {"case": "faster_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
-            {"case": "stable_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {
+                "case": "slower_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}],
+            },
+            {
+                "case": "faster_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}],
+            },
+            {
+                "case": "stable_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}],
+            },
             {
                 "case": "incomparable_case",
                 "success": False,
@@ -486,9 +498,17 @@ def test_render_text_groups_cases_into_readable_sections() -> None:
     )
     cand = _run(
         [
-            {"case": "slower_case", "success": True, "samples": [{"elapsed_ms": 120.0}]},
+            {
+                "case": "slower_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 120.0}],
+            },
             {"case": "faster_case", "success": True, "samples": [{"elapsed_ms": 90.0}]},
-            {"case": "stable_case", "success": True, "samples": [{"elapsed_ms": 103.0}]},
+            {
+                "case": "stable_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 103.0}],
+            },
             {
                 "case": "incomparable_case",
                 "success": True,
@@ -560,9 +580,21 @@ def test_render_markdown_include_metrics_outputs_metric_columns() -> None:
 def test_render_markdown_groups_cases_into_readable_sections() -> None:
     base = _run(
         [
-            {"case": "slower_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
-            {"case": "faster_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
-            {"case": "stable_case", "success": True, "samples": [{"elapsed_ms": 100.0}]},
+            {
+                "case": "slower_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}],
+            },
+            {
+                "case": "faster_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}],
+            },
+            {
+                "case": "stable_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}],
+            },
             {
                 "case": "incomparable_case",
                 "success": False,
@@ -573,9 +605,17 @@ def test_render_markdown_groups_cases_into_readable_sections() -> None:
     )
     cand = _run(
         [
-            {"case": "slower_case", "success": True, "samples": [{"elapsed_ms": 120.0}]},
+            {
+                "case": "slower_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 120.0}],
+            },
             {"case": "faster_case", "success": True, "samples": [{"elapsed_ms": 90.0}]},
-            {"case": "stable_case", "success": True, "samples": [{"elapsed_ms": 103.0}]},
+            {
+                "case": "stable_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 103.0}],
+            },
             {
                 "case": "incomparable_case",
                 "success": True,

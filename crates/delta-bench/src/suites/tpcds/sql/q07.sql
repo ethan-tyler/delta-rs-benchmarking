@@ -3,4 +3,5 @@ FROM store_sales
 WHERE ss_quantity > 0
 GROUP BY ss_item_sk
 ORDER BY sale_count DESC
+       , ss_item_sk ASC
 LIMIT 10;

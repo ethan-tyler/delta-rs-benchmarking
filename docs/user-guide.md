@@ -1,17 +1,17 @@
 # User Guide
 
-This guide covers day-to-day use of the benchmark harness.
+Task-first playbook for active contributors running and comparing `delta-rs` benchmarks.
 
-## Local setup
+## Prerequisites and Workspace Modes
 
-Prepare a managed `delta-rs` checkout and sync the harness:
+Managed checkout mode (recommended):
 
 ```bash
 ./scripts/prepare_delta_rs.sh
 ./scripts/sync_harness_to_delta_rs.sh
 ```
 
-Use an existing local `delta-rs` clone (instead of managed `.delta-rs-under-test`):
+Use an existing local `delta-rs` clone:
 
 ```bash
 DELTA_RS_DIR=/path/to/your/delta-rs \
@@ -23,29 +23,13 @@ DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
 ./scripts/bench.sh doctor
 ```
 
-## Local cleanup workflow
-
-Use `cleanup_local.sh` to remove local benchmark artifacts with a safety-first default.
+Quick health check:
 
 ```bash
-./scripts/cleanup_local.sh --results
+./scripts/bench.sh doctor
 ```
 
-The default mode is dry-run, so commands are only printed. No deletion happens unless
-`--apply` is provided.
-
-Targeted cleanup examples:
-
-```bash
-./scripts/cleanup_local.sh --apply --results --keep-last 5 --older-than-days 14
-./scripts/cleanup_local.sh --apply --fixtures
-./scripts/cleanup_local.sh --apply --delta-rs-under-test
-./scripts/cleanup_local.sh --apply --fixtures --delta-rs-under-test
-```
-
-Use `./scripts/cleanup_local.sh --help` for the full flag list and examples.
-
-## Generate fixtures and run suites
+## First Benchmark Run (Happy Path)
 
 Generate deterministic fixture data:
 
@@ -53,58 +37,31 @@ Generate deterministic fixture data:
 ./scripts/bench.sh data --dataset-id tiny_smoke --seed 42
 ```
 
-Run benchmark suites:
+Run all suites across Rust and Python lanes:
 
 ```bash
 ./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
-`run` prints a per-case summary table in the terminal, and detailed outputs are written to `results/<label>/<suite>.json`.
-Use `--no-summary-table` for quieter CI/log output.
-`scripts/bench.sh` suppresses Rust compiler warnings by default; set `DELTA_BENCH_SUPPRESS_RUST_WARNINGS=0` to re-enable warning output.
+Expected behavior:
 
-## DuckDB-backed TPC-DS fixture profile (`tpcds_duckdb`)
+- terminal includes per-case summary table
+- detailed results land at `results/<label>/<suite>.json`
+- for quieter logs, pass `--no-summary-table`
+- Rust warnings are suppressed by default; set `DELTA_BENCH_SUPPRESS_RUST_WARNINGS=0` to re-enable
 
-Use this dataset selector when you want `fixtures/<scale>/tpcds/store_sales` generated from
-DuckDB `tpcds` extension data (`dsdgen`) instead of synthetic mapping.
+## Compare Workflows
 
-Requirements:
-
-- `python3`
-- `duckdb` Python package (`pip install duckdb`)
-
-Example:
-
-```bash
-./scripts/bench.sh data --dataset-id tpcds_duckdb --seed 42
-./scripts/bench.sh run --suite tpcds --runner rust --dataset-id tpcds_duckdb --warmup 1 --iters 1 --label tpcds-duckdb-smoke
-```
-
-Runtime knobs:
-
-- `DELTA_BENCH_DUCKDB_PYTHON` (default: `python3`)
-- `DELTA_BENCH_TPCDS_DUCKDB_SCRIPT` (optional script override, useful for smoke tests)
-- `DELTA_BENCH_TPCDS_DUCKDB_TIMEOUT_MS` (default: `600000`)
-
-## Marketplace datasets (document-only path)
-
-For externally provisioned Delta tables (for example Marketplace-delivered TPC-DS data), place or
-copy those tables under the fixture roots expected by suite registration (for TPC-DS this is
-`fixtures/<scale>/tpcds/<table_name>`). This repository does not currently automate Marketplace
-ingestion.
-
-## Compare two refs
-
-Run sequential base-vs-candidate comparison using branch names:
+### Branch-to-branch compare
 
 ```bash
 ./scripts/compare_branch.sh main <candidate_ref> all
 ```
 
-`<candidate_ref>` must be a real branch in `.delta-rs-under-test`.
-If unsure, run `git -C .delta-rs-under-test branch -a` first.
+`<candidate_ref>` must exist in `.delta-rs-under-test`.
+Use `git -C .delta-rs-under-test branch -a` to inspect available refs.
 
-Pin exact commits to avoid ref drift during long runs:
+### Immutable SHA compare (recommended for long runs)
 
 ```bash
 ./scripts/compare_branch.sh \
@@ -113,27 +70,67 @@ Pin exact commits to avoid ref drift during long runs:
   all
 ```
 
-The compare workflow will:
+### Current checkout commit vs latest upstream main
 
-1. Update `.delta-rs-under-test`.
-2. Sync this repo's harness into the `delta-rs` workspace.
-3. Benchmark the base ref.
-4. Benchmark the candidate ref.
-5. Print a terminal comparison report with grouped sections (`Regressions`, `Improvements`,
-   `Stable`, `Needs Attention`) and a `delta_pct` column for per-case percentage difference.
+```bash
+./scripts/compare_branch.sh --current-vs-main all
+```
 
-Useful tuning options:
+### What compare does
 
-- `BENCH_TIMEOUT_SECONDS` (default `3600`) caps each `bench.sh` step runtime.
-- `BENCH_RETRY_ATTEMPTS` (default `2`) retries transient failures.
-- `BENCH_RETRY_DELAY_SECONDS` (default `5`) sets retry delay.
-- `--noise-threshold` controls compare sensitivity.
-- `--aggregation` controls representative sample selection (`min`, `median`, `p95`; default `median`) and is forwarded to `compare.py`.
-- `cd python && python3 -m delta_bench_compare.compare ... --include-metrics` appends per-case metric columns.
+1. updates `.delta-rs-under-test`
+2. syncs this harness into the `delta-rs` workspace
+3. refreshes deterministic fixtures with the base revision
+4. optionally runs unreported prewarm iterations for both refs
+5. executes measured benchmark runs for base and candidate in configured order
+6. aggregates each side into one JSON payload from all measured runs
+7. prints grouped report sections: `Regressions`, `Improvements`, `Stable`, `Needs Attention`
 
-## Object-store mode
+### Compare tuning
 
-Local is the default backend. To run fixture-backed suites against object storage:
+- `BENCH_TIMEOUT_SECONDS` (default `3600`) caps each benchmark step
+- `BENCH_RETRY_ATTEMPTS` (default `2`) retries transient failures
+- `BENCH_RETRY_DELAY_SECONDS` (default `5`) controls retry delay
+- `--noise-threshold` controls sensitivity
+- `--aggregation min|median|p95` selects representative sample (default `median`)
+- `--warmup` sets warmup iterations per case (default `2`)
+- `--iters` sets measured iterations per case per run (default `9`)
+- `--prewarm-iters` sets unreported prewarm iterations per ref (default `1`)
+- `--compare-runs` sets measured runs per ref before aggregation (default `3`)
+- `--measure-order` controls run ordering (`base-first`, `candidate-first`, `alternate`; default `alternate`)
+- `cd python && python3 -m delta_bench_compare.compare ... --include-metrics` appends metric columns
+
+### Reliable compare protocol (recommended)
+
+For PR and release decisions, prefer this protocol:
+
+1. use immutable commits (`--base-sha`, `--candidate-sha`) or `--current-vs-main`
+2. run on an otherwise idle machine and keep backend/profile identical between refs
+3. keep `--measure-order alternate` to reduce drift from cache/thermal effects
+4. keep aggregation at `median` unless you are analyzing tail latency
+5. treat `cv_pct > 10` as noisy and rerun with higher `--compare-runs` or `--iters`
+
+Example decision-grade command:
+
+```bash
+./scripts/compare_branch.sh \
+  --current-vs-main \
+  --warmup 2 \
+  --iters 9 \
+  --prewarm-iters 1 \
+  --compare-runs 3 \
+  --measure-order alternate \
+  --aggregation median \
+  all
+```
+
+## Backend and Dataset Selection
+
+### Local backend (default)
+
+Use local backend for quickest contributor feedback loops.
+
+### Object-store mode (S3)
 
 ```bash
 ./scripts/bench.sh data \
@@ -157,23 +154,84 @@ Local is the default backend. To run fixture-backed suites against object storag
 
 Notes:
 
-- For non-local backends, `--storage-option table_root=...` is required.
-- Local fixture cache (`fixtures/<scale>/rows.jsonl` and `fixtures/<scale>/manifest.json`) is unchanged.
-- The `write` suite currently supports only local storage; non-local backends return explicit case failures.
-- The `delete_update` suite seeds isolated remote tables per iteration to keep DML benchmark runs independent.
+- for non-local backends, `--storage-option table_root=...` is required
+- local fixture cache (`fixtures/<scale>/rows.jsonl`, `fixtures/<scale>/manifest.json`) is unchanged
+- `write` suite currently supports only local storage
+- `delete_update` seeds isolated remote tables per iteration to keep DML runs independent
 
-Workflow mode storage configuration:
+Workflow variables for backend mode:
 
-- Optional repository variable `BENCH_STORAGE_BACKEND` (`local` or `s3`)
-- Optional multi-line repository variable `BENCH_STORAGE_OPTIONS` (one `KEY=VALUE` per line)
-- Optional repository variable `BENCH_BACKEND_PROFILE` (profile name in `backends/*.env`)
-- Optional repository variable `BENCH_RUNNER_MODE` (`rust`, `python`, or `all`)
-- PR benchmark workflow compares immutable PR base/head SHAs to avoid moving branch refs during execution
-- Benchmark workflow comments publish benchmark output without merge gating
+- `BENCH_STORAGE_BACKEND` (`local` or `s3`)
+- `BENCH_STORAGE_OPTIONS` (multi-line `KEY=VALUE`)
+- `BENCH_BACKEND_PROFILE` (`backends/*.env` profile name)
+- `BENCH_RUNNER_MODE` (`rust`, `python`, or `all`)
 
-## Security and remote runner options
+## Cleanup and Troubleshooting
 
-`compare_branch.sh` supports dedicated remote execution and preflight checks:
+### Safe cleanup defaults
+
+`cleanup_local.sh` is dry-run by default and does nothing destructive unless `--apply` is set.
+With `--apply`, deletion is restricted to this repo root unless `--allow-outside-root` is explicitly set.
+
+Preview cleanup:
+
+```bash
+./scripts/cleanup_local.sh --results
+```
+
+Apply targeted cleanup:
+
+```bash
+./scripts/cleanup_local.sh --apply --results --keep-last 5 --older-than-days 14
+./scripts/cleanup_local.sh --apply --fixtures
+./scripts/cleanup_local.sh --apply --delta-rs-under-test
+./scripts/cleanup_local.sh --apply --fixtures --delta-rs-under-test
+./scripts/cleanup_local.sh --apply --results --allow-outside-root
+```
+
+### High-signal troubleshooting commands
+
+```bash
+./scripts/bench.sh --help
+./scripts/compare_branch.sh --help
+./scripts/cleanup_local.sh --help
+./scripts/longitudinal_bench.sh --help
+```
+
+If the local workspace wiring looks wrong, run `./scripts/bench.sh doctor`.
+
+## Advanced Topics
+
+### DuckDB-backed TPC-DS fixture profile (`tpcds_duckdb`)
+
+Use this selector when `fixtures/<scale>/tpcds/store_sales` should come from DuckDB `tpcds` extension data (`dsdgen`).
+
+Requirements:
+
+- `python3`
+- `duckdb` Python package (`pip install duckdb`)
+
+Example:
+
+```bash
+./scripts/bench.sh data --dataset-id tpcds_duckdb --seed 42
+./scripts/bench.sh run --suite tpcds --runner rust --dataset-id tpcds_duckdb --warmup 1 --iters 1 --label tpcds-duckdb-smoke
+```
+
+Runtime knobs:
+
+- `DELTA_BENCH_DUCKDB_PYTHON` (default `python3`)
+- `DELTA_BENCH_TPCDS_DUCKDB_SCRIPT` (script override)
+- `DELTA_BENCH_TPCDS_DUCKDB_TIMEOUT_MS` (default `600000`)
+
+### Marketplace datasets (document-only path)
+
+Place externally provisioned Delta tables under suite-expected fixture roots (for TPC-DS: `fixtures/<scale>/tpcds/<table_name>`).
+This repository does not currently automate Marketplace ingestion.
+
+### Remote runner + security preflight options
+
+`compare_branch.sh` supports remote execution and preflight requirements:
 
 - `--remote-runner <ssh-host>`
 - `--remote-root <path>`
@@ -193,55 +251,29 @@ Example:
   main <candidate_ref> all
 ```
 
-For run-mode operations and provisioning constraints, use the dedicated runbook: [security-runner.md](security-runner.md).
+### Metrics and schema reference
 
-## Metrics and schema
-
-Each sample writes normalized metrics under `cases[].samples[].metrics`.
-
-Always present:
+Sample-level metrics live at `cases[].samples[].metrics` and always include:
 
 - `rows_processed`
 - `bytes_processed`
 - `operations`
 - `table_version`
 
-Optional (suite-dependent):
+Optional suite-dependent fields include:
 
-- `files_scanned`
-- `files_pruned`
-- `bytes_scanned`
-- `scan_time_ms`
-- `rewrite_time_ms`
-- `result_hash`
-- `schema_hash`
+- `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`, `rewrite_time_ms`
+- `result_hash`, `schema_hash`
 
-Optional case-level elapsed aggregates (`cases[].elapsed_stats`):
+Optional case-level elapsed aggregates at `cases[].elapsed_stats`:
 
-- `min_ms`
-- `max_ms`
-- `mean_ms`
-- `median_ms`
-- `stddev_ms`
-- `cv_pct`
+- `min_ms`, `max_ms`, `mean_ms`, `median_ms`, `stddev_ms`, `cv_pct`
 
-See [architecture.md](architecture.md) for schema details and execution context.
+For complete schema and source mapping, use [architecture.md](architecture.md).
 
-## Useful CLI commands
+## Related Guides
 
-```bash
-cargo run -p delta-bench -- --help
-cargo run -p delta-bench -- list all
-cargo run -p delta-bench -- data --dataset-id tiny_smoke --seed 42
-cargo run -p delta-bench -- run --target all --runner all --dataset-id tiny_smoke --warmup 1 --iterations 5
-cargo run -p delta-bench -- data --dataset-id tpcds_duckdb --seed 42
-cargo run -p delta-bench -- doctor
-```
-
-Run against the managed `delta-rs` checkout workspace:
-
-```bash
-DELTA_BENCH_EXEC_ROOT="$(pwd)/.delta-rs-under-test" \
-DELTA_RS_DIR="$(pwd)/.delta-rs-under-test" \
-./scripts/bench.sh doctor
-```
+- [Longitudinal CLI Guide](longitudinal-cli.md)
+- [Longitudinal Runbook](longitudinal-runbook.md)
+- [Security Runner Runbook](security-runner.md)
+- [Architecture Reference](architecture.md)

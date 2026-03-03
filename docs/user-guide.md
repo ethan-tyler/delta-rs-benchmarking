@@ -121,6 +121,17 @@ The compare workflow will:
 4. Benchmark the candidate ref.
 5. Print a terminal comparison report with grouped sections (`Regressions`, `Improvements`,
    `Stable`, `Needs Attention`) and a `delta_pct` column for per-case percentage difference.
+6. Print a `Hash Assertion Triage` report that classifies hash mismatches into:
+   - stale-manifest candidates (same mismatch on base and candidate),
+   - candidate-only mismatches (regression suspects),
+   - nondeterministic cases (stabilize ordering/output before any hash refresh).
+
+Hash refresh policy:
+
+- Do not refresh hashes automatically.
+- Refresh only deterministic stale-baseline cases.
+- If a mismatch appears only on candidate, investigate behavior changes first.
+- Keep manifest hash refreshes in a dedicated commit.
 
 Useful tuning options:
 

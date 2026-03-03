@@ -60,6 +60,14 @@ Compare your current checkout commit against the latest remote `main` (auto-pick
 ./scripts/compare_branch.sh --current-vs-main all
 ```
 
+Hash assertion policy (implemented in compare output):
+
+- `compare_branch.sh` now prints a `Hash Assertion Triage` section after perf comparison.
+- Refresh `exact_result_hash` values only when a case is deterministic and fails on both base and candidate with the same found hash.
+- Treat candidate-only hash mismatches as regressions to investigate, not as automatic refresh candidates.
+- Keep hash refreshes in dedicated commits separate from feature/perf commits.
+- Hash refreshes are explicit/manual; no automatic manifest rewrites happen during runs.
+
 Refresh committed release-history benchmark manifests:
 
 ```bash

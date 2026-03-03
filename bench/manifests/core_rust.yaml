@@ -43,7 +43,7 @@ cases:
   enabled: true
   assertions:
   - type: exact_result_hash
-    value: sha256:b6e7328f69cf0b5cff23287e99dac4e81ff0d283911955deae54ea6a61917e1d
+    value: sha256:6c31c0889cda64cd09aa2c753ece7b18de8a29acd258aec4a8049f7492402c4e
   - type: schema_hash
     value: sha256:5acd94043ee7628611eb2eece7f69a0d5b4c0a644d15a7ece2dce6344bda7af1
 - id: write_append_small
@@ -133,7 +133,7 @@ cases:
   enabled: true
   assertions:
   - type: exact_result_hash
-    value: sha256:2235d8ecdb3c194946d2155181449b08abf9128d2ebbdf5cdd63fce3521d6f14
+    value: sha256:3ad9ac554eef460e843f0622241d847c986eb31db6e5264c6e104a82dd08e829
   - type: schema_hash
     value: sha256:88976a18c30316ed24456055b10f135c4df325eded17e982e6e199d3856a3edc
 - id: merge_delete_5pct
@@ -196,7 +196,7 @@ cases:
   enabled: true
   assertions:
   - type: exact_result_hash
-    value: sha256:f0656a8b2ff0a469a3ab0e03322190bdf9ffdfe44df0fa4a6640b9b5bc75a5c6
+    value: sha256:ffbb7ca210ef7182b2223849392af2f8cfa5e8320c7a9edf614c5613d5db5f14
   - type: schema_hash
     value: sha256:295b42ee754a3ec916d4535729487c98e25a12e0f7297a120c50596315fa3592
 - id: metadata_time_travel_v0
@@ -268,7 +268,7 @@ cases:
   enabled: true
   assertions:
   - type: exact_result_hash
-    value: sha256:6737ae41bb20a597eb9d5f0dafff00e79dcac7b0a817b009440bcba6651ee592
+    value: sha256:d3cf7184a65e170c462bae58773eb0cc2d77abf7c7d260b515aaeb28ad4be70a
   - type: schema_hash
     value: sha256:b5574e46183d736338990949d30cb6bf4fc51f7427e55e3c83f8472abe0ed251
 - id: tpcds_q64

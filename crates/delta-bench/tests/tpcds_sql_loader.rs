@@ -59,3 +59,18 @@ fn disabled_queries_are_not_loaded_or_required() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].id, "q03");
 }
+
+#[test]
+fn q07_sql_has_deterministic_tie_break_ordering() {
+    let loaded = load_enabled_queries(&phase1_query_catalog()).expect("load phase1 sql");
+    let q07 = loaded
+        .iter()
+        .find(|query| query.id == "q07")
+        .expect("q07 should be enabled");
+    let normalized = q07.sql.replace('\n', " ").to_ascii_lowercase();
+    assert!(
+        normalized.contains("order by sale_count desc, ss_item_sk asc"),
+        "q07 must include deterministic secondary sort key; sql={}",
+        q07.sql
+    );
+}

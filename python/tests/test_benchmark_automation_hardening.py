@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
+import tempfile
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPARE_BRANCH = REPO_ROOT / "scripts" / "compare_branch.sh"
 PREPARE_DELTA_RS = REPO_ROOT / "scripts" / "prepare_delta_rs.sh"
+LOCAL_CLEANUP = REPO_ROOT / "scripts" / "cleanup_local.sh"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark.yml"
 NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
@@ -246,3 +249,90 @@ def test_bench_wrapper_suppresses_rust_warnings_by_default() -> None:
     )
     assert "RUSTFLAGS=\"${RUSTFLAGS:-} -Awarnings\"" in script
     assert "--quiet -p delta-bench --" in script
+
+
+def test_cleanup_local_help_lists_all_flags() -> None:
+    result = subprocess.run(
+        ["bash", str(LOCAL_CLEANUP), "--help"],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    for flag in (
+        "--apply",
+        "--dry-run",
+        "--results",
+        "--fixtures",
+        "--delta-rs-under-test",
+        "--keep-last <N>",
+        "--older-than-days <N>",
+        "--help",
+    ):
+        assert flag in result.stdout
+
+
+def test_cleanup_local_defaults_to_dry_run() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        results_dir = root / "results"
+        label_dir = results_dir / "old-run"
+        label_dir.mkdir(parents=True)
+        result_file = label_dir / "scan.json"
+        result_file.write_text("{}", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        result = subprocess.run(
+            ["bash", str(LOCAL_CLEANUP), "--results"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0
+        assert "Mode: dry-run" in result.stdout
+        assert "DRY-RUN: rm -rf" in result.stdout
+        assert result_file.exists()
+
+
+def test_cleanup_local_requires_apply_for_deletion() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        results_dir = root / "results"
+        label_dir = results_dir / "run-a"
+        label_dir.mkdir(parents=True)
+        marker = label_dir / "scan.json"
+        marker.write_text("{}", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        dry_run = subprocess.run(
+            ["bash", str(LOCAL_CLEANUP), "--results"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert dry_run.returncode == 0
+        assert marker.exists()
+
+        apply_run = subprocess.run(
+            ["bash", str(LOCAL_CLEANUP), "--apply", "--results"],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert apply_run.returncode == 0
+        assert "Mode: apply" in apply_run.stdout
+        assert "APPLY: rm -rf" in apply_run.stdout
+        assert not label_dir.exists()

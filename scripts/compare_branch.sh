@@ -283,6 +283,12 @@ esac
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
 RUNNER_RESULTS_DIR="${DELTA_BENCH_RESULTS:-${RUNNER_ROOT}/results}"
+DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-${DELTA_RS_DIR}/.delta_bench_checkout.lock}"
+DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS:-7200}"
+CHECKOUT_LOCK_FD=""
+CHECKOUT_LOCK_DIR=""
+export DELTA_BENCH_CHECKOUT_LOCK_FILE
+export DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS
 storage_args=(--storage-backend "${STORAGE_BACKEND}")
 if [[ ${#STORAGE_OPTIONS[@]} -gt 0 ]]; then
   for option in "${STORAGE_OPTIONS[@]}"; do
@@ -403,6 +409,57 @@ exec_on_runner() {
   fi
 }
 
+release_checkout_lock() {
+  if [[ -n "${CHECKOUT_LOCK_FD}" ]]; then
+    eval "exec ${CHECKOUT_LOCK_FD}>&-" >/dev/null 2>&1 || true
+    CHECKOUT_LOCK_FD=""
+  fi
+  if [[ -n "${CHECKOUT_LOCK_DIR}" ]]; then
+    rm -f "${CHECKOUT_LOCK_DIR}/pid" >/dev/null 2>&1 || true
+    rmdir "${CHECKOUT_LOCK_DIR}" >/dev/null 2>&1 || true
+    CHECKOUT_LOCK_DIR=""
+  fi
+}
+
+acquire_checkout_lock() {
+  if [[ -n "${REMOTE_RUNNER}" ]]; then
+    return
+  fi
+  if [[ "${DELTA_BENCH_CHECKOUT_LOCK_HELD:-0}" == "1" ]]; then
+    return
+  fi
+
+  if command -v flock >/dev/null 2>&1; then
+    mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
+    exec {CHECKOUT_LOCK_FD}>"${DELTA_BENCH_CHECKOUT_LOCK_FILE}"
+    if ! flock -w "${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}" "${CHECKOUT_LOCK_FD}"; then
+      echo "failed to acquire checkout lock within ${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+      exit 1
+    fi
+    export DELTA_BENCH_CHECKOUT_LOCK_HELD=1
+    return
+  fi
+
+  mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
+  local lock_dir="${DELTA_BENCH_CHECKOUT_LOCK_FILE}.dir"
+  local deadline=$((SECONDS + DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS))
+  while true; do
+    if mkdir "${lock_dir}" >/dev/null 2>&1; then
+      CHECKOUT_LOCK_DIR="${lock_dir}"
+      printf '%s\n' "$$" > "${CHECKOUT_LOCK_DIR}/pid" || true
+      export DELTA_BENCH_CHECKOUT_LOCK_HELD=1
+      return
+    fi
+    if (( SECONDS >= deadline )); then
+      echo "failed to acquire checkout lock within ${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+acquire_checkout_lock
+
 cleanup_harness_overlay_untracked() {
   local managed_paths=(
     "crates/delta-bench"
@@ -416,6 +473,7 @@ cleanup_harness_overlay_untracked() {
     # Keep delta-rs checkout reusable and avoid stash-pop collisions after compare runs.
     exec_on_runner git -C "${DELTA_RS_DIR}" clean -fd -- "${path}" >/dev/null 2>&1 || true
   done
+  release_checkout_lock
 }
 
 trap cleanup_harness_overlay_untracked EXIT

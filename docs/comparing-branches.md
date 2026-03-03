@@ -1,0 +1,164 @@
+# Comparing Branches
+
+This guide covers the primary contributor workflow: running the same benchmarks against two revisions of delta-rs and seeing what changed.
+
+## Table of Contents
+
+- [When to Use Branch Comparison](#when-to-use-branch-comparison)
+- [Quick Start: Compare Your Branch Against Main](#quick-start-compare-your-branch-against-main)
+- [Comparison Methods](#comparison-methods)
+- [What Compare Does Under the Hood](#what-compare-does-under-the-hood)
+- [Tuning Your Comparison](#tuning-your-comparison)
+- [Reliable Comparison Protocol](#reliable-comparison-protocol)
+- [Reading the Report](#reading-the-report)
+- [Next Steps](#next-steps)
+
+## When to Use Branch Comparison
+
+Branch comparison answers the question: "did my change make things faster, slower, or about the same?" It runs every benchmark case against both a base revision and a candidate revision, then classifies each case as a regression, improvement, or stable.
+
+Use it before merging PRs, validating optimizations, or making release decisions. For tracking performance across many revisions over time, use [Longitudinal Benchmarking](longitudinal.md) instead.
+
+## Quick Start: Compare Your Branch Against Main
+
+The fastest way to compare your current checkout against upstream `main`:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main all
+```
+
+This builds and benchmarks both your current checkout and the latest remote `main`, then prints a grouped report showing regressions, improvements, and stable cases. The defaults (2 warmup, 9 measured iterations, 3 runs per ref, alternating order) are tuned for decision-grade results.
+
+## Comparison Methods
+
+### Current checkout vs upstream main
+
+The simplest option. Compares whatever commit is checked out in `.delta-rs-under-test` against the latest `origin/main`:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main all
+```
+
+Use this when you are working on a branch and want to check your changes against main without specifying exact SHAs.
+
+### Named branch-to-branch
+
+Compare any two branches or refs that exist in the delta-rs checkout:
+
+```bash
+./scripts/compare_branch.sh main <candidate_ref> all
+```
+
+The `<candidate_ref>` must exist in `.delta-rs-under-test`. To see available refs:
+
+```bash
+git -C .delta-rs-under-test branch -a
+```
+
+### Immutable SHA compare (recommended for long runs)
+
+Pin both sides to exact commit SHAs for fully reproducible results:
+
+```bash
+./scripts/compare_branch.sh \
+  --base-sha 5a0c8d7f3f2d9d42fdd9414f1ce2af319e0c52e1 \
+  --candidate-sha 8c6170f1de4af5e2d3336b4fce8a9896af4d9b90 \
+  all
+```
+
+This is the most reproducible option because branches can move during a long run, but SHAs cannot. Prefer this for benchmarks that take more than a few minutes.
+
+## What Compare Does Under the Hood
+
+When you run a comparison, the script executes these steps in order:
+
+1. **Updates the checkout** -- fetches the latest state of `.delta-rs-under-test` and resolves the base and candidate refs.
+2. **Syncs the harness** -- copies the benchmark crate and configuration into the delta-rs workspace so Cargo can build it.
+3. **Generates fixtures** -- creates deterministic test data using the base revision, ensuring both sides benchmark against identical input.
+4. **Runs prewarm iterations** (optional) -- executes unreported warmup iterations for both refs to prime caches and stabilize thermal state.
+5. **Runs measured iterations** -- executes the configured number of measured benchmark runs for base and candidate in the configured order (alternating by default).
+6. **Aggregates results** -- combines all measured runs for each side into a single JSON payload using the configured aggregation method (median by default).
+7. **Prints the report** -- classifies each case and prints grouped output: Regressions, Improvements, Stable, and Needs Attention.
+
+## Tuning Your Comparison
+
+### Benchmark flags
+
+These flags control the measurement itself:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--warmup` | `2` | Warmup iterations per case (not measured). |
+| `--iters` | `9` | Measured iterations per case per run. |
+| `--prewarm-iters` | `1` | Unreported warmup iterations per ref (run before any measured iterations). |
+| `--compare-runs` | `3` | Number of independent measured runs per ref before aggregation. |
+| `--measure-order` | `alternate` | Run interleaving: `base-first`, `candidate-first`, or `alternate`. |
+| `--aggregation` | `median` | How to pick the representative sample: `min`, `median`, or `p95`. |
+| `--noise-threshold` | `0.05` | Minimum relative change to classify as regression or improvement. |
+
+### Environment variables
+
+These control execution behavior at the script level:
+
+| Variable | Default | Description |
+|---|---|---|
+| `BENCH_TIMEOUT_SECONDS` | `3600` | Maximum time per benchmark step before timeout. |
+| `BENCH_RETRY_ATTEMPTS` | `2` | Number of retries for transient failures. |
+| `BENCH_RETRY_DELAY_SECONDS` | `5` | Delay between retries. |
+
+### Adding metric columns to the report
+
+To see per-case metrics (rows processed, files scanned, etc.) alongside timing data:
+
+```bash
+cd python && python3 -m delta_bench_compare.compare ... --include-metrics
+```
+
+## Reliable Comparison Protocol
+
+For PR merge decisions and release validation, follow these practices to minimize noise and maximize confidence:
+
+1. **Use immutable refs.** Pass `--base-sha` and `--candidate-sha` (or `--current-vs-main`) so the revisions cannot shift during the run.
+2. **Run on an idle machine.** Keep the system otherwise quiet and use the same backend/profile for both refs.
+3. **Keep alternating order.** The default `--measure-order alternate` reduces drift from cache warming, thermal throttling, and background processes by interleaving base and candidate runs.
+4. **Use median aggregation.** The default `median` is robust to outliers. Switch to `p95` only when analyzing tail latency.
+5. **Watch for noise.** If `cv_pct` (coefficient of variation) exceeds 10% for a case, the measurement is noisy. Rerun with higher `--compare-runs` or `--iters` to increase sample size.
+
+Decision-grade command with all recommended defaults made explicit:
+
+```bash
+./scripts/compare_branch.sh \
+  --current-vs-main \
+  --warmup 2 \
+  --iters 9 \
+  --prewarm-iters 1 \
+  --compare-runs 3 \
+  --measure-order alternate \
+  --aggregation median \
+  all
+```
+
+## Reading the Report
+
+The comparison report groups benchmark cases into four sections:
+
+| Section | Meaning |
+|---|---|
+| **Regressions** | Cases where the candidate is slower than the base beyond the noise threshold. Investigate before merging. |
+| **Improvements** | Cases where the candidate is faster than the base beyond the noise threshold. |
+| **Stable** | Cases where performance is within the noise threshold. No action needed. |
+| **Needs Attention** | Cases with high variability (`cv_pct > 10`) or other anomalies. Results may not be reliable -- consider rerunning with more iterations. |
+
+Key metrics to look at:
+
+- **Relative change (%)** -- how much faster or slower the candidate is compared to the base.
+- **cv_pct** -- coefficient of variation as a percentage. Below 5% is good. Above 10% means the measurement is noisy and you should increase `--compare-runs` or `--iters`.
+- **median_ms** -- the representative timing for each case.
+
+For the complete list of metrics that may appear in the report, see [Reference](reference.md#metrics-reference).
+
+## Next Steps
+
+- **Track trends over time** -- see [Longitudinal Benchmarking](longitudinal.md) for regression detection across many revisions.
+- **Run on dedicated hardware** -- see [Cloud Runner](cloud-runner.md) for noise-isolated benchmarks on hardened infrastructure.
+- **Understand the result format** -- see [Reference](reference.md#result-schema-v2) for the complete schema v2 field listing.

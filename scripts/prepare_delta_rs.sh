@@ -8,6 +8,56 @@ DELTA_RS_REPO_URL="${DELTA_RS_REPO_URL:-https://github.com/delta-io/delta-rs}"
 DELTA_RS_BRANCH="${DELTA_RS_BRANCH:-main}"
 DELTA_RS_REF="${DELTA_RS_REF:-}"
 DELTA_RS_REF_TYPE="${DELTA_RS_REF_TYPE:-auto}"
+DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-${DELTA_RS_DIR}/.delta_bench_checkout.lock}"
+DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS:-300}"
+CHECKOUT_LOCK_FD=""
+CHECKOUT_LOCK_DIR=""
+
+release_checkout_lock() {
+  if [[ -n "${CHECKOUT_LOCK_FD}" ]]; then
+    eval "exec ${CHECKOUT_LOCK_FD}>&-" >/dev/null 2>&1 || true
+    CHECKOUT_LOCK_FD=""
+  fi
+  if [[ -n "${CHECKOUT_LOCK_DIR}" ]]; then
+    rm -f "${CHECKOUT_LOCK_DIR}/pid" >/dev/null 2>&1 || true
+    rmdir "${CHECKOUT_LOCK_DIR}" >/dev/null 2>&1 || true
+    CHECKOUT_LOCK_DIR=""
+  fi
+}
+
+acquire_checkout_lock() {
+  if [[ "${DELTA_BENCH_CHECKOUT_LOCK_HELD:-0}" == "1" ]]; then
+    return
+  fi
+
+  if command -v flock >/dev/null 2>&1; then
+    mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
+    exec {CHECKOUT_LOCK_FD}>"${DELTA_BENCH_CHECKOUT_LOCK_FILE}"
+    if ! flock -w "${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}" "${CHECKOUT_LOCK_FD}"; then
+      echo "failed to acquire checkout lock within ${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+      exit 1
+    fi
+    export DELTA_BENCH_CHECKOUT_LOCK_HELD=1
+    return
+  fi
+
+  mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
+  local lock_dir="${DELTA_BENCH_CHECKOUT_LOCK_FILE}.dir"
+  local deadline=$((SECONDS + DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS))
+  while true; do
+    if mkdir "${lock_dir}" >/dev/null 2>&1; then
+      CHECKOUT_LOCK_DIR="${lock_dir}"
+      printf '%s\n' "$$" > "${CHECKOUT_LOCK_DIR}/pid" || true
+      export DELTA_BENCH_CHECKOUT_LOCK_HELD=1
+      return
+    fi
+    if (( SECONDS >= deadline )); then
+      echo "failed to acquire checkout lock within ${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
 
 cleanup_harness_overlay_untracked() {
   local managed_paths=(
@@ -24,11 +74,14 @@ cleanup_harness_overlay_untracked() {
   done
 }
 
+trap release_checkout_lock EXIT
+
 if [[ ! -d "${DELTA_RS_DIR}/.git" ]]; then
   echo "cloning ${DELTA_RS_REPO_URL} into ${DELTA_RS_DIR}"
   git clone --origin origin "${DELTA_RS_REPO_URL}" "${DELTA_RS_DIR}"
 fi
 
+acquire_checkout_lock
 cleanup_harness_overlay_untracked
 git -C "${DELTA_RS_DIR}" fetch origin
 

@@ -13,6 +13,7 @@ from delta_bench_compare.compare import (
     compare_runs,
     format_change,
 )
+from delta_bench_compare.aggregate import aggregate_payloads
 
 
 def _run(cases: list[dict]) -> dict:
@@ -261,6 +262,95 @@ def test_compare_runs_rejects_unknown_aggregation() -> None:
     cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 90.0}]}])
     with pytest.raises(ValueError, match="aggregation"):
         compare_runs(base, cand, threshold=0.05, aggregation="not-a-mode")
+
+
+def test_aggregate_payloads_merges_samples_and_recomputes_elapsed_stats() -> None:
+    run_a = _run(
+        [
+            {
+                "case": "scan_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}, {"elapsed_ms": 110.0}],
+            }
+        ]
+    )
+    run_b = _run(
+        [
+            {
+                "case": "scan_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 90.0}, {"elapsed_ms": 95.0}],
+            }
+        ]
+    )
+    run_a["context"]["label"] = "run-a"
+    run_b["context"]["label"] = "run-b"
+
+    aggregated = aggregate_payloads([run_a, run_b], label="merged-run")
+    assert aggregated["context"]["label"] == "merged-run"
+    case = aggregated["cases"][0]
+    assert case["success"] is True
+    assert len(case["samples"]) == 4
+    assert case["elapsed_stats"]["min_ms"] == pytest.approx(90.0)
+    assert case["elapsed_stats"]["max_ms"] == pytest.approx(110.0)
+    assert case["elapsed_stats"]["median_ms"] == pytest.approx(97.5)
+    assert case["elapsed_stats"]["mean_ms"] == pytest.approx(98.75)
+
+
+def test_aggregate_payloads_rejects_case_set_mismatch() -> None:
+    run_a = _run(
+        [
+            {
+                "case": "scan_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}],
+            }
+        ]
+    )
+    run_b = _run(
+        [
+            {
+                "case": "scan_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 90.0}],
+            },
+            {
+                "case": "extra_case",
+                "success": True,
+                "samples": [{"elapsed_ms": 10.0}],
+            },
+        ]
+    )
+
+    with pytest.raises(ValueError, match="case set mismatch"):
+        aggregate_payloads([run_a, run_b], label="merged-run")
+
+
+def test_aggregate_payloads_rejects_inconsistent_classification() -> None:
+    run_a = _run(
+        [
+            {
+                "case": "scan_case",
+                "classification": "supported",
+                "success": True,
+                "samples": [{"elapsed_ms": 100.0}],
+            }
+        ]
+    )
+    run_b = _run(
+        [
+            {
+                "case": "scan_case",
+                "classification": "expected_failure",
+                "success": False,
+                "failure": {"message": "expected"},
+                "samples": [],
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="inconsistent classification"):
+        aggregate_payloads([run_a, run_b], label="merged-run")
 
 
 def test_format_change_handles_zero_baseline() -> None:

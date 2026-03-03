@@ -13,32 +13,9 @@ Managed checkout mode (recommended first run):
 ./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
-`run` prints a per-case summary table in the terminal, and detailed results are written to `results/<label>/<suite>.json` (pass `--no-summary-table` to suppress table output).
-Rust compiler warnings are suppressed by default in `scripts/bench.sh` output; set `DELTA_BENCH_SUPPRESS_RUST_WARNINGS=0` to show them.
+`run` prints a per-case summary table in the terminal, and detailed results are written to `results/<label>/<suite>.json`.
 
-Use your existing local `delta-rs` checkout instead of `.delta-rs-under-test`:
-
-```bash
-DELTA_RS_DIR=/path/to/your/delta-rs \
-DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
-./scripts/sync_harness_to_delta_rs.sh
-
-DELTA_RS_DIR=/path/to/your/delta-rs \
-DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
-./scripts/bench.sh doctor
-```
-
-TPC-DS DuckDB-backed fixture generation (subset-first):
-
-```bash
-./scripts/bench.sh data --dataset-id tpcds_duckdb --seed 42
-./scripts/bench.sh run --suite tpcds --runner rust --dataset-id tpcds_duckdb --warmup 1 --iters 1 --label tpcds-duckdb-smoke
-```
-
-Dependencies for `tpcds_duckdb`: `python3` plus `duckdb` (`pip install duckdb`).
-Marketplace datasets are currently a document-only path: place external Delta tables under expected `fixtures/<scale>/...` roots.
-
-## Common workflows
+## Common tasks
 
 Compare two refs:
 
@@ -46,27 +23,17 @@ Compare two refs:
 ./scripts/compare_branch.sh main <candidate_ref> all
 ```
 
-`<candidate_ref>` must be a real branch in `.delta-rs-under-test` (or use commit SHAs below).
-
-Pin immutable commits when needed:
+Pin immutable commits:
 
 ```bash
 ./scripts/compare_branch.sh --base-sha <base_sha> --candidate-sha <candidate_sha> all
 ```
 
-Compare your current checkout commit against the latest remote `main` (auto-picks `upstream`, falls back to `origin`):
+Compare your current checkout commit against latest remote `main`:
 
 ```bash
 ./scripts/compare_branch.sh --current-vs-main all
 ```
-
-Hash assertion policy (implemented in compare output):
-
-- `compare_branch.sh` now prints a `Hash Assertion Triage` section after perf comparison.
-- Refresh `exact_result_hash` values only when a case is deterministic and fails on both base and candidate with the same found hash.
-- Treat candidate-only hash mismatches as regressions to investigate, not as automatic refresh candidates.
-- Keep hash refreshes in dedicated commits separate from feature/perf commits.
-- Hash refreshes are explicit/manual; no automatic manifest rewrites happen during runs.
 
 Refresh committed release-history benchmark manifests:
 
@@ -74,7 +41,7 @@ Refresh committed release-history benchmark manifests:
 ./scripts/update_release_history_manifests.sh
 ```
 
-Clean local benchmark artifacts safely (dry-run by default):
+Clean local artifacts safely (dry-run by default):
 
 ```bash
 ./scripts/cleanup_local.sh --results
@@ -83,6 +50,7 @@ Clean local benchmark artifacts safely (dry-run by default):
 ```
 
 `cleanup_local.sh` never deletes anything unless `--apply` is explicitly provided.
+With `--apply`, deletions are restricted to this repository root unless `--allow-outside-root` is set.
 
 Show CLI help:
 
@@ -93,9 +61,9 @@ Show CLI help:
 ./scripts/cleanup_local.sh --help
 ```
 
-## Documentation
+## Detailed guides
 
-- [User Guide](docs/user-guide.md): day-to-day usage, suite execution, object-store mode, and metrics.
+- [User Guide](docs/user-guide.md): local setup, dataset/fixture generation, suite execution, object-store mode, and cleanup.
 - [Longitudinal CLI Guide](docs/longitudinal-cli.md): revision selection, matrix execution, reporting, and retention.
 - [Longitudinal Runbook](docs/longitudinal-runbook.md): nightly operations, release-tag history runs, and failure recovery.
 - [Security Runbook (Cloud Runner)](docs/security-runner.md): runner hardening, preflight checks, and provisioning controls.

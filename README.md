@@ -29,14 +29,14 @@ For decision-grade branch comparisons, use `compare_branch.sh` defaults:
 
 ## Contributor Task Router
 
-| Task | Primary page | Use when |
-| --- | --- | --- |
-| Run suites locally | [User Guide](docs/user-guide.md) | You need fixture generation, suite execution, backend selection, and cleanup. |
-| Compare refs and SHAs | [User Guide](docs/user-guide.md#compare-workflows) | You need base-vs-candidate or current-vs-main performance deltas. |
-| Run longitudinal CLI pipeline | [Longitudinal CLI Guide](docs/longitudinal-cli.md) | You are executing revision manifests, matrix runs, ingest, and reports. |
-| Recover failed longitudinal jobs | [Longitudinal Runbook](docs/longitudinal-runbook.md) | Nightly/release workflow failed and you need recovery steps. |
-| Run remote/security-controlled benches | [Security Runbook](docs/security-runner.md) | You need run-mode checks, no-public-ipv4, and provisioning controls. |
-| Understand internals and schema | [Architecture](docs/architecture.md) | You need component, data-flow, and schema v2 reference detail. |
+| Task                                   | Primary page                                         | Use when                                                                      |
+| -------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Run suites locally                     | [User Guide](docs/user-guide.md)                     | You need fixture generation, suite execution, backend selection, and cleanup. |
+| Compare refs and SHAs                  | [User Guide](docs/user-guide.md#compare-workflows)   | You need base-vs-candidate or current-vs-main performance deltas.             |
+| Run longitudinal CLI pipeline          | [Longitudinal CLI Guide](docs/longitudinal-cli.md)   | You are executing revision manifests, matrix runs, ingest, and reports.       |
+| Recover failed longitudinal jobs       | [Longitudinal Runbook](docs/longitudinal-runbook.md) | Nightly/release workflow failed and you need recovery steps.                  |
+| Run remote/security-controlled benches | [Security Runbook](docs/security-runner.md)          | You need run-mode checks, no-public-ipv4, and provisioning controls.          |
+| Understand internals and schema        | [Architecture](docs/architecture.md)                 | You need component, data-flow, and schema v2 reference detail.                |
 
 ## Choose Your Workflow
 

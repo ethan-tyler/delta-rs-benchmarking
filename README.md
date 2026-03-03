@@ -1,10 +1,10 @@
 # delta-rs-benchmarking
 
-Benchmark harness for `delta-rs` with branch comparison and longitudinal trend tracking.
+Benchmark harness for `delta-rs` with local branch comparison and longitudinal trend tracking.
 
-## Quickstart
+## Start Here
 
-Managed checkout mode (recommended first run):
+First successful local run (recommended first path):
 
 ```bash
 ./scripts/prepare_delta_rs.sh
@@ -13,66 +13,72 @@ Managed checkout mode (recommended first run):
 ./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
-`run` prints a per-case summary table in the terminal, and detailed results are written to `results/<label>/<suite>.json`.
+The run prints a per-case summary table and writes full results to `results/<label>/<suite>.json`.
 
-## Common tasks
+For decision-grade branch comparisons, use `compare_branch.sh` defaults:
 
-Compare two refs:
-
-```bash
-./scripts/compare_branch.sh main <candidate_ref> all
-```
-
-Pin immutable commits:
-
-```bash
-./scripts/compare_branch.sh --base-sha <base_sha> --candidate-sha <candidate_sha> all
-```
-
-Compare your current checkout commit against latest remote `main`:
+- warmup: `2`
+- measured iters: `9`
+- prewarm iters per ref: `1`
+- measured runs per ref: `3`
+- run order: `alternate` (base-first then candidate-first on alternating runs)
 
 ```bash
 ./scripts/compare_branch.sh --current-vs-main all
 ```
 
-Refresh committed release-history benchmark manifests:
+## Contributor Task Router
 
-```bash
-./scripts/update_release_history_manifests.sh
-```
+| Task | Primary page | Use when |
+| --- | --- | --- |
+| Run suites locally | [User Guide](docs/user-guide.md) | You need fixture generation, suite execution, backend selection, and cleanup. |
+| Compare refs and SHAs | [User Guide](docs/user-guide.md#compare-workflows) | You need base-vs-candidate or current-vs-main performance deltas. |
+| Run longitudinal CLI pipeline | [Longitudinal CLI Guide](docs/longitudinal-cli.md) | You are executing revision manifests, matrix runs, ingest, and reports. |
+| Recover failed longitudinal jobs | [Longitudinal Runbook](docs/longitudinal-runbook.md) | Nightly/release workflow failed and you need recovery steps. |
+| Run remote/security-controlled benches | [Security Runbook](docs/security-runner.md) | You need run-mode checks, no-public-ipv4, and provisioning controls. |
+| Understand internals and schema | [Architecture](docs/architecture.md) | You need component, data-flow, and schema v2 reference detail. |
 
-Clean local artifacts safely (dry-run by default):
+## Choose Your Workflow
 
-```bash
-./scripts/cleanup_local.sh --results
-./scripts/cleanup_local.sh --apply --results --keep-last 5 --older-than-days 14
-./scripts/cleanup_local.sh --apply --fixtures --delta-rs-under-test
-```
+### Run Locally
 
-`cleanup_local.sh` never deletes anything unless `--apply` is explicitly provided.
-With `--apply`, deletions are restricted to this repository root unless `--allow-outside-root` is set.
+Use the happy path in [docs/user-guide.md](docs/user-guide.md#first-benchmark-run-happy-path).
 
-Show CLI help:
+### Compare Performance Between Revisions
+
+Start with [docs/user-guide.md#compare-workflows](docs/user-guide.md#compare-workflows) for:
+
+- branch-to-branch compare
+- immutable SHA compare
+- current checkout vs latest remote `main`
+
+### Execute Longitudinal Pipelines
+
+- command cookbook: [docs/longitudinal-cli.md](docs/longitudinal-cli.md)
+- operational recovery: [docs/longitudinal-runbook.md](docs/longitudinal-runbook.md)
+
+### Run on Hardened or Remote Runners
+
+Use [docs/security-runner.md](docs/security-runner.md) for run-mode commands, compare preflight enforcement flags, and provisioning guardrails.
+
+### Inspect Architecture and Result Schema
+
+Use [docs/architecture.md](docs/architecture.md) for component map, schema v2 fields, and reproducibility controls.
+
+## Common Command Entrypoints
 
 ```bash
 ./scripts/bench.sh --help
 ./scripts/compare_branch.sh --help
 ./scripts/longitudinal_bench.sh --help
 ./scripts/cleanup_local.sh --help
+./scripts/docs_check.sh
 ```
 
-## Detailed guides
-
-- [User Guide](docs/user-guide.md): local setup, dataset/fixture generation, suite execution, object-store mode, and cleanup.
-- [Longitudinal CLI Guide](docs/longitudinal-cli.md): revision selection, matrix execution, reporting, and retention.
-- [Longitudinal Runbook](docs/longitudinal-runbook.md): nightly operations, release-tag history runs, and failure recovery.
-- [Security Runbook (Cloud Runner)](docs/security-runner.md): runner hardening, preflight checks, and provisioning controls.
-- [Architecture](docs/architecture.md): components, data flow, schema, and reproducibility controls.
-
-## Current scope
+## Current Scope
 
 - Suites: `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `tpcds`, `interop_py`
 - Deterministic fixture generation and normalized result schema
-- Manual branch-to-branch comparison with result reporting
-- Longitudinal revision benchmarking pipeline with resumable execution
+- Manual branch-to-branch comparison with grouped reporting
+- Longitudinal revision benchmarking with resumable execution
 - Release-tag longitudinal history for `rust-v*` and `python-v*` tracks

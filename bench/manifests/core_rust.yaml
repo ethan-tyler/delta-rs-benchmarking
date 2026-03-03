@@ -43,7 +43,7 @@ cases:
   enabled: true
   assertions:
   - type: exact_result_hash
-    value: sha256:6c31c0889cda64cd09aa2c753ece7b18de8a29acd258aec4a8049f7492402c4e
+    value: sha256:4d1fd8f90ce4d7480edaf3af4d3716d84d10b0f77211789e47bbe1b06ad8e138
   - type: schema_hash
     value: sha256:5acd94043ee7628611eb2eece7f69a0d5b4c0a644d15a7ece2dce6344bda7af1
 - id: write_append_small
@@ -133,7 +133,7 @@ cases:
   enabled: true
   assertions:
   - type: exact_result_hash
-    value: sha256:3ad9ac554eef460e843f0622241d847c986eb31db6e5264c6e104a82dd08e829
+    value: sha256:bb64c4072ca2b19a19a09b7be6d9ddaf8a932bfca82cf23a138b689e3877ae6c
   - type: schema_hash
     value: sha256:88976a18c30316ed24456055b10f135c4df325eded17e982e6e199d3856a3edc
 - id: merge_delete_5pct

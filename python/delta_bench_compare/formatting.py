@@ -55,14 +55,30 @@ def _row_cells(row: ComparisonRow, include_metrics: bool = False) -> list[str]:
         candidate_metrics = row.candidate_metrics
         cells.extend(
             [
-                _fmt_metric(baseline_metrics.files_scanned if baseline_metrics else None),
-                _fmt_metric(candidate_metrics.files_scanned if candidate_metrics else None),
-                _fmt_metric(baseline_metrics.files_pruned if baseline_metrics else None),
-                _fmt_metric(candidate_metrics.files_pruned if candidate_metrics else None),
-                _fmt_metric(baseline_metrics.bytes_scanned if baseline_metrics else None),
-                _fmt_metric(candidate_metrics.bytes_scanned if candidate_metrics else None),
-                _fmt_metric(baseline_metrics.scan_time_ms if baseline_metrics else None),
-                _fmt_metric(candidate_metrics.scan_time_ms if candidate_metrics else None),
+                _fmt_metric(
+                    baseline_metrics.files_scanned if baseline_metrics else None
+                ),
+                _fmt_metric(
+                    candidate_metrics.files_scanned if candidate_metrics else None
+                ),
+                _fmt_metric(
+                    baseline_metrics.files_pruned if baseline_metrics else None
+                ),
+                _fmt_metric(
+                    candidate_metrics.files_pruned if candidate_metrics else None
+                ),
+                _fmt_metric(
+                    baseline_metrics.bytes_scanned if baseline_metrics else None
+                ),
+                _fmt_metric(
+                    candidate_metrics.bytes_scanned if candidate_metrics else None
+                ),
+                _fmt_metric(
+                    baseline_metrics.scan_time_ms if baseline_metrics else None
+                ),
+                _fmt_metric(
+                    candidate_metrics.scan_time_ms if candidate_metrics else None
+                ),
                 _fmt_metric(
                     baseline_metrics.rewrite_time_ms if baseline_metrics else None
                 ),
@@ -91,7 +107,9 @@ def render_text_table(comparison: Comparison, include_metrics: bool = False) -> 
     )
 
 
-def _table_lines_plain(rows: list[ComparisonRow], include_metrics: bool = False) -> list[str]:
+def _table_lines_plain(
+    rows: list[ComparisonRow], include_metrics: bool = False
+) -> list[str]:
     header = _headers(include_metrics=include_metrics)
     body = [_row_cells(row, include_metrics=include_metrics) for row in rows]
 
@@ -105,7 +123,9 @@ def _table_lines_plain(rows: list[ComparisonRow], include_metrics: bool = False)
         "  ".join("-" * widths[idx] for idx in range(len(header))),
     ]
     for cells in body:
-        lines.append("  ".join(value.ljust(widths[idx]) for idx, value in enumerate(cells)))
+        lines.append(
+            "  ".join(value.ljust(widths[idx]) for idx, value in enumerate(cells))
+        )
     return lines
 
 

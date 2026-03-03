@@ -209,6 +209,35 @@ def test_prepare_delta_rs_cleans_untracked_harness_overlay_before_checkout() -> 
     )
 
 
+def test_compare_branch_acquires_checkout_lock_for_full_run() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "DELTA_BENCH_CHECKOUT_LOCK_FILE" in script
+    assert "DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS" in script
+    assert "acquire_checkout_lock" in script
+    assert "DELTA_BENCH_CHECKOUT_LOCK_HELD" in script
+    assert re.search(
+        r"flock -w \"\$\{DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS\}\"",
+        script,
+    )
+    assert re.search(r"export DELTA_BENCH_CHECKOUT_LOCK_HELD=1", script)
+
+
+def test_prepare_delta_rs_honors_existing_checkout_lock() -> None:
+    script = PREPARE_DELTA_RS.read_text(encoding="utf-8")
+    assert "DELTA_BENCH_CHECKOUT_LOCK_FILE" in script
+    assert "DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS" in script
+    assert "DELTA_BENCH_CHECKOUT_LOCK_HELD" in script
+    assert "acquire_checkout_lock" in script
+    assert re.search(
+        r"if \[\[ \"\$\{DELTA_BENCH_CHECKOUT_LOCK_HELD:-0\}\" == \"1\" \]\]; then",
+        script,
+    )
+    assert re.search(
+        r"flock -w \"\$\{DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS\}\"",
+        script,
+    )
+
+
 def test_benchmark_workflow_accepts_optional_storage_configuration() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "BENCH_STORAGE_BACKEND" in workflow

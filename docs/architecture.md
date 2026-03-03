@@ -27,7 +27,7 @@
 5. `delta-bench run` prints a per-case terminal summary table and writes schema v2 JSON results to `results/<label>/<suite>.json`.
 6. `compare.py` reads baseline/candidate result JSON (schema v2 only) and classifies per-case changes.
 7. `security_check.sh` runs before benchmark execution to validate security/fidelity invariants.
-8. Manual compare script prints markdown output suitable for PR comments.
+8. compare workflow produces grouped text output by default (and `compare.py` supports markdown output when needed).
 
 Marketplace datasets are currently a document-only path: place externally provisioned Delta tables under the expected `fixtures/<scale>/...` roots; no automated ingestion pipeline exists in-repo yet.
 

@@ -80,7 +80,25 @@ fn run_command_accepts_tpcds_duckdb_dataset_id() {
 fn run_command_defaults_runner_to_all() {
     let args = Args::parse_from(["delta-bench", "run"]);
     match args.command {
-        Command::Run { runner, .. } => assert_eq!(runner, RunnerMode::All),
+        Command::Run {
+            runner,
+            no_summary_table,
+            ..
+        } => {
+            assert_eq!(runner, RunnerMode::All);
+            assert!(!no_summary_table);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn run_command_accepts_no_summary_table_flag() {
+    let args = Args::parse_from(["delta-bench", "run", "--no-summary-table"]);
+    match args.command {
+        Command::Run {
+            no_summary_table, ..
+        } => assert!(no_summary_table),
         other => panic!("unexpected command: {other:?}"),
     }
 }

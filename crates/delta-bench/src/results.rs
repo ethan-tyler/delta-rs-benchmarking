@@ -36,6 +36,86 @@ pub fn validate_case_classification(value: &str) -> Result<(), String> {
     parse_case_classification(value).map(|_| ())
 }
 
+pub fn render_run_summary_table(cases: &[CaseResult]) -> String {
+    let headers = [
+        "case".to_string(),
+        "status".to_string(),
+        "mean_ms".to_string(),
+        "min_ms".to_string(),
+        "max_ms".to_string(),
+        "stddev_ms".to_string(),
+        "cv_pct".to_string(),
+    ];
+    let mut rows = Vec::with_capacity(cases.len());
+    for case in cases {
+        let status = match (case.success, case.classification.as_str()) {
+            (true, "expected_failure") => "expected_failure",
+            (true, _) => "ok",
+            (false, _) => "failed",
+        };
+        let stats = case.elapsed_stats.as_ref();
+        rows.push(vec![
+            case.case.clone(),
+            status.to_string(),
+            format_stat(stats.map(|s| s.mean_ms)),
+            format_stat(stats.map(|s| s.min_ms)),
+            format_stat(stats.map(|s| s.max_ms)),
+            format_stat(stats.map(|s| s.stddev_ms)),
+            format_stat(stats.and_then(|s| s.cv_pct)),
+        ]);
+    }
+
+    let mut widths: Vec<usize> = headers.iter().map(String::len).collect();
+    for row in &rows {
+        for (idx, value) in row.iter().enumerate() {
+            widths[idx] = widths[idx].max(value.len());
+        }
+    }
+
+    let mut output = String::new();
+    let border = render_table_border(&widths);
+    output.push_str(&border);
+    output.push('\n');
+    output.push_str(&render_table_row(&headers, &widths));
+    output.push('\n');
+    output.push_str(&border);
+    output.push('\n');
+    for row in &rows {
+        output.push_str(&render_table_row(row, &widths));
+        output.push('\n');
+    }
+    output.push_str(&border);
+    output
+}
+
+fn format_stat(value: Option<f64>) -> String {
+    value
+        .map(|v| format!("{v:.3}"))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn render_table_border(widths: &[usize]) -> String {
+    let mut border = String::new();
+    border.push('+');
+    for width in widths {
+        border.push_str(&"-".repeat(width + 2));
+        border.push('+');
+    }
+    border
+}
+
+fn render_table_row(values: &[String], widths: &[usize]) -> String {
+    let mut row = String::new();
+    row.push('|');
+    for (idx, value) in values.iter().enumerate() {
+        row.push(' ');
+        row.push_str(value);
+        row.push_str(&" ".repeat(widths[idx] - value.len() + 1));
+        row.push('|');
+    }
+    row
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BenchContext {
     #[serde(deserialize_with = "deserialize_schema_version_v2")]
@@ -285,4 +365,58 @@ pub struct BenchRunResult {
     pub schema_version: u32,
     pub context: BenchContext,
     pub cases: Vec<CaseResult>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{render_run_summary_table, CaseFailure, CaseResult, ElapsedStats};
+
+    fn success_case(name: &str, mean_ms: f64, cv_pct: Option<f64>) -> CaseResult {
+        CaseResult {
+            case: name.to_string(),
+            success: true,
+            classification: "supported".to_string(),
+            samples: Vec::new(),
+            elapsed_stats: Some(ElapsedStats {
+                min_ms: mean_ms - 1.0,
+                max_ms: mean_ms + 1.0,
+                mean_ms,
+                median_ms: mean_ms,
+                stddev_ms: 0.2,
+                cv_pct,
+            }),
+            failure: None,
+        }
+    }
+
+    #[test]
+    fn run_summary_table_includes_header_and_stats() {
+        let output = render_run_summary_table(&[success_case("scan_full_narrow", 10.5, Some(2.4))]);
+
+        assert!(output.contains("case"));
+        assert!(output.contains("status"));
+        assert!(output.contains("mean_ms"));
+        assert!(output.contains("scan_full_narrow"));
+        assert!(output.contains("ok"));
+        assert!(output.contains("10.500"));
+        assert!(output.contains("2.400"));
+    }
+
+    #[test]
+    fn run_summary_table_formats_failures_without_elapsed_stats() {
+        let output = render_run_summary_table(&[CaseResult {
+            case: "merge_upsert_10pct".to_string(),
+            success: false,
+            classification: "supported".to_string(),
+            samples: Vec::new(),
+            elapsed_stats: None,
+            failure: Some(CaseFailure {
+                message: "boom".to_string(),
+            }),
+        }]);
+
+        assert!(output.contains("merge_upsert_10pct"));
+        assert!(output.contains("failed"));
+        assert!(output.contains(" - "));
+    }
 }

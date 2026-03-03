@@ -66,12 +66,23 @@ Refresh committed release-history benchmark manifests:
 ./scripts/update_release_history_manifests.sh
 ```
 
+Clean local benchmark artifacts safely (dry-run by default):
+
+```bash
+./scripts/cleanup_local.sh --results
+./scripts/cleanup_local.sh --apply --results --keep-last 5 --older-than-days 14
+./scripts/cleanup_local.sh --apply --fixtures --delta-rs-under-test
+```
+
+`cleanup_local.sh` never deletes anything unless `--apply` is explicitly provided.
+
 Show CLI help:
 
 ```bash
 ./scripts/bench.sh --help
 ./scripts/compare_branch.sh --help
 ./scripts/longitudinal_bench.sh --help
+./scripts/cleanup_local.sh --help
 ```
 
 ## Documentation

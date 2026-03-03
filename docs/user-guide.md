@@ -23,6 +23,28 @@ DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
 ./scripts/bench.sh doctor
 ```
 
+## Local cleanup workflow
+
+Use `cleanup_local.sh` to remove local benchmark artifacts with a safety-first default.
+
+```bash
+./scripts/cleanup_local.sh --results
+```
+
+The default mode is dry-run, so commands are only printed. No deletion happens unless
+`--apply` is provided.
+
+Targeted cleanup examples:
+
+```bash
+./scripts/cleanup_local.sh --apply --results --keep-last 5 --older-than-days 14
+./scripts/cleanup_local.sh --apply --fixtures
+./scripts/cleanup_local.sh --apply --delta-rs-under-test
+./scripts/cleanup_local.sh --apply --fixtures --delta-rs-under-test
+```
+
+Use `./scripts/cleanup_local.sh --help` for the full flag list and examples.
+
 ## Generate fixtures and run suites
 
 Generate deterministic fixture data:

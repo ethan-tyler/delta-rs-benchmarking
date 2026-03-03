@@ -17,29 +17,53 @@ HEADING_PATTERN = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.MULTILINE)
 
 REQUIRED_SECTIONS: dict[str, list[str]] = {
     "README.md": [
-        "## Start Here",
-        "## Contributor Task Router",
-        "## Choose Your Workflow",
+        "## Quick Start",
+        "## What You Can Do",
     ],
-    "docs/user-guide.md": [
-        "## Prerequisites and Workspace Modes",
-        "## First Benchmark Run (Happy Path)",
-        "## Compare Workflows",
-        "## Backend and Dataset Selection",
-        "## Cleanup and Troubleshooting",
-        "## Advanced Topics",
-    ],
-    "docs/longitudinal-cli.md": [
+    "docs/getting-started.md": [
+        "## How the Harness Works",
         "## Prerequisites",
-        "## Happy-Path Pipeline",
-        "## End-to-End Orchestration",
-        "## Advanced Controls",
+        "## Your First Benchmark Run",
+        "## Choosing a Dataset",
+        "## Choosing a Backend",
+        "## Cleanup",
+        "## Troubleshooting",
     ],
-    "docs/longitudinal-runbook.md": [
-        "## Scope",
-        "## Nightly and Release Workflows",
-        "## Failure Recovery Playbooks",
-        "## Manual Recovery Commands",
+    "docs/comparing-branches.md": [
+        "## When to Use Branch Comparison",
+        "## Comparison Methods",
+        "## What Compare Does Under the Hood",
+        "## Tuning Your Comparison",
+        "## Reliable Comparison Protocol",
+        "## Reading the Report",
+    ],
+    "docs/longitudinal.md": [
+        "## When to Use Longitudinal Benchmarking",
+        "## Prerequisites",
+        "## Pipeline Stages Overview",
+        "## Automated Workflows",
+        "## Failure Recovery",
+    ],
+    "docs/reference.md": [
+        "## Glossary",
+        "## Benchmark Suites and Cases",
+        "## Metrics Reference",
+        "## CLI Commands and Flags",
+        "## Environment Variables",
+        "## Datasets and Scales",
+        "## Result Schema v2",
+    ],
+    "docs/architecture.md": [
+        "## Key Concepts",
+        "## Components",
+        "## Data Flow",
+        "## Reproducibility Controls",
+    ],
+    "docs/cloud-runner.md": [
+        "## When to Use a Cloud Runner",
+        "## Setting Up Run Mode",
+        "## Preflight Enforcement on Compare",
+        "## Provisioning Controls",
     ],
 }
 
@@ -96,9 +120,9 @@ def test_heading_levels_do_not_jump() -> None:
         for hashes, text in headings:
             level = len(hashes)
             if prev_level != 0:
-                assert level <= prev_level + 1, (
-                    f"heading level jumps in {doc_file} at heading: {text}"
-                )
+                assert (
+                    level <= prev_level + 1
+                ), f"heading level jumps in {doc_file} at heading: {text}"
             prev_level = level
 
 

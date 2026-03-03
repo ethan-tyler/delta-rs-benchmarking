@@ -1,10 +1,10 @@
 # delta-rs-benchmarking
 
-Benchmark harness for `delta-rs` with local branch comparison and longitudinal trend tracking.
+Benchmark harness for [delta-rs](https://github.com/delta-io/delta-rs). Runs reproducible performance benchmarks against any delta-rs revision with local branch comparison and longitudinal trend tracking.
 
-## Start Here
+## Quick Start
 
-First successful local run (recommended first path):
+Get from zero to your first benchmark result:
 
 ```bash
 ./scripts/prepare_delta_rs.sh
@@ -13,72 +13,45 @@ First successful local run (recommended first path):
 ./scripts/bench.sh run --suite all --runner all --dataset-id tiny_smoke --warmup 1 --iters 5 --label local
 ```
 
-The run prints a per-case summary table and writes full results to `results/<label>/<suite>.json`.
+This clones delta-rs, generates test data, runs all benchmark suites, and writes results to `results/local/<suite>.json`.
 
-For decision-grade branch comparisons, use `compare_branch.sh` defaults:
-
-- warmup: `2`
-- measured iters: `9`
-- prewarm iters per ref: `1`
-- measured runs per ref: `3`
-- run order: `alternate` (base-first then candidate-first on alternating runs)
+To compare your branch against main with decision-grade defaults:
 
 ```bash
 ./scripts/compare_branch.sh --current-vs-main all
 ```
 
-## Contributor Task Router
+## What You Can Do
 
-| Task                                   | Primary page                                         | Use when                                                                      |
-| -------------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------- |
-| Run suites locally                     | [User Guide](docs/user-guide.md)                     | You need fixture generation, suite execution, backend selection, and cleanup. |
-| Compare refs and SHAs                  | [User Guide](docs/user-guide.md#compare-workflows)   | You need base-vs-candidate or current-vs-main performance deltas.             |
-| Run longitudinal CLI pipeline          | [Longitudinal CLI Guide](docs/longitudinal-cli.md)   | You are executing revision manifests, matrix runs, ingest, and reports.       |
-| Recover failed longitudinal jobs       | [Longitudinal Runbook](docs/longitudinal-runbook.md) | Nightly/release workflow failed and you need recovery steps.                  |
-| Run remote/security-controlled benches | [Security Runbook](docs/security-runner.md)          | You need run-mode checks, no-public-ipv4, and provisioning controls.          |
-| Understand internals and schema        | [Architecture](docs/architecture.md)                 | You need component, data-flow, and schema v2 reference detail.                |
+| Goal | Guide | When to use it |
+| --- | --- | --- |
+| Set up and run your first benchmark | [Getting Started](docs/getting-started.md) | You are new to this harness and want to get running. |
+| Compare performance between two revisions | [Comparing Branches](docs/comparing-branches.md) | You want to know if a change made things faster or slower. |
+| Track performance across many revisions | [Longitudinal Benchmarking](docs/longitudinal.md) | You need nightly regression detection or release baselines. |
+| Run on dedicated cloud infrastructure | [Cloud Runner](docs/cloud-runner.md) | You need noise isolation, security controls, or reproducible CI. |
+| Look up suites, metrics, flags, env vars | [Reference](docs/reference.md) | You need to find a specific configuration option or metric name. |
+| Understand internals and architecture | [Architecture](docs/architecture.md) | You want to know how the harness is structured and how data flows. |
 
-## Choose Your Workflow
+## Command Quick Reference
 
-### Run Locally
+| Script | Purpose |
+| --- | --- |
+| `./scripts/bench.sh` | Generate fixtures and run benchmark suites |
+| `./scripts/compare_branch.sh` | Compare two revisions with multi-run aggregation |
+| `./scripts/longitudinal_bench.sh` | Run longitudinal pipeline stages |
+| `./scripts/cleanup_local.sh` | Safe artifact cleanup (dry-run by default) |
+| `./scripts/docs_check.sh` | Run documentation quality checks |
 
-Use the happy path in [docs/user-guide.md](docs/user-guide.md#first-benchmark-run-happy-path).
+Pass `--help` to any script for full usage details.
 
-### Compare Performance Between Revisions
+## Current Benchmark Scope
 
-Start with [docs/user-guide.md#compare-workflows](docs/user-guide.md#compare-workflows) for:
-
-- branch-to-branch compare
-- immutable SHA compare
-- current checkout vs latest remote `main`
-
-### Execute Longitudinal Pipelines
-
-- command cookbook: [docs/longitudinal-cli.md](docs/longitudinal-cli.md)
-- operational recovery: [docs/longitudinal-runbook.md](docs/longitudinal-runbook.md)
-
-### Run on Hardened or Remote Runners
-
-Use [docs/security-runner.md](docs/security-runner.md) for run-mode commands, compare preflight enforcement flags, and provisioning guardrails.
-
-### Inspect Architecture and Result Schema
-
-Use [docs/architecture.md](docs/architecture.md) for component map, schema v2 fields, and reproducibility controls.
-
-## Common Command Entrypoints
-
-```bash
-./scripts/bench.sh --help
-./scripts/compare_branch.sh --help
-./scripts/longitudinal_bench.sh --help
-./scripts/cleanup_local.sh --help
-./scripts/docs_check.sh
-```
-
-## Current Scope
-
-- Suites: `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `tpcds`, `interop_py`
-- Deterministic fixture generation and normalized result schema
-- Manual branch-to-branch comparison with grouped reporting
-- Longitudinal revision benchmarking with resumable execution
-- Release-tag longitudinal history for `rust-v*` and `python-v*` tracks
+| Category | Details |
+| --- | --- |
+| Suites | `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `tpcds`, `interop_py` |
+| Cases | 35 individual benchmark cases across all suites |
+| Runners | Rust native and Python interop (pandas, polars, pyarrow) |
+| Fixtures | Deterministic seed-based generation with normalized result schema |
+| Comparison | Branch-to-branch with multi-run aggregation and grouped reporting |
+| Longitudinal | Revision benchmarking with resumable execution and trend reports |
+| Release tracking | `rust-v*` and `python-v*` tag history |

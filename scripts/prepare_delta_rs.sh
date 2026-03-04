@@ -92,7 +92,7 @@ if [[ -n "${DELTA_RS_REF}" ]]; then
         echo "delta-rs ref '${DELTA_RS_REF}' is not available after fetch; provide a reachable commit SHA" >&2
         exit 1
       fi
-      git -C "${DELTA_RS_DIR}" checkout --detach "${DELTA_RS_REF}"
+      git -C "${DELTA_RS_DIR}" checkout -q --detach "${DELTA_RS_REF}"
       ;;
     *)
       echo "unknown DELTA_RS_REF_TYPE '${DELTA_RS_REF_TYPE}' (expected: auto, commit)" >&2
@@ -100,8 +100,8 @@ if [[ -n "${DELTA_RS_REF}" ]]; then
       ;;
   esac
 else
-  git -C "${DELTA_RS_DIR}" checkout "${DELTA_RS_BRANCH}"
-  git -C "${DELTA_RS_DIR}" pull --ff-only origin "${DELTA_RS_BRANCH}"
+  git -C "${DELTA_RS_DIR}" checkout -q "${DELTA_RS_BRANCH}"
+  git -C "${DELTA_RS_DIR}" pull -q --ff-only origin "${DELTA_RS_BRANCH}"
 fi
 
 resolved_ref="$(git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD)"

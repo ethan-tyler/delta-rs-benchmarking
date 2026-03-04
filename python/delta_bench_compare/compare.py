@@ -234,7 +234,18 @@ def main() -> None:
     )
     parser.add_argument("--format", choices=["text", "markdown"], default="text")
     parser.add_argument("--include-metrics", action="store_true")
+    parser.add_argument(
+        "--color",
+        choices=["auto", "always", "never"],
+        default="auto",
+        help="Control ANSI color output (default: auto, detects TTY)",
+    )
     args = parser.parse_args()
+
+    if args.color != "auto":
+        from .terminal import set_color_mode
+
+        set_color_mode(args.color == "always")
 
     comparison = compare_runs(
         _load(args.baseline),

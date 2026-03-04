@@ -126,15 +126,15 @@ async fn main() -> BenchResult<()> {
             fs::create_dir_all(&out_dir)?;
             let out_file = out_dir.join(format!("{target}.json"));
             fs::write(out_file.clone(), serde_json::to_vec_pretty(&output)?)?;
+            let ok_count = output.cases.iter().filter(|case| case.success).count();
+            let failed_count = output.cases.len().saturating_sub(ok_count);
+            println!(
+                "run summary: {} case(s), {} ok, {} failed",
+                output.cases.len(),
+                ok_count,
+                failed_count
+            );
             if !no_summary_table {
-                let ok_count = output.cases.iter().filter(|case| case.success).count();
-                let failed_count = output.cases.len().saturating_sub(ok_count);
-                println!(
-                    "run summary: {} case(s), {} ok, {} failed",
-                    output.cases.len(),
-                    ok_count,
-                    failed_count
-                );
                 println!("{}", render_run_summary_table(&output.cases));
             }
             println!("wrote result: {}", out_file.display());

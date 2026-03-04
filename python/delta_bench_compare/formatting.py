@@ -1,6 +1,15 @@
 from __future__ import annotations
 
 from delta_bench_compare.model import Comparison, ComparisonRow
+from delta_bench_compare.terminal import bold, dim, green, red, visible_len, yellow
+
+_COMPACT_STABLE_THRESHOLD = 5
+
+_DISPLAY_HEADERS: dict[str, str] = {
+    "baseline": "baseline (ms)",
+    "candidate": "candidate (ms)",
+    "delta_pct": "delta %",
+}
 
 
 def _fmt_ms(value: float | None) -> str:
@@ -40,6 +49,12 @@ def _headers(include_metrics: bool = False) -> list[str]:
             ]
         )
     return header
+
+
+def _display_headers(include_metrics: bool = False) -> list[str]:
+    return [
+        _DISPLAY_HEADERS.get(h, h) for h in _headers(include_metrics=include_metrics)
+    ]
 
 
 def _row_cells(row: ComparisonRow, include_metrics: bool = False) -> list[str]:
@@ -90,6 +105,35 @@ def _row_cells(row: ComparisonRow, include_metrics: bool = False) -> list[str]:
     return cells
 
 
+def _colorize_cells(cells: list[str], change: str) -> list[str]:
+    """Apply ANSI color to delta_pct and change columns based on classification."""
+    colored = list(cells)
+    if "faster" in change:
+        colored[3] = green(cells[3])
+        colored[4] = green(cells[4])
+    elif "slower" in change:
+        colored[3] = red(cells[3])
+        colored[4] = red(cells[4])
+    elif change == "no change":
+        colored[3] = dim(cells[3])
+        colored[4] = dim(cells[4])
+    elif change in {"incomparable", "expected_failure", "new", "removed"}:
+        colored[4] = yellow(cells[4])
+    return colored
+
+
+# Numeric column indices: baseline (1), candidate (2), delta_pct (3)
+_RIGHT_ALIGN_INDICES = {1, 2, 3}
+
+
+def _pad(value: str, width: int, right_align: bool) -> str:
+    vlen = visible_len(value)
+    padding = max(0, width - vlen)
+    if right_align:
+        return " " * padding + value
+    return value + " " * padding
+
+
 def _table_lines_markdown(
     rows: list[ComparisonRow], include_metrics: bool = False
 ) -> list[str]:
@@ -110,21 +154,36 @@ def render_text_table(comparison: Comparison, include_metrics: bool = False) -> 
 def _table_lines_plain(
     rows: list[ComparisonRow], include_metrics: bool = False
 ) -> list[str]:
-    header = _headers(include_metrics=include_metrics)
-    body = [_row_cells(row, include_metrics=include_metrics) for row in rows]
+    header = _display_headers(include_metrics=include_metrics)
+    raw_body = [_row_cells(row, include_metrics=include_metrics) for row in rows]
 
+    # Compute widths from raw (uncolored) values
     widths = [len(column) for column in header]
-    for cells in body:
+    for cells in raw_body:
         for idx, value in enumerate(cells):
             widths[idx] = max(widths[idx], len(value))
 
+    # Determine which columns beyond the base set are numeric (metrics)
+    right_indices = set(_RIGHT_ALIGN_INDICES)
+    if include_metrics:
+        right_indices.update(range(5, len(header)))
+
     lines = [
-        "  ".join(column.ljust(widths[idx]) for idx, column in enumerate(header)),
+        "  ".join(
+            _pad(column, widths[idx], idx in right_indices)
+            for idx, column in enumerate(header)
+        ),
         "  ".join("-" * widths[idx] for idx in range(len(header))),
     ]
-    for cells in body:
+
+    # Apply color after width computation
+    for raw_cells, row in zip(raw_body, rows):
+        colored = _colorize_cells(raw_cells, row.change)
         lines.append(
-            "  ".join(value.ljust(widths[idx]) for idx, value in enumerate(cells))
+            "  ".join(
+                _pad(colored[idx], widths[idx], idx in right_indices)
+                for idx in range(len(colored))
+            )
         )
     return lines
 
@@ -146,23 +205,49 @@ def _group_rows(comparison: Comparison) -> list[tuple[str, list[ComparisonRow]]]
     ]
 
 
+def _section_header(title: str, count: int) -> str:
+    return bold(f"--- {title} ({count}) ---")
+
+
 def render_text_report(comparison: Comparison, include_metrics: bool = False) -> str:
     s = comparison.summary
-    lines = [
-        "Summary:",
-        f"  faster: {s.faster}",
-        f"  slower: {s.slower}",
-        f"  no_change: {s.no_change}",
-        f"  incomparable: {s.incomparable}",
-        f"  new: {s.new}",
-        f"  removed: {s.removed}",
-    ]
+
+    parts: list[str] = []
+    if s.faster:
+        parts.append(green(f"{s.faster} faster"))
+    if s.slower:
+        parts.append(red(f"{s.slower} slower"))
+    if s.no_change:
+        parts.append(dim(f"{s.no_change} no change"))
+    if s.incomparable:
+        parts.append(yellow(f"{s.incomparable} incomparable"))
+    if s.new:
+        parts.append(yellow(f"{s.new} new"))
+    if s.removed:
+        parts.append(yellow(f"{s.removed} removed"))
+
+    lines = [bold("Summary:"), "  " + "  |  ".join(parts)]
 
     for title, rows in _group_rows(comparison):
         if not rows:
             continue
-        lines.extend(["", f"{title}:"])
-        lines.extend(_table_lines_plain(rows, include_metrics=include_metrics))
+        lines.append("")
+        if (
+            title == "Stable (no change)"
+            and len(rows) > _COMPACT_STABLE_THRESHOLD
+        ):
+            lines.append(
+                dim(
+                    f"--- {title} ({len(rows)} cases, all within noise threshold) ---"
+                )
+            )
+            names = ", ".join(r.case for r in rows)
+            lines.append(dim(f"  {names}"))
+        else:
+            lines.append(_section_header(title, len(rows)))
+            lines.extend(
+                _table_lines_plain(rows, include_metrics=include_metrics)
+            )
 
     return "\n".join(lines)
 

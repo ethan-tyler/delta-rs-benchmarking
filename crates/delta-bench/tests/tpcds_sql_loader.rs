@@ -67,7 +67,13 @@ fn q07_sql_has_deterministic_tie_break_ordering() {
         .iter()
         .find(|query| query.id == "q07")
         .expect("q07 should be enabled");
-    let normalized = q07.sql.replace('\n', " ").to_ascii_lowercase();
+    let normalized = q07
+        .sql
+        .to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace(" ,", ",");
     assert!(
         normalized.contains("order by sale_count desc, ss_item_sk asc"),
         "q07 must include deterministic secondary sort key; sql={}",

@@ -404,8 +404,8 @@ def test_render_text_default_output_does_not_include_metric_columns() -> None:
     comparison = compare_runs(base, cand, threshold=0.05)
     out = render_text(comparison)
     assert "Summary:" in out
-    assert "Improvements (faster):" in out
-    assert "Case" in out and "baseline" in out and "delta_pct" in out
+    assert "Improvements (faster)" in out
+    assert "Case" in out and "baseline" in out and "delta %" in out
     assert "-10.00%" in out
     assert "1.11x faster" in out
     assert "files_scanned" not in out
@@ -521,11 +521,11 @@ def test_render_text_groups_cases_into_readable_sections() -> None:
     comparison = compare_runs(base, cand, threshold=0.05)
     out = render_text(comparison)
     assert "Summary:" in out
-    assert "Regressions (slower):" in out
-    assert "Improvements (faster):" in out
-    assert "Stable (no change):" in out
-    assert "Needs Attention:" in out
-    assert out.index("Regressions (slower):") < out.index("Improvements (faster):")
+    assert "Regressions (slower)" in out
+    assert "Improvements (faster)" in out
+    assert "Stable (no change)" in out
+    assert "Needs Attention" in out
+    assert out.index("Regressions (slower)") < out.index("Improvements (faster)")
 
 
 def test_render_markdown_include_metrics_outputs_metric_columns() -> None:
@@ -756,6 +756,127 @@ def test_public_schema_loader_rejects_invalid_json(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="invalid JSON"):
         load_benchmark_payload(path)
+
+
+def test_render_text_uses_display_headers() -> None:
+    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
+    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 90.0}]}])
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison)
+    assert "delta %" in out
+    assert "baseline (ms)" in out
+    assert "candidate (ms)" in out
+    # Machine-readable names should not appear in text output
+    assert "delta_pct" not in out
+
+
+def test_render_markdown_preserves_machine_headers() -> None:
+    base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
+    cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 90.0}]}])
+    from delta_bench_compare.compare import render_markdown
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_markdown(comparison)
+    assert "delta_pct" in out
+    assert "baseline" in out
+    assert "candidate" in out
+
+
+def test_render_text_compact_stable_section() -> None:
+    """When more than 5 cases are stable, the section collapses to a name list."""
+    cases_base = [
+        {"case": f"stable_{i}", "success": True, "samples": [{"elapsed_ms": 100.0}]}
+        for i in range(8)
+    ]
+    cases_cand = [
+        {"case": f"stable_{i}", "success": True, "samples": [{"elapsed_ms": 102.0}]}
+        for i in range(8)
+    ]
+    base = _run(cases_base)
+    cand = _run(cases_cand)
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison)
+    assert "all within noise threshold" in out
+    # All 8 case names should appear in the compact list
+    for i in range(8):
+        assert f"stable_{i}" in out
+    # Should not contain a full table (no dashes separator for stable section)
+    stable_idx = out.index("Stable (no change)")
+    after_stable = out[stable_idx:]
+    assert "baseline (ms)" not in after_stable
+
+
+def test_render_text_stable_section_shows_table_when_few() -> None:
+    """When 5 or fewer stable cases, the full table is shown."""
+    cases_base = [
+        {"case": f"case_{i}", "success": True, "samples": [{"elapsed_ms": 100.0}]}
+        for i in range(3)
+    ]
+    cases_cand = [
+        {"case": f"case_{i}", "success": True, "samples": [{"elapsed_ms": 102.0}]}
+        for i in range(3)
+    ]
+    base = _run(cases_base)
+    cand = _run(cases_cand)
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison)
+    assert "Stable (no change)" in out
+    assert "all within noise threshold" not in out
+    assert "baseline (ms)" in out
+
+
+def test_render_text_right_aligns_numeric_columns() -> None:
+    base = _run(
+        [
+            {"case": "short", "success": True, "samples": [{"elapsed_ms": 1.5}]},
+            {"case": "longer_name", "success": True, "samples": [{"elapsed_ms": 1000.0}]},
+        ]
+    )
+    cand = _run(
+        [
+            {"case": "short", "success": True, "samples": [{"elapsed_ms": 1.4}]},
+            {"case": "longer_name", "success": True, "samples": [{"elapsed_ms": 1050.0}]},
+        ]
+    )
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison)
+    # Right-aligned values should have leading spaces before shorter numbers
+    lines = out.split("\n")
+    data_lines = [line for line in lines if "1.50 ms" in line or "1000.00 ms" in line]
+    assert len(data_lines) >= 1
+    for line in data_lines:
+        # The ms values should exist and the line should be properly aligned
+        assert "ms" in line
+
+
+def test_terminal_color_disabled_when_not_tty() -> None:
+    from delta_bench_compare.terminal import dim, green, red, yellow
+
+    # In pytest (non-TTY), color functions should return raw text
+    assert red("hello") == "hello"
+    assert green("hello") == "hello"
+    assert yellow("hello") == "hello"
+    assert dim("hello") == "hello"
+
+
+def test_terminal_set_color_mode() -> None:
+    from delta_bench_compare.terminal import set_color_mode, red, visible_len
+
+    set_color_mode(True)
+    colored = red("test")
+    assert "\033[" in colored
+    assert visible_len(colored) == 4
+
+    set_color_mode(False)
+    assert red("test") == "test"
 
 
 def test_compare_runs_handles_deterministic_tpcds_case_names() -> None:

@@ -527,6 +527,13 @@ run_security_check() {
   fi
 }
 
+phase() {
+  local step="$1"
+  local total="$2"
+  local desc="$3"
+  printf '\n=== [%d/%d] %s ===\n\n' "${step}" "${total}" "${desc}"
+}
+
 run_benchmark_suite_for_ref() {
   local ref="$1"
   local mode="$2"
@@ -534,10 +541,17 @@ run_benchmark_suite_for_ref() {
   local warmup="$4"
   local iters="$5"
   local no_summary_table="${6:-0}"
+  local quiet="${7:-0}"
 
-  prepare_delta_rs_ref "${ref}" "${mode}"
-  run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-  run_security_check
+  if (( quiet != 0 )); then
+    prepare_delta_rs_ref "${ref}" "${mode}" >/dev/null
+    run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh >/dev/null
+    run_security_check >/dev/null
+  else
+    prepare_delta_rs_ref "${ref}" "${mode}"
+    run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
+    run_security_check
+  fi
 
   local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup "${warmup}" --iters "${iters}")
   run_cmd+=("${storage_args[@]}")
@@ -589,10 +603,17 @@ aggregate_run_labels() {
   run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.aggregate --output "${out_json}" --label "${out_label}" "${input_paths[@]}"
 }
 
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
-
 base_label="base-$(sanitize_label "${base_ref}")"
 cand_label="cand-$(sanitize_label "${candidate_ref}")"
+
+# Calculate total phases for progress display
+total_phases=$(( 1 + (BENCH_PREWARM_ITERS > 0 ? 1 : 0) + BENCH_COMPARE_RUNS + 1 + 1 ))
+current_phase=1
+
+phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"
+current_phase=$((current_phase + 1))
+
+run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 
 ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"
 ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"
@@ -603,34 +624,45 @@ run_security_check
 run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
 if (( BENCH_PREWARM_ITERS > 0 )); then
-  run_benchmark_suite_for_ref "${base_ref}" "${base_ref_mode}" "${base_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
-  run_benchmark_suite_for_ref "${candidate_ref}" "${candidate_ref_mode}" "${cand_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
+  phase "${current_phase}" "${total_phases}" "Prewarm runs (${BENCH_PREWARM_ITERS} iterations, results discarded)"
+  current_phase=$((current_phase + 1))
+  run_benchmark_suite_for_ref "${base_ref}" "${base_ref_mode}" "${base_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1 1
+  run_benchmark_suite_for_ref "${candidate_ref}" "${candidate_ref_mode}" "${cand_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1 1
 fi
 
 base_run_labels=()
 cand_run_labels=()
 run_idx=1
 while (( run_idx <= BENCH_COMPARE_RUNS )); do
+  phase "${current_phase}" "${total_phases}" "Measured run ${run_idx}/${BENCH_COMPARE_RUNS}"
+  current_phase=$((current_phase + 1))
   order="$(run_order_for_iteration "${run_idx}")"
   for side in ${order}; do
     if [[ "${side}" == "base" ]]; then
       run_label="${base_label}-r${run_idx}"
-      run_benchmark_suite_for_ref "${base_ref}" "${base_ref_mode}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 0
+      echo "  -> base (${base_ref:0:10}...)"
+      run_benchmark_suite_for_ref "${base_ref}" "${base_ref_mode}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1 1
       base_run_labels+=("${run_label}")
     else
       run_label="${cand_label}-r${run_idx}"
-      run_benchmark_suite_for_ref "${candidate_ref}" "${candidate_ref_mode}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 0
+      echo "  -> candidate (${candidate_ref:0:10}...)"
+      run_benchmark_suite_for_ref "${candidate_ref}" "${candidate_ref_mode}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1 1
       cand_run_labels+=("${run_label}")
     fi
   done
   run_idx=$((run_idx + 1))
 done
 
+phase "${current_phase}" "${total_phases}" "Aggregating results"
+current_phase=$((current_phase + 1))
+
 aggregate_run_labels "${base_label}" "${base_run_labels[@]}"
 aggregate_run_labels "${cand_label}" "${cand_run_labels[@]}"
 
 base_json="${RUNNER_RESULTS_DIR}/${base_label}/${suite}.json"
 cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"
+
+phase "${current_phase}" "${total_phases}" "Comparison report"
 
 compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
 

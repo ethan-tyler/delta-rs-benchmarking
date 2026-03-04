@@ -36,6 +36,27 @@ pub fn validate_case_classification(value: &str) -> Result<(), String> {
     parse_case_classification(value).map(|_| ())
 }
 
+fn is_terminal() -> bool {
+    std::io::IsTerminal::is_terminal(&std::io::stdout())
+}
+
+fn colorize(text: &str, code: &str) -> String {
+    if is_terminal() {
+        format!("\x1b[{code}m{text}\x1b[0m")
+    } else {
+        text.to_string()
+    }
+}
+
+fn colorize_status(status: &str) -> String {
+    match status {
+        "ok" => colorize(status, "32"),
+        "failed" => colorize(status, "31"),
+        "expected_failure" => colorize(status, "33"),
+        _ => status.to_string(),
+    }
+}
+
 pub fn render_run_summary_table(cases: &[CaseResult]) -> String {
     let headers = [
         "case".to_string(),
@@ -46,6 +67,9 @@ pub fn render_run_summary_table(cases: &[CaseResult]) -> String {
         "stddev_ms".to_string(),
         "cv_pct".to_string(),
     ];
+    // right-align: false for case & status, true for all numeric columns
+    let right_align = [false, false, true, true, true, true, true];
+
     let mut rows = Vec::with_capacity(cases.len());
     for case in cases {
         let status = match (case.success, case.classification.as_str()) {
@@ -65,6 +89,7 @@ pub fn render_run_summary_table(cases: &[CaseResult]) -> String {
         ]);
     }
 
+    // Compute widths from raw (uncolored) values
     let mut widths: Vec<usize> = headers.iter().map(String::len).collect();
     for row in &rows {
         for (idx, value) in row.iter().enumerate() {
@@ -72,16 +97,31 @@ pub fn render_run_summary_table(cases: &[CaseResult]) -> String {
         }
     }
 
+    // Apply color to status column after width calculation
+    let colored_rows: Vec<Vec<String>> = rows
+        .iter()
+        .map(|row| {
+            let mut colored = row.clone();
+            colored[1] = colorize_status(&row[1]);
+            colored
+        })
+        .collect();
+
     let mut output = String::new();
     let border = render_table_border(&widths);
     output.push_str(&border);
     output.push('\n');
-    output.push_str(&render_table_row(&headers, &widths));
+    output.push_str(&render_table_row(&headers, &widths, &right_align));
     output.push('\n');
     output.push_str(&border);
     output.push('\n');
-    for row in &rows {
-        output.push_str(&render_table_row(row, &widths));
+    for (colored_row, raw_row) in colored_rows.iter().zip(rows.iter()) {
+        output.push_str(&render_table_row_colored(
+            colored_row,
+            raw_row,
+            &widths,
+            &right_align,
+        ));
         output.push('\n');
     }
     output.push_str(&border);
@@ -104,13 +144,45 @@ fn render_table_border(widths: &[usize]) -> String {
     border
 }
 
-fn render_table_row(values: &[String], widths: &[usize]) -> String {
+fn render_table_row(values: &[String], widths: &[usize], right_align: &[bool]) -> String {
     let mut row = String::new();
     row.push('|');
     for (idx, value) in values.iter().enumerate() {
         row.push(' ');
-        row.push_str(value);
-        row.push_str(&" ".repeat(widths[idx] - value.len() + 1));
+        if right_align.get(idx).copied().unwrap_or(false) {
+            row.push_str(&" ".repeat(widths[idx] - value.len()));
+            row.push_str(value);
+        } else {
+            row.push_str(value);
+            row.push_str(&" ".repeat(widths[idx] - value.len()));
+        }
+        row.push(' ');
+        row.push('|');
+    }
+    row
+}
+
+/// Render a table row where some cells may contain ANSI color codes.
+/// Uses `raw_values` for width calculation (visible length) and `colored_values` for display.
+fn render_table_row_colored(
+    colored_values: &[String],
+    raw_values: &[String],
+    widths: &[usize],
+    right_align: &[bool],
+) -> String {
+    let mut row = String::new();
+    row.push('|');
+    for (idx, colored) in colored_values.iter().enumerate() {
+        let raw_len = raw_values[idx].len();
+        row.push(' ');
+        if right_align.get(idx).copied().unwrap_or(false) {
+            row.push_str(&" ".repeat(widths[idx] - raw_len));
+            row.push_str(colored);
+        } else {
+            row.push_str(colored);
+            row.push_str(&" ".repeat(widths[idx] - raw_len));
+        }
+        row.push(' ');
         row.push('|');
     }
     row

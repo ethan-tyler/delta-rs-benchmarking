@@ -1,3 +1,4 @@
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,105 @@ pub fn host_name() -> String {
         }
     }
     "unknown-host".to_string()
+}
+
+pub const PYTHON_INTEROP_REQUIRED_MODULES: [&str; 3] = ["pandas", "polars", "pyarrow"];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PythonModuleProbeResult {
+    pub missing_modules: Vec<String>,
+    pub probe_error: Option<String>,
+}
+
+pub fn probe_python_modules(python_executable: &str, modules: &[&str]) -> PythonModuleProbeResult {
+    if modules.is_empty() {
+        return PythonModuleProbeResult {
+            missing_modules: Vec::new(),
+            probe_error: None,
+        };
+    }
+
+    const PROBE_SCRIPT: &str = r#"
+import importlib.util
+import json
+import sys
+
+print(json.dumps({name: bool(importlib.util.find_spec(name)) for name in sys.argv[1:]}))
+"#;
+
+    let output = match Command::new(python_executable)
+        .arg("-c")
+        .arg(PROBE_SCRIPT)
+        .args(modules)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return PythonModuleProbeResult {
+                missing_modules: Vec::new(),
+                probe_error: Some(format!("failed to execute '{python_executable}': {error}")),
+            };
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            format!("'{python_executable}' exited with status {}", output.status)
+        } else {
+            format!(
+                "'{python_executable}' exited with status {}: {stderr}",
+                output.status
+            )
+        };
+        return PythonModuleProbeResult {
+            missing_modules: Vec::new(),
+            probe_error: Some(message),
+        };
+    }
+
+    let parsed = match serde_json::from_slice::<Value>(&output.stdout) {
+        Ok(value) => value,
+        Err(error) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let snippet = if stdout.is_empty() {
+                "empty stdout".to_string()
+            } else {
+                format!("stdout='{stdout}'")
+            };
+            return PythonModuleProbeResult {
+                missing_modules: Vec::new(),
+                probe_error: Some(format!(
+                    "failed to parse probe output from '{python_executable}': {error} ({snippet})"
+                )),
+            };
+        }
+    };
+
+    let Some(availability) = parsed.as_object() else {
+        return PythonModuleProbeResult {
+            missing_modules: Vec::new(),
+            probe_error: Some(format!(
+                "invalid probe output from '{python_executable}': expected JSON object"
+            )),
+        };
+    };
+
+    let missing_modules = modules
+        .iter()
+        .filter(|name| {
+            availability
+                .get(**name)
+                .and_then(|present| present.as_bool())
+                != Some(true)
+        })
+        .map(|name| (*name).to_string())
+        .collect::<Vec<_>>();
+
+    PythonModuleProbeResult {
+        missing_modules,
+        probe_error: None,
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

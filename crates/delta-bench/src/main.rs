@@ -13,7 +13,8 @@ use delta_bench::suites::{
     apply_dataset_assertion_policy, list_targets, plan_run_cases, run_planned_cases,
 };
 use delta_bench::system::{
-    benchmark_fidelity_info, delta_rs_checkout_info, host_name, FidelityEnvOverrides,
+    benchmark_fidelity_info, delta_rs_checkout_info, host_name, probe_python_modules,
+    FidelityEnvOverrides, PYTHON_INTEROP_REQUIRED_MODULES,
 };
 
 #[tokio::main]
@@ -231,6 +232,43 @@ async fn main() -> BenchResult<()> {
                 _ => "unknown".to_string(),
             };
             println!("hardening_state={hardening_state}");
+
+            let interop_python = std::env::var("DELTA_BENCH_INTEROP_PYTHON")
+                .ok()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "python3".to_string());
+            println!("interop_python_executable={interop_python}");
+
+            let interop_probe =
+                probe_python_modules(&interop_python, &PYTHON_INTEROP_REQUIRED_MODULES);
+            if let Some(error) = interop_probe.probe_error.as_deref() {
+                println!("interop_python_dependency_probe=error");
+                println!("interop_python_dependency_probe_error={error}");
+                println!(
+                    "doctor_warning=python interop dependency probe failed for {interop_python}"
+                );
+                println!(
+                    "doctor_hint=install/check modules: {}",
+                    PYTHON_INTEROP_REQUIRED_MODULES.join(",")
+                );
+            } else if interop_probe.missing_modules.is_empty() {
+                println!("interop_python_dependency_probe=ok");
+                println!("interop_python_missing_dependencies=none");
+            } else {
+                println!("interop_python_dependency_probe=ok");
+                println!(
+                    "interop_python_missing_dependencies={}",
+                    interop_probe.missing_modules.join(",")
+                );
+                println!(
+                    "doctor_warning=python interop cases may report expected_failure until dependencies are installed"
+                );
+                println!(
+                    "doctor_hint=install with: {interop_python} -m pip install {}",
+                    PYTHON_INTEROP_REQUIRED_MODULES.join(" ")
+                );
+            }
         }
     }
 

@@ -48,6 +48,8 @@ struct InteropCaseOutput {
     result_hash: Option<String>,
     #[serde(default)]
     schema_hash: Option<String>,
+    #[serde(default)]
+    elapsed_ms: Option<f64>,
     classification: String,
 }
 
@@ -155,6 +157,9 @@ async fn run_case(
         match run_python_case_with_runtime(case, fixtures_dir, scale, runtime, None).await {
             Ok(output) => {
                 classification = output.classification.clone();
+                let elapsed_ms = output
+                    .elapsed_ms
+                    .unwrap_or_else(|| started.elapsed().as_secs_f64() * 1000.0);
                 let metrics = SampleMetrics::base(
                     output.rows_processed,
                     output.bytes_processed,
@@ -173,7 +178,7 @@ async fn run_case(
                     schema_hash: output.schema_hash,
                 });
                 samples.push(IterationSample {
-                    elapsed_ms: started.elapsed().as_secs_f64() * 1000.0,
+                    elapsed_ms,
                     rows: metrics.rows_processed,
                     bytes: metrics.bytes_processed,
                     metrics: Some(metrics),
@@ -306,9 +311,51 @@ async fn run_python_case_once(
 #[cfg(test)]
 mod tests {
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
-    use super::{run_python_case_with_runtime, InteropRuntimeConfig};
+    use super::{run_case, run_python_case_with_runtime, InteropRuntimeConfig};
+
+    #[cfg(unix)]
+    fn make_executable(path: &std::path::Path) {
+        let mut perms = fs::metadata(path).expect("metadata").permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms).expect("chmod");
+    }
+
+    #[tokio::test]
+    #[cfg(unix)]
+    async fn case_elapsed_uses_python_reported_timing_not_process_startup() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let fake_python = temp.path().join("fake-python");
+        fs::write(
+            &fake_python,
+            r#"#!/usr/bin/env sh
+sleep 0.25
+printf '%s' '{"rows_processed":1,"bytes_processed":1,"operations":1,"classification":"supported","elapsed_ms":1.5}'
+"#,
+        )
+        .expect("write fake python executable");
+        make_executable(&fake_python);
+
+        let runtime = InteropRuntimeConfig {
+            timeout: Duration::from_secs(1),
+            retries: 0,
+            python_executable: fake_python.to_string_lossy().into_owned(),
+        };
+
+        let case = run_case("pandas_roundtrip_smoke", temp.path(), "sf1", 0, 1, &runtime)
+            .await
+            .expect("run case");
+
+        assert_eq!(case.samples.len(), 1);
+        assert!(
+            (case.samples[0].elapsed_ms - 1.5).abs() < 0.001,
+            "process startup leaked into measured time: {} ms",
+            case.samples[0].elapsed_ms
+        );
+    }
 
     #[tokio::test]
     async fn python_runtime_enforces_timeout() {

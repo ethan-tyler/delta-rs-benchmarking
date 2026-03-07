@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,7 +35,9 @@ def _hash_payload(value: Any) -> str:
     return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
 
 
-def _expected_failure(rows: list[dict[str, Any]], message: str) -> dict[str, Any]:
+def _expected_failure(
+    rows: list[dict[str, Any]], message: str, elapsed_ms: float | None = None
+) -> dict[str, Any]:
     return {
         "rows_processed": len(rows),
         "bytes_processed": _approx_bytes(rows),
@@ -48,16 +51,17 @@ def _expected_failure(rows: list[dict[str, Any]], message: str) -> dict[str, Any
         "files_skipped": None,
         "spill_bytes": None,
         "result_hash": _hash_payload({"message": message, "rows": len(rows)}),
+        "elapsed_ms": elapsed_ms,
         "classification": "expected_failure",
     }
-
 
 def _pandas_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
     try:
         import pandas as pd
     except ImportError as exc:
-        return _expected_failure(rows, f"missing dependency: {exc}")
+        return _expected_failure(rows, f"missing dependency: {exc}", elapsed_ms=0.0)
 
+    started = time.perf_counter()
     df = pd.DataFrame(rows)
     grouped = (
         df[df["flag"]]
@@ -65,6 +69,7 @@ def _pandas_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         .sum()
         .sort_values("region")
     )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
     payload = {
         "rows_processed": int(df.shape[0]),
         "bytes_processed": _approx_bytes(rows),
@@ -78,6 +83,7 @@ def _pandas_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "files_skipped": None,
         "spill_bytes": 0,
         "result_hash": _hash_payload(grouped.to_dict(orient="records")),
+        "elapsed_ms": elapsed_ms,
         "classification": "supported",
     }
     return payload
@@ -87,8 +93,9 @@ def _polars_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
     try:
         import polars as pl
     except ImportError as exc:
-        return _expected_failure(rows, f"missing dependency: {exc}")
+        return _expected_failure(rows, f"missing dependency: {exc}", elapsed_ms=0.0)
 
+    started = time.perf_counter()
     frame = pl.DataFrame(rows)
     grouped = (
         frame.filter(pl.col("flag") == True)
@@ -96,6 +103,7 @@ def _polars_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         .agg(pl.col("value_i64").sum().alias("value_i64_sum"))
         .sort("region")
     )
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
     return {
         "rows_processed": int(frame.height),
         "bytes_processed": _approx_bytes(rows),
@@ -109,6 +117,7 @@ def _polars_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "files_skipped": None,
         "spill_bytes": 0,
         "result_hash": _hash_payload(grouped.to_dicts()),
+        "elapsed_ms": elapsed_ms,
         "classification": "supported",
     }
 
@@ -118,8 +127,9 @@ def _pyarrow_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         import pyarrow as pa
         import pyarrow.compute as pc
     except ImportError as exc:
-        return _expected_failure(rows, f"missing dependency: {exc}")
+        return _expected_failure(rows, f"missing dependency: {exc}", elapsed_ms=0.0)
 
+    started = time.perf_counter()
     table = pa.table(
         {
             "id": [row["id"] for row in rows],
@@ -133,6 +143,7 @@ def _pyarrow_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
     )
     filtered = table.filter(mask)
     result_value = int(pc.sum(filtered["value_i64"]).as_py() or 0)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
 
     return {
         "rows_processed": int(table.num_rows),
@@ -147,6 +158,7 @@ def _pyarrow_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "files_skipped": None,
         "spill_bytes": 0,
         "result_hash": _hash_payload({"sum": result_value, "rows": filtered.num_rows}),
+        "elapsed_ms": elapsed_ms,
         "classification": "supported",
     }
 

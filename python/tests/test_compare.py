@@ -138,6 +138,102 @@ def test_compare_rows_use_metrics_from_median_sample() -> None:
     assert row.candidate_metrics.files_scanned == 11
 
 
+def test_compare_rows_include_contention_metrics_from_representative_sample() -> None:
+    base = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 4,
+                                "ops_failed": 2,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 2,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    },
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 3,
+                                "ops_failed": 3,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 3,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    },
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 95.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 5,
+                                "ops_failed": 1,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 1,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    row = comparison.rows[0]
+
+    assert row.baseline_metrics is not None
+    assert row.candidate_metrics is not None
+    assert row.baseline_metrics.contention is not None
+    assert row.candidate_metrics.contention is not None
+    assert row.baseline_metrics.contention.conflict_delete_read == 2
+    assert row.candidate_metrics.contention.ops_succeeded == 5
+
+
 def test_compare_rows_even_count_median_uses_same_sample_for_time_and_metrics() -> None:
     base = _run(
         [
@@ -295,6 +391,77 @@ def test_aggregate_payloads_merges_samples_and_recomputes_elapsed_stats() -> Non
     assert case["elapsed_stats"]["max_ms"] == pytest.approx(110.0)
     assert case["elapsed_stats"]["median_ms"] == pytest.approx(97.5)
     assert case["elapsed_stats"]["mean_ms"] == pytest.approx(98.75)
+
+
+def test_aggregate_payloads_preserves_nested_contention_metrics() -> None:
+    run_a = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 4,
+                                "ops_failed": 2,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 2,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    run_b = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 3,
+                                "ops_failed": 3,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 3,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+
+    aggregated = aggregate_payloads([run_a, run_b], label="merged-run")
+    samples = aggregated["cases"][0]["samples"]
+    assert len(samples) == 2
+    assert samples[0]["metrics"]["contention"]["worker_count"] == 2
+    assert samples[1]["metrics"]["contention"]["conflict_delete_read"] == 3
 
 
 def test_aggregate_payloads_rejects_case_set_mismatch() -> None:
@@ -470,6 +637,161 @@ def test_render_text_include_metrics_outputs_metric_columns() -> None:
     assert "candidate_rewrite_time_ms" in out
 
 
+def test_render_text_include_metrics_outputs_contention_columns_when_present() -> None:
+    base = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 4,
+                                "ops_failed": 2,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 2,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 5,
+                                "ops_failed": 1,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 1,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_text(comparison, include_metrics=True)
+    assert "baseline_worker_count" in out
+    assert "candidate_ops_succeeded" in out
+    assert "baseline_conflict_delete_read" in out
+    assert "candidate_other_errors" in out
+
+
+def test_contention_metric_headers_align_with_row_values() -> None:
+    base = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 4,
+                                "ops_failed": 2,
+                                "conflict_append": 7,
+                                "conflict_delete_read": 8,
+                                "conflict_delete_delete": 9,
+                                "conflict_metadata_changed": 10,
+                                "conflict_protocol_changed": 11,
+                                "conflict_transaction": 12,
+                                "version_already_exists": 13,
+                                "max_commit_attempts_exceeded": 14,
+                                "other_errors": 15,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 20,
+                                "race_count": 30,
+                                "ops_attempted": 60,
+                                "ops_succeeded": 40,
+                                "ops_failed": 20,
+                                "conflict_append": 70,
+                                "conflict_delete_read": 80,
+                                "conflict_delete_delete": 90,
+                                "conflict_metadata_changed": 100,
+                                "conflict_protocol_changed": 110,
+                                "conflict_transaction": 120,
+                                "version_already_exists": 130,
+                                "max_commit_attempts_exceeded": 140,
+                                "other_errors": 150,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import compare_runs
+    from delta_bench_compare.formatting import _headers, _row_cells
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    row = comparison.rows[0]
+    cells = _row_cells(row, comparison.rows, include_metrics=True)
+    headers = _headers(comparison.rows, include_metrics=True)
+    mapped = dict(zip(headers, cells))
+
+    assert mapped["baseline_worker_count"] == "2"
+    assert mapped["candidate_worker_count"] == "20"
+    assert mapped["baseline_race_count"] == "3"
+    assert mapped["candidate_race_count"] == "30"
+    assert mapped["baseline_conflict_delete_read"] == "8"
+    assert mapped["candidate_conflict_delete_read"] == "80"
+    assert mapped["baseline_other_errors"] == "15"
+    assert mapped["candidate_other_errors"] == "150"
+
+
 def test_render_text_groups_cases_into_readable_sections() -> None:
     base = _run(
         [
@@ -575,6 +897,162 @@ def test_render_markdown_include_metrics_outputs_metric_columns() -> None:
     out = render_markdown(comparison, include_metrics=True)
     assert "baseline_files_scanned" in out
     assert "candidate_rewrite_time_ms" in out
+
+
+def test_render_markdown_include_metrics_outputs_contention_columns_when_present() -> (
+    None
+):
+    base = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 4,
+                                "ops_failed": 2,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 2,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 5,
+                                "ops_failed": 1,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 1,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import render_markdown
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_markdown(comparison, include_metrics=True)
+    assert "baseline_worker_count" in out
+    assert "candidate_ops_succeeded" in out
+
+
+def test_contention_metric_headers_align_with_row_values() -> None:
+    base = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 100.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 4,
+                                "ops_failed": 2,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 2,
+                                "conflict_delete_delete": 7,
+                                "conflict_metadata_changed": 8,
+                                "conflict_protocol_changed": 9,
+                                "conflict_transaction": 10,
+                                "version_already_exists": 11,
+                                "max_commit_attempts_exceeded": 12,
+                                "other_errors": 13,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    cand = _run(
+        [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "samples": [
+                    {
+                        "elapsed_ms": 90.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 20,
+                                "race_count": 30,
+                                "ops_attempted": 60,
+                                "ops_succeeded": 40,
+                                "ops_failed": 20,
+                                "conflict_append": 1,
+                                "conflict_delete_read": 21,
+                                "conflict_delete_delete": 71,
+                                "conflict_metadata_changed": 81,
+                                "conflict_protocol_changed": 91,
+                                "conflict_transaction": 101,
+                                "version_already_exists": 111,
+                                "max_commit_attempts_exceeded": 121,
+                                "other_errors": 131,
+                            }
+                        },
+                    }
+                ],
+            }
+        ]
+    )
+    from delta_bench_compare.compare import render_markdown
+
+    comparison = compare_runs(base, cand, threshold=0.05)
+    out = render_markdown(comparison, include_metrics=True)
+    lines = out.splitlines()
+    header_idx = next(
+        idx for idx, line in enumerate(lines) if line.startswith("Case | baseline")
+    )
+    headers = lines[header_idx].split(" | ")
+    values = lines[header_idx + 2].split(" | ")
+    assert len(headers) == len(values)
+    row = dict(zip(headers, values))
+
+    assert row["baseline_worker_count"] == "2"
+    assert row["candidate_worker_count"] == "20"
+    assert row["baseline_conflict_delete_delete"] == "7"
+    assert row["candidate_conflict_delete_delete"] == "71"
+    assert row["candidate_other_errors"] == "131"
 
 
 def test_render_markdown_groups_cases_into_readable_sections() -> None:
@@ -758,6 +1236,55 @@ def test_public_schema_loader_rejects_invalid_json(tmp_path: Path) -> None:
         load_benchmark_payload(path)
 
 
+def test_public_schema_loader_preserves_nested_contention_metrics(
+    tmp_path: Path,
+) -> None:
+    from delta_bench_compare.schema import load_benchmark_payload
+
+    payload = {
+        "schema_version": 2,
+        "context": {"schema_version": 2, "label": "v2"},
+        "cases": [
+            {
+                "case": "update_vs_compaction",
+                "success": True,
+                "classification": "supported",
+                "samples": [
+                    {
+                        "elapsed_ms": 91.0,
+                        "metrics": {
+                            "contention": {
+                                "worker_count": 2,
+                                "race_count": 3,
+                                "ops_attempted": 6,
+                                "ops_succeeded": 4,
+                                "ops_failed": 2,
+                                "conflict_append": 0,
+                                "conflict_delete_read": 2,
+                                "conflict_delete_delete": 0,
+                                "conflict_metadata_changed": 0,
+                                "conflict_protocol_changed": 0,
+                                "conflict_transaction": 0,
+                                "version_already_exists": 0,
+                                "max_commit_attempts_exceeded": 0,
+                                "other_errors": 0,
+                            }
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    path = tmp_path / "contention.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_benchmark_payload(path)
+    assert (
+        loaded["cases"][0]["samples"][0]["metrics"]["contention"]
+        == payload["cases"][0]["samples"][0]["metrics"]["contention"]
+    )
+
+
 def test_render_text_uses_display_headers() -> None:
     base = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 100.0}]}])
     cand = _run([{"case": "a", "success": True, "samples": [{"elapsed_ms": 90.0}]}])
@@ -835,13 +1362,21 @@ def test_render_text_right_aligns_numeric_columns() -> None:
     base = _run(
         [
             {"case": "short", "success": True, "samples": [{"elapsed_ms": 1.5}]},
-            {"case": "longer_name", "success": True, "samples": [{"elapsed_ms": 1000.0}]},
+            {
+                "case": "longer_name",
+                "success": True,
+                "samples": [{"elapsed_ms": 1000.0}],
+            },
         ]
     )
     cand = _run(
         [
             {"case": "short", "success": True, "samples": [{"elapsed_ms": 1.4}]},
-            {"case": "longer_name", "success": True, "samples": [{"elapsed_ms": 1050.0}]},
+            {
+                "case": "longer_name",
+                "success": True,
+                "samples": [{"elapsed_ms": 1050.0}],
+            },
         ]
     )
     from delta_bench_compare.compare import render_text

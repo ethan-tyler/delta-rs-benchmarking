@@ -10,6 +10,25 @@ class SampleMetricSnapshot:
     bytes_scanned: int | None
     scan_time_ms: int | None
     rewrite_time_ms: int | None
+    contention: "ContentionMetricSnapshot | None" = None
+
+
+@dataclass(frozen=True)
+class ContentionMetricSnapshot:
+    worker_count: int | None
+    race_count: int | None
+    ops_attempted: int | None
+    ops_succeeded: int | None
+    ops_failed: int | None
+    conflict_append: int | None
+    conflict_delete_read: int | None
+    conflict_delete_delete: int | None
+    conflict_metadata_changed: int | None
+    conflict_protocol_changed: int | None
+    conflict_transaction: int | None
+    version_already_exists: int | None
+    max_commit_attempts_exceeded: int | None
+    other_errors: int | None
 
 
 @dataclass(frozen=True)

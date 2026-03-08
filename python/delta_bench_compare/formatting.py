@@ -11,6 +11,50 @@ _DISPLAY_HEADERS: dict[str, str] = {
     "delta_pct": "delta %",
 }
 
+_SCAN_METRIC_HEADERS = [
+    "baseline_files_scanned",
+    "candidate_files_scanned",
+    "baseline_files_pruned",
+    "candidate_files_pruned",
+    "baseline_bytes_scanned",
+    "candidate_bytes_scanned",
+    "baseline_scan_time_ms",
+    "candidate_scan_time_ms",
+    "baseline_rewrite_time_ms",
+    "candidate_rewrite_time_ms",
+]
+
+_CONTENTION_METRIC_HEADERS = [
+    "baseline_worker_count",
+    "candidate_worker_count",
+    "baseline_race_count",
+    "candidate_race_count",
+    "baseline_ops_attempted",
+    "candidate_ops_attempted",
+    "baseline_ops_succeeded",
+    "candidate_ops_succeeded",
+    "baseline_ops_failed",
+    "candidate_ops_failed",
+    "baseline_conflict_append",
+    "candidate_conflict_append",
+    "baseline_conflict_delete_read",
+    "candidate_conflict_delete_read",
+    "baseline_conflict_delete_delete",
+    "candidate_conflict_delete_delete",
+    "baseline_conflict_metadata_changed",
+    "candidate_conflict_metadata_changed",
+    "baseline_conflict_protocol_changed",
+    "candidate_conflict_protocol_changed",
+    "baseline_conflict_transaction",
+    "candidate_conflict_transaction",
+    "baseline_version_already_exists",
+    "candidate_version_already_exists",
+    "baseline_max_commit_attempts_exceeded",
+    "candidate_max_commit_attempts_exceeded",
+    "baseline_other_errors",
+    "candidate_other_errors",
+]
+
 
 def _fmt_ms(value: float | None) -> str:
     return "-" if value is None else f"{value:.2f} ms"
@@ -31,33 +75,81 @@ def _fmt_delta_pct(
     return f"{delta_pct:+.2f}%"
 
 
-def _headers(include_metrics: bool = False) -> list[str]:
+def _has_scan_metrics(rows: list[ComparisonRow]) -> bool:
+    for row in rows:
+        for metrics in (row.baseline_metrics, row.candidate_metrics):
+            if metrics is None:
+                continue
+            if any(
+                value is not None
+                for value in (
+                    metrics.files_scanned,
+                    metrics.files_pruned,
+                    metrics.bytes_scanned,
+                    metrics.scan_time_ms,
+                    metrics.rewrite_time_ms,
+                )
+            ):
+                return True
+    return False
+
+
+def _has_contention_metrics(rows: list[ComparisonRow]) -> bool:
+    for row in rows:
+        for metrics in (row.baseline_metrics, row.candidate_metrics):
+            if metrics is not None and metrics.contention is not None:
+                return True
+    return False
+
+
+def _headers(rows: list[ComparisonRow], include_metrics: bool = False) -> list[str]:
     header = ["Case", "baseline", "candidate", "delta_pct", "change"]
     if include_metrics:
-        header.extend(
-            [
-                "baseline_files_scanned",
-                "candidate_files_scanned",
-                "baseline_files_pruned",
-                "candidate_files_pruned",
-                "baseline_bytes_scanned",
-                "candidate_bytes_scanned",
-                "baseline_scan_time_ms",
-                "candidate_scan_time_ms",
-                "baseline_rewrite_time_ms",
-                "candidate_rewrite_time_ms",
-            ]
-        )
+        if _has_scan_metrics(rows):
+            header.extend(_SCAN_METRIC_HEADERS)
+        if _has_contention_metrics(rows):
+            header.extend(_CONTENTION_METRIC_HEADERS)
     return header
 
 
-def _display_headers(include_metrics: bool = False) -> list[str]:
+def _display_headers(
+    rows: list[ComparisonRow], include_metrics: bool = False
+) -> list[str]:
+    return [_DISPLAY_HEADERS.get(h, h) for h in _headers(rows, include_metrics)]
+
+
+def _contention_values(metrics: object | None) -> list[str]:
+    contention = getattr(metrics, "contention", None)
     return [
-        _DISPLAY_HEADERS.get(h, h) for h in _headers(include_metrics=include_metrics)
+        _fmt_metric(contention.worker_count if contention else None),
+        _fmt_metric(contention.race_count if contention else None),
+        _fmt_metric(contention.ops_attempted if contention else None),
+        _fmt_metric(contention.ops_succeeded if contention else None),
+        _fmt_metric(contention.ops_failed if contention else None),
+        _fmt_metric(contention.conflict_append if contention else None),
+        _fmt_metric(contention.conflict_delete_read if contention else None),
+        _fmt_metric(contention.conflict_delete_delete if contention else None),
+        _fmt_metric(contention.conflict_metadata_changed if contention else None),
+        _fmt_metric(contention.conflict_protocol_changed if contention else None),
+        _fmt_metric(contention.conflict_transaction if contention else None),
+        _fmt_metric(contention.version_already_exists if contention else None),
+        _fmt_metric(contention.max_commit_attempts_exceeded if contention else None),
+        _fmt_metric(contention.other_errors if contention else None),
     ]
 
 
-def _row_cells(row: ComparisonRow, include_metrics: bool = False) -> list[str]:
+def _interleave_metric_cells(
+    baseline_values: list[str], candidate_values: list[str]
+) -> list[str]:
+    cells: list[str] = []
+    for baseline_value, candidate_value in zip(baseline_values, candidate_values):
+        cells.extend([baseline_value, candidate_value])
+    return cells
+
+
+def _row_cells(
+    row: ComparisonRow, rows: list[ComparisonRow], include_metrics: bool = False
+) -> list[str]:
     cells = [
         row.case,
         _fmt_ms(row.baseline_ms),
@@ -68,45 +160,52 @@ def _row_cells(row: ComparisonRow, include_metrics: bool = False) -> list[str]:
     if include_metrics:
         baseline_metrics = row.baseline_metrics
         candidate_metrics = row.candidate_metrics
-        cells.extend(
-            [
-                _fmt_metric(
-                    baseline_metrics.files_scanned if baseline_metrics else None
-                ),
-                _fmt_metric(
-                    candidate_metrics.files_scanned if candidate_metrics else None
-                ),
-                _fmt_metric(
-                    baseline_metrics.files_pruned if baseline_metrics else None
-                ),
-                _fmt_metric(
-                    candidate_metrics.files_pruned if candidate_metrics else None
-                ),
-                _fmt_metric(
-                    baseline_metrics.bytes_scanned if baseline_metrics else None
-                ),
-                _fmt_metric(
-                    candidate_metrics.bytes_scanned if candidate_metrics else None
-                ),
-                _fmt_metric(
-                    baseline_metrics.scan_time_ms if baseline_metrics else None
-                ),
-                _fmt_metric(
-                    candidate_metrics.scan_time_ms if candidate_metrics else None
-                ),
-                _fmt_metric(
-                    baseline_metrics.rewrite_time_ms if baseline_metrics else None
-                ),
-                _fmt_metric(
-                    candidate_metrics.rewrite_time_ms if candidate_metrics else None
-                ),
-            ]
-        )
+        if _has_scan_metrics(rows):
+            cells.extend(
+                [
+                    _fmt_metric(
+                        baseline_metrics.files_scanned if baseline_metrics else None
+                    ),
+                    _fmt_metric(
+                        candidate_metrics.files_scanned if candidate_metrics else None
+                    ),
+                    _fmt_metric(
+                        baseline_metrics.files_pruned if baseline_metrics else None
+                    ),
+                    _fmt_metric(
+                        candidate_metrics.files_pruned if candidate_metrics else None
+                    ),
+                    _fmt_metric(
+                        baseline_metrics.bytes_scanned if baseline_metrics else None
+                    ),
+                    _fmt_metric(
+                        candidate_metrics.bytes_scanned if candidate_metrics else None
+                    ),
+                    _fmt_metric(
+                        baseline_metrics.scan_time_ms if baseline_metrics else None
+                    ),
+                    _fmt_metric(
+                        candidate_metrics.scan_time_ms if candidate_metrics else None
+                    ),
+                    _fmt_metric(
+                        baseline_metrics.rewrite_time_ms if baseline_metrics else None
+                    ),
+                    _fmt_metric(
+                        candidate_metrics.rewrite_time_ms if candidate_metrics else None
+                    ),
+                ]
+            )
+        if _has_contention_metrics(rows):
+            cells.extend(
+                _interleave_metric_cells(
+                    _contention_values(baseline_metrics),
+                    _contention_values(candidate_metrics),
+                )
+            )
     return cells
 
 
 def _colorize_cells(cells: list[str], change: str) -> list[str]:
-    """Apply ANSI color to delta_pct and change columns based on classification."""
     colored = list(cells)
     if "faster" in change:
         colored[3] = green(cells[3])
@@ -122,7 +221,6 @@ def _colorize_cells(cells: list[str], change: str) -> list[str]:
     return colored
 
 
-# Numeric column indices: baseline (1), candidate (2), delta_pct (3)
 _RIGHT_ALIGN_INDICES = {1, 2, 3}
 
 
@@ -135,35 +233,41 @@ def _pad(value: str, width: int, right_align: bool) -> str:
 
 
 def _table_lines_markdown(
-    rows: list[ComparisonRow], include_metrics: bool = False
+    reference_rows: list[ComparisonRow],
+    rows: list[ComparisonRow],
+    include_metrics: bool = False,
 ) -> list[str]:
-    header = _headers(include_metrics=include_metrics)
+    header = _headers(reference_rows, include_metrics=include_metrics)
     lines = [" | ".join(header), " | ".join(["---"] * len(header))]
     for row in rows:
-        cells = _row_cells(row, include_metrics=include_metrics)
+        cells = _row_cells(row, reference_rows, include_metrics=include_metrics)
         lines.append(" | ".join(cells))
     return lines
 
 
 def render_text_table(comparison: Comparison, include_metrics: bool = False) -> str:
     return "\n".join(
-        _table_lines_markdown(comparison.rows, include_metrics=include_metrics)
+        _table_lines_markdown(
+            comparison.rows, comparison.rows, include_metrics=include_metrics
+        )
     )
 
 
 def _table_lines_plain(
-    rows: list[ComparisonRow], include_metrics: bool = False
+    reference_rows: list[ComparisonRow],
+    rows: list[ComparisonRow],
+    include_metrics: bool = False,
 ) -> list[str]:
-    header = _display_headers(include_metrics=include_metrics)
-    raw_body = [_row_cells(row, include_metrics=include_metrics) for row in rows]
+    header = _display_headers(reference_rows, include_metrics=include_metrics)
+    raw_body = [
+        _row_cells(row, reference_rows, include_metrics=include_metrics) for row in rows
+    ]
 
-    # Compute widths from raw (uncolored) values
     widths = [len(column) for column in header]
     for cells in raw_body:
         for idx, value in enumerate(cells):
             widths[idx] = max(widths[idx], len(value))
 
-    # Determine which columns beyond the base set are numeric (metrics)
     right_indices = set(_RIGHT_ALIGN_INDICES)
     if include_metrics:
         right_indices.update(range(5, len(header)))
@@ -176,7 +280,6 @@ def _table_lines_plain(
         "  ".join("-" * widths[idx] for idx in range(len(header))),
     ]
 
-    # Apply color after width computation
     for raw_cells, row in zip(raw_body, rows):
         colored = _colorize_cells(raw_cells, row.change)
         lines.append(
@@ -232,21 +335,18 @@ def render_text_report(comparison: Comparison, include_metrics: bool = False) ->
         if not rows:
             continue
         lines.append("")
-        if (
-            title == "Stable (no change)"
-            and len(rows) > _COMPACT_STABLE_THRESHOLD
-        ):
+        if title == "Stable (no change)" and len(rows) > _COMPACT_STABLE_THRESHOLD:
             lines.append(
-                dim(
-                    f"--- {title} ({len(rows)} cases, all within noise threshold) ---"
-                )
+                dim(f"--- {title} ({len(rows)} cases, all within noise threshold) ---")
             )
             names = ", ".join(r.case for r in rows)
             lines.append(dim(f"  {names}"))
         else:
             lines.append(_section_header(title, len(rows)))
             lines.extend(
-                _table_lines_plain(rows, include_metrics=include_metrics)
+                _table_lines_plain(
+                    comparison.rows, rows, include_metrics=include_metrics
+                )
             )
 
     return "\n".join(lines)
@@ -271,6 +371,10 @@ def render_markdown(comparison: Comparison, include_metrics: bool = False) -> st
         if not rows:
             continue
         lines.extend(["", f"## {title}", ""])
-        lines.extend(_table_lines_markdown(rows, include_metrics=include_metrics))
+        lines.extend(
+            _table_lines_markdown(
+                comparison.rows, rows, include_metrics=include_metrics
+            )
+        )
 
     return "\n".join(lines)

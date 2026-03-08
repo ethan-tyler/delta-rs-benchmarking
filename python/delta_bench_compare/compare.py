@@ -8,7 +8,13 @@ from .formatting import (
     render_markdown as render_markdown_output,
     render_text_report,
 )
-from .model import Comparison, ComparisonRow, SampleMetricSnapshot, Summary
+from .model import (
+    Comparison,
+    ComparisonRow,
+    ContentionMetricSnapshot,
+    SampleMetricSnapshot,
+    Summary,
+)
 from .schema import case_classification, load_benchmark_payload
 
 VALID_AGGREGATIONS = {"min", "median", "p95"}
@@ -61,12 +67,43 @@ def best_sample_metrics(
         return None
 
     metrics = sample.get("metrics") or {}
+    contention = metrics.get("contention") or {}
     return SampleMetricSnapshot(
         files_scanned=_metric_as_int(metrics, "files_scanned"),
         files_pruned=_metric_as_int(metrics, "files_pruned"),
         bytes_scanned=_metric_as_int(metrics, "bytes_scanned"),
         scan_time_ms=_metric_as_int(metrics, "scan_time_ms"),
         rewrite_time_ms=_metric_as_int(metrics, "rewrite_time_ms"),
+        contention=(
+            None
+            if not contention
+            else ContentionMetricSnapshot(
+                worker_count=_metric_as_int(contention, "worker_count"),
+                race_count=_metric_as_int(contention, "race_count"),
+                ops_attempted=_metric_as_int(contention, "ops_attempted"),
+                ops_succeeded=_metric_as_int(contention, "ops_succeeded"),
+                ops_failed=_metric_as_int(contention, "ops_failed"),
+                conflict_append=_metric_as_int(contention, "conflict_append"),
+                conflict_delete_read=_metric_as_int(contention, "conflict_delete_read"),
+                conflict_delete_delete=_metric_as_int(
+                    contention, "conflict_delete_delete"
+                ),
+                conflict_metadata_changed=_metric_as_int(
+                    contention, "conflict_metadata_changed"
+                ),
+                conflict_protocol_changed=_metric_as_int(
+                    contention, "conflict_protocol_changed"
+                ),
+                conflict_transaction=_metric_as_int(contention, "conflict_transaction"),
+                version_already_exists=_metric_as_int(
+                    contention, "version_already_exists"
+                ),
+                max_commit_attempts_exceeded=_metric_as_int(
+                    contention, "max_commit_attempts_exceeded"
+                ),
+                other_errors=_metric_as_int(contention, "other_errors"),
+            )
+        ),
     )
 
 

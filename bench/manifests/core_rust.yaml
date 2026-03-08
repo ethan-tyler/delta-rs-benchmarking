@@ -253,6 +253,43 @@ cases:
     value: sha256:946812dd6467af6e16ef037a0740a69a9918a6bf24a26f72e8f63170efbc2550
   - type: schema_hash
     value: sha256:c8b115babb97a1443d08ee890507c9c69a25fd88a3f03b88e810aaa79fcb17cc
+- id: concurrent_table_create
+  target: concurrency
+  runner: rust
+  enabled: true
+  assertions:
+  - type: schema_hash
+    value: sha256:af6f6f116e31d3f0a9b37325ff5d99daef0c2583e2d70bc8b6b8f19929b7ad4c
+  - type: version_monotonicity
+- id: concurrent_append_multi
+  target: concurrency
+  runner: rust
+  enabled: true
+  assertions:
+  - type: schema_hash
+    value: sha256:af6f6f116e31d3f0a9b37325ff5d99daef0c2583e2d70bc8b6b8f19929b7ad4c
+  - type: version_monotonicity
+- id: update_vs_compaction
+  target: concurrency
+  runner: rust
+  enabled: true
+  assertions:
+  - type: schema_hash
+    value: sha256:af6f6f116e31d3f0a9b37325ff5d99daef0c2583e2d70bc8b6b8f19929b7ad4c
+- id: delete_vs_compaction
+  target: concurrency
+  runner: rust
+  enabled: true
+  assertions:
+  - type: schema_hash
+    value: sha256:af6f6f116e31d3f0a9b37325ff5d99daef0c2583e2d70bc8b6b8f19929b7ad4c
+- id: optimize_vs_optimize_overlap
+  target: concurrency
+  runner: rust
+  enabled: true
+  assertions:
+  - type: schema_hash
+    value: sha256:af6f6f116e31d3f0a9b37325ff5d99daef0c2583e2d70bc8b6b8f19929b7ad4c
 - id: tpcds_q03
   target: tpcds
   runner: rust

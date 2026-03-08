@@ -33,6 +33,14 @@ fn list_targets_includes_interop_py() {
 }
 
 #[test]
+fn list_targets_includes_concurrency() {
+    assert!(
+        list_targets().contains(&"concurrency"),
+        "concurrency target missing from list_targets"
+    );
+}
+
+#[test]
 fn optimize_vacuum_case_list_is_exact() {
     let cases = list_cases_for_target("optimize_vacuum").expect("known target should work");
     assert_eq!(
@@ -102,6 +110,21 @@ fn interop_py_case_list_is_exact() {
             "pandas_roundtrip_smoke".to_string(),
             "polars_roundtrip_smoke".to_string(),
             "pyarrow_dataset_scan_perf".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn concurrency_case_list_is_exact() {
+    let cases = list_cases_for_target("concurrency").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "concurrent_table_create".to_string(),
+            "concurrent_append_multi".to_string(),
+            "update_vs_compaction".to_string(),
+            "delete_vs_compaction".to_string(),
+            "optimize_vs_optimize_overlap".to_string(),
         ]
     );
 }

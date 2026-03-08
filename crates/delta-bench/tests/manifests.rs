@@ -53,6 +53,11 @@ fn loads_p0_rust_manifest_in_file_order() {
             "optimize_heavy_compaction",
             "vacuum_dry_run_lite",
             "vacuum_execute_lite",
+            "concurrent_table_create",
+            "concurrent_append_multi",
+            "update_vs_compaction",
+            "delete_vs_compaction",
+            "optimize_vs_optimize_overlap",
             "tpcds_q03",
             "tpcds_q07",
             "tpcds_q64",
@@ -169,14 +174,14 @@ fn p0_rust_manifest_enforces_hash_assertions_for_every_enabled_case() {
                 .assertions
                 .iter()
                 .any(|assertion| matches!(assertion, ManifestAssertion::SchemaHash { .. }));
-            !(has_result_hash && has_schema_hash)
+            !has_schema_hash || (case.target != "concurrency" && !has_result_hash)
         })
         .map(|case| case.id.clone())
         .collect::<Vec<_>>();
 
     assert!(
         missing.is_empty(),
-        "every enabled rust case in core_rust.yaml should include both exact_result_hash and schema_hash assertions, missing={missing:?}"
+        "every enabled rust case in core_rust.yaml should include schema_hash assertions, and all non-concurrency rust cases should include exact_result_hash assertions, missing={missing:?}"
     );
 }
 
@@ -224,4 +229,95 @@ fn p0_rust_manifest_includes_enabled_tpcds_cases() {
             "missing enabled TPC-DS manifest entry for case '{case_id}'"
         );
     }
+}
+
+#[test]
+fn p0_rust_manifest_includes_all_concurrency_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let expected_cases = list_cases_for_target("concurrency")
+        .expect("concurrency should be a registered suite target");
+
+    for case in expected_cases {
+        let present = manifest
+            .cases
+            .iter()
+            .any(|entry| entry.target == "concurrency" && entry.id == case);
+        assert!(
+            present,
+            "missing concurrency manifest entry for case '{case}'"
+        );
+    }
+}
+
+#[test]
+fn p0_rust_manifest_does_not_require_exact_hash_assertions_for_concurrency_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+
+    let concurrency_entries = manifest
+        .cases
+        .iter()
+        .filter(|entry| entry.target == "concurrency")
+        .collect::<Vec<_>>();
+    assert!(
+        !concurrency_entries.is_empty(),
+        "expected concurrency entries to be present in the rust manifest"
+    );
+    assert!(
+        concurrency_entries.iter().all(|entry| {
+            entry
+                .assertions
+                .iter()
+                .all(|assertion| !matches!(assertion, ManifestAssertion::ExactResultHash { .. }))
+        }),
+        "concurrency cases should not use exact_result_hash assertions"
+    );
+}
+
+#[test]
+fn p0_rust_manifest_scopes_version_monotonicity_to_shared_table_concurrency_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+
+    let required_cases = ["concurrent_table_create", "concurrent_append_multi"];
+    let missing = manifest
+        .cases
+        .iter()
+        .filter(|entry| {
+            entry.target == "concurrency" && required_cases.contains(&entry.id.as_str())
+        })
+        .filter(|entry| {
+            !entry
+                .assertions
+                .iter()
+                .any(|assertion| matches!(assertion, ManifestAssertion::VersionMonotonicity))
+        })
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        missing.is_empty(),
+        "shared-table concurrency cases should include version_monotonicity assertions, missing={missing:?}"
+    );
+
+    let unexpected = manifest
+        .cases
+        .iter()
+        .filter(|entry| {
+            entry.target == "concurrency" && !required_cases.contains(&entry.id.as_str())
+        })
+        .filter(|entry| {
+            entry
+                .assertions
+                .iter()
+                .any(|assertion| matches!(assertion, ManifestAssertion::VersionMonotonicity))
+        })
+        .map(|entry| entry.id.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        unexpected.is_empty(),
+        "cloned-table concurrency cases should not include version_monotonicity assertions, unexpected={unexpected:?}"
+    );
 }

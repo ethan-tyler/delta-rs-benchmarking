@@ -243,3 +243,86 @@ fn schema_v2_elapsed_stats_parse_when_present() {
     assert_eq!(elapsed_stats.stddev_ms, 0.9);
     assert_eq!(elapsed_stats.cv_pct, Some(8.57));
 }
+
+#[test]
+fn schema_v2_contention_metrics_parse_and_round_trip() {
+    let payload = r#"
+{
+  "schema_version": 2,
+  "context": {
+    "schema_version": 2,
+    "label": "v2-run",
+    "git_sha": "abc123",
+    "created_at": "2026-02-27T22:48:22.208400Z",
+    "host": "test-host",
+    "suite": "concurrency",
+    "scale": "sf1",
+    "iterations": 1,
+    "warmup": 0
+  },
+  "cases": [
+    {
+      "case": "update_vs_compaction",
+      "success": true,
+      "classification": "supported",
+      "samples": [
+        {
+          "elapsed_ms": 9.9,
+          "rows": 12,
+          "bytes": null,
+          "metrics": {
+            "rows_processed": 12,
+            "bytes_processed": null,
+            "operations": 1,
+            "table_version": 2,
+            "contention": {
+              "worker_count": 2,
+              "race_count": 3,
+              "ops_attempted": 6,
+              "ops_succeeded": 3,
+              "ops_failed": 3,
+              "conflict_append": 0,
+              "conflict_delete_read": 2,
+              "conflict_delete_delete": 1,
+              "conflict_metadata_changed": 0,
+              "conflict_protocol_changed": 0,
+              "conflict_transaction": 0,
+              "version_already_exists": 0,
+              "max_commit_attempts_exceeded": 0,
+              "other_errors": 0
+            }
+          }
+        }
+      ],
+      "failure": null
+    }
+  ]
+}
+"#;
+
+    let parsed: BenchRunResult =
+        serde_json::from_str(payload).expect("schema v2 with contention should parse");
+    let contention = parsed.cases[0].samples[0]
+        .metrics
+        .as_ref()
+        .and_then(|metrics| metrics.contention.as_ref())
+        .expect("contention metrics should be present");
+    assert_eq!(contention.worker_count, 2);
+    assert_eq!(contention.race_count, 3);
+    assert_eq!(contention.ops_attempted, 6);
+    assert_eq!(contention.ops_succeeded, 3);
+    assert_eq!(contention.ops_failed, 3);
+    assert_eq!(contention.conflict_delete_read, 2);
+    assert_eq!(contention.conflict_delete_delete, 1);
+
+    let serialized = serde_json::to_string(&parsed).expect("serialize round-trip");
+    let reparsed: BenchRunResult =
+        serde_json::from_str(&serialized).expect("reparse round-trip payload");
+    let reparsed_contention = reparsed.cases[0].samples[0]
+        .metrics
+        .as_ref()
+        .and_then(|metrics| metrics.contention.as_ref())
+        .expect("contention metrics should survive round-trip");
+    assert_eq!(reparsed_contention.worker_count, 2);
+    assert_eq!(reparsed_contention.conflict_delete_read, 2);
+}

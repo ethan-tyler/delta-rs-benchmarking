@@ -268,6 +268,8 @@ pub struct SampleMetrics {
     pub result_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contention: Option<ContentionMetrics>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -290,6 +292,24 @@ pub struct RuntimeIOMetrics {
     pub spill_bytes: Option<u64>,
     pub result_hash: Option<String>,
     pub schema_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContentionMetrics {
+    pub worker_count: u64,
+    pub race_count: u64,
+    pub ops_attempted: u64,
+    pub ops_succeeded: u64,
+    pub ops_failed: u64,
+    pub conflict_append: u64,
+    pub conflict_delete_read: u64,
+    pub conflict_delete_delete: u64,
+    pub conflict_metadata_changed: u64,
+    pub conflict_protocol_changed: u64,
+    pub conflict_transaction: u64,
+    pub version_already_exists: u64,
+    pub max_commit_attempts_exceeded: u64,
+    pub other_errors: u64,
 }
 
 impl SampleMetrics {
@@ -318,6 +338,7 @@ impl SampleMetrics {
             spill_bytes: None,
             result_hash: None,
             schema_hash: None,
+            contention: None,
         }
     }
 
@@ -357,6 +378,11 @@ impl SampleMetrics {
         self.spill_bytes = metrics.spill_bytes;
         self.result_hash = metrics.result_hash;
         self.schema_hash = metrics.schema_hash;
+        self
+    }
+
+    pub fn with_contention(mut self, metrics: ContentionMetrics) -> Self {
+        self.contention = Some(metrics);
         self
     }
 

@@ -1,4 +1,6 @@
-use delta_bench::results::{RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
+use delta_bench::results::{
+    ContentionMetrics, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics,
+};
 
 #[test]
 fn base_constructor_defaults_scan_and_rewrite_metrics_to_none() {
@@ -57,4 +59,45 @@ fn runtime_io_builder_populates_result_and_schema_hashes() {
 
     assert_eq!(metrics.result_hash.as_deref(), Some("sha256:result"));
     assert_eq!(metrics.schema_hash.as_deref(), Some("sha256:schema"));
+}
+
+#[test]
+fn contention_builder_populates_nested_metrics() {
+    let metrics = SampleMetrics::base(Some(3), Some(99), Some(1), Some(2)).with_contention(
+        ContentionMetrics {
+            worker_count: 3,
+            race_count: 3,
+            ops_attempted: 9,
+            ops_succeeded: 6,
+            ops_failed: 3,
+            conflict_append: 1,
+            conflict_delete_read: 1,
+            conflict_delete_delete: 1,
+            conflict_metadata_changed: 1,
+            conflict_protocol_changed: 1,
+            conflict_transaction: 1,
+            version_already_exists: 1,
+            max_commit_attempts_exceeded: 1,
+            other_errors: 0,
+        },
+    );
+
+    let contention = metrics
+        .contention
+        .as_ref()
+        .expect("contention metrics should be present");
+    assert_eq!(contention.worker_count, 3);
+    assert_eq!(contention.race_count, 3);
+    assert_eq!(contention.ops_attempted, 9);
+    assert_eq!(contention.ops_succeeded, 6);
+    assert_eq!(contention.ops_failed, 3);
+    assert_eq!(contention.conflict_append, 1);
+    assert_eq!(contention.conflict_delete_read, 1);
+    assert_eq!(contention.conflict_delete_delete, 1);
+    assert_eq!(contention.conflict_metadata_changed, 1);
+    assert_eq!(contention.conflict_protocol_changed, 1);
+    assert_eq!(contention.conflict_transaction, 1);
+    assert_eq!(contention.version_already_exists, 1);
+    assert_eq!(contention.max_commit_attempts_exceeded, 1);
+    assert_eq!(contention.other_errors, 0);
 }

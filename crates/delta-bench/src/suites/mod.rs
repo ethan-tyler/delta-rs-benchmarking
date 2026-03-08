@@ -53,6 +53,7 @@ pub(crate) fn fixture_error_cases(case_names: Vec<String>, message: &str) -> Vec
         .collect()
 }
 
+pub mod concurrency;
 pub mod delete_update;
 pub mod interop_py;
 pub mod merge;
@@ -65,13 +66,14 @@ pub mod write;
 
 /// Single source of truth for suite names. Adding a new suite requires updating
 /// this array, `list_cases_for_target`, and `run_target`.
-const SUITE_NAMES: [&str; 8] = [
+const SUITE_NAMES: [&str; 9] = [
     "scan",
     "write",
     "delete_update",
     "merge",
     "metadata",
     "optimize_vacuum",
+    "concurrency",
     "tpcds",
     "interop_py",
 ];
@@ -179,6 +181,7 @@ pub fn list_cases_for_target(target: &str) -> BenchResult<Vec<String>> {
         "merge" => Ok(merge::case_names()),
         "metadata" => Ok(metadata::case_names()),
         "optimize_vacuum" => Ok(optimize_vacuum::case_names()),
+        "concurrency" => Ok(concurrency::case_names()),
         "tpcds" => Ok(tpcds::case_names()),
         "interop_py" => Ok(interop_py::case_names()),
         "all" => {
@@ -322,6 +325,7 @@ async fn run_single_suite(
         "optimize_vacuum" => {
             optimize_vacuum::run(fixtures_dir, scale, warmup, iterations, storage).await
         }
+        "concurrency" => concurrency::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "tpcds" => tpcds::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "interop_py" => interop_py::run(fixtures_dir, scale, warmup, iterations, storage).await,
         other => Err(BenchError::InvalidArgument(format!(

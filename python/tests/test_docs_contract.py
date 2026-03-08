@@ -139,3 +139,60 @@ def test_longitudinal_state_path_uses_matrix_state_json_consistently() -> None:
     for file_path in markdown_files:
         content = file_path.read_text(encoding="utf-8")
         assert "matrix.json" not in content, f"{file_path} still references matrix.json"
+
+
+def test_reference_docs_cover_concurrency_suite_and_contention_metrics() -> None:
+    markdown = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+
+    assert "### concurrency (5 cases)" in markdown
+    for case_name in (
+        "concurrent_table_create",
+        "concurrent_append_multi",
+        "update_vs_compaction",
+        "delete_vs_compaction",
+        "optimize_vs_optimize_overlap",
+    ):
+        assert f"`{case_name}`" in markdown
+
+    assert "### Contention metrics" in markdown
+    for metric_name in (
+        "worker_count",
+        "race_count",
+        "ops_attempted",
+        "ops_succeeded",
+        "ops_failed",
+        "conflict_append",
+        "conflict_delete_read",
+        "conflict_delete_delete",
+        "conflict_metadata_changed",
+        "conflict_protocol_changed",
+        "conflict_transaction",
+        "version_already_exists",
+        "max_commit_attempts_exceeded",
+        "other_errors",
+    ):
+        assert f"`{metric_name}`" in markdown
+    assert "table_version: null" in markdown
+
+
+def test_compare_docs_cover_concurrency_guidance() -> None:
+    markdown = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+
+    assert "### Concurrency suite guidance" in markdown
+    for flag in (
+        "--compare-runs 5",
+        "--noise-threshold 0.10",
+        "--aggregation median",
+        "--measure-order alternate",
+    ):
+        assert flag in markdown
+
+    assert "concurrent_table_create" in markdown
+    assert "concurrent_append_multi" in markdown
+    assert "update_vs_compaction" in markdown
+    assert "delete_vs_compaction" in markdown
+    assert "optimize_vs_optimize_overlap" in markdown
+    assert "conflict_delete_read" in markdown
+    assert "conflict_delete_delete" in markdown
+    assert "table_version" in markdown
+    assert "leave it null" in markdown

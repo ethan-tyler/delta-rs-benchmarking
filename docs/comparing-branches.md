@@ -114,6 +114,29 @@ To see per-case metrics (rows processed, files scanned, etc.) alongside timing d
 cd python && python3 -m delta_bench_compare.compare ... --include-metrics
 ```
 
+### Concurrency suite guidance
+
+For `target=concurrency`, change classification still uses `elapsed_ms`, but the nested contention counters are the real interpretation layer for the contended cases. Render the report with `--include-metrics` so the `metrics.contention` columns are visible when you compare runs. `table_version` is only a useful sanity metric for `concurrent_table_create` and `concurrent_append_multi`; the contended cases intentionally leave it null because each measured sample aggregates independent fixture copies.
+
+Recommended settings for this suite:
+
+```bash
+./scripts/compare_branch.sh \
+  --current-vs-main \
+  --compare-runs 5 \
+  --noise-threshold 0.10 \
+  --aggregation median \
+  --measure-order alternate \
+  concurrency
+```
+
+Case interpretation:
+
+- `concurrent_table_create`, `concurrent_append_multi`: primary signal is `elapsed_ms`; `ops_succeeded` is the secondary sanity check.
+- `update_vs_compaction`: localized update-versus-compaction race; primary signals are `ops_succeeded` and `conflict_delete_read`; treat `elapsed_ms` as secondary.
+- `delete_vs_compaction`: scattered delete-versus-compaction race; primary signals are `ops_succeeded` and `conflict_delete_read`; treat `elapsed_ms` as secondary.
+- `optimize_vs_optimize_overlap`: primary signal is preserved overlapping-remove conflict behavior, especially `conflict_delete_delete`; treat `elapsed_ms` as secondary.
+
 ## Reliable Comparison Protocol
 
 For PR merge decisions and release validation, follow these practices to minimize noise and maximize confidence:

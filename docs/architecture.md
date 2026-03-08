@@ -67,6 +67,8 @@ Benchmark execution follows this pipeline:
 
 3. **Suite execution.** `delta-bench run` resolves runner mode from manifest-planned cases and executes Rust suites directly and Python interop cases via subprocess. Each case runs for the configured warmup + measured iterations.
 
+   The `concurrency` suite is Rust-only in v1 and prepares its per-race fixture copies before measurement starts, so setup work does not pollute the timed samples.
+
 4. **Result output.** Each suite writes a schema v2 JSON file to `results/<label>/<suite>.json`. The terminal displays a per-case summary table (suppressible with `--no-summary-table`).
 
 5. **Comparison (optional).** `compare.py` reads baseline and candidate JSON files, computes relative changes, and classifies each case as regression, improvement, stable, or needs attention.
@@ -94,6 +96,7 @@ Different suites populate different subsets of the metrics:
 | `scan` | `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms` |
 | `merge` | `files_scanned`, `files_pruned`, `scan_time_ms`, `rewrite_time_ms` |
 | `optimize_vacuum` (optimize cases) | `files_scanned` (considered), `files_pruned` (skipped) |
+| `concurrency` | `operations`, nested `metrics.contention` counters such as `ops_succeeded`, `conflict_delete_read`, `conflict_delete_delete`; `table_version` is only meaningful for shared-table cases |
 
 ## Benchmark Coverage
 
@@ -102,8 +105,9 @@ The harness covers these operation categories with specific contrast cases:
 - **scan** includes pruning contrast: `scan_pruning_hit` vs `scan_pruning_miss` to measure the impact of partition pruning.
 - **merge** includes a localized partition-aware case: `merge_localized_1pct` tests merge performance when a partition predicate narrows the scan scope.
 - **optimize_vacuum** includes noop-vs-heavy contrast: `optimize_noop_already_compact` vs `optimize_heavy_compaction` to measure compaction overhead when there is nothing to do vs aggressive compaction.
+- **concurrency** includes both parallel and contended workflows: fresh-path table creation, concurrent append, DML-vs-compaction races, and overlapping optimize operations. The contended cases aggregate independent fixture copies, so they intentionally leave `table_version` unset.
 
-For the complete list of all 35 benchmark cases across 8 suites, see [Reference](reference.md#benchmark-suites-and-cases).
+For the complete list of all 40 benchmark cases across 9 suites, see [Reference](reference.md#benchmark-suites-and-cases).
 
 ## Reproducibility Controls
 

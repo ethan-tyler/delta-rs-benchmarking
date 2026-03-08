@@ -48,8 +48,8 @@ Pass `--help` to any script for full usage details.
 
 | Category | Details |
 | --- | --- |
-| Suites | `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `tpcds`, `interop_py` |
-| Cases | 35 individual benchmark cases across all suites |
+| Suites | `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `concurrency`, `tpcds`, `interop_py` |
+| Cases | 40 individual benchmark cases across all suites |
 | Runners | Rust native and Python interop (pandas, polars, pyarrow) |
 | Fixtures | Deterministic seed-based generation with normalized result schema |
 | Comparison | Branch-to-branch with multi-run aggregation and grouped reporting |

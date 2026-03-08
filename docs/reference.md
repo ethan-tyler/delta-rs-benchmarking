@@ -106,6 +106,20 @@ Table maintenance operations: file compaction and vacuum.
 | `vacuum_dry_run_lite` | Dry-run vacuum to identify removable files without deleting | files_scanned, operations |
 | `vacuum_execute_lite` | Execute vacuum to remove expired files | files_scanned, operations |
 
+### concurrency (5 cases)
+
+Rust-only multi-worker races for parallel table creation, concurrent appends, and overlapping maintenance/DML operations. Local storage only. Each measured sample uses fixed worker topology and fixed work; contended cases aggregate 3 independent races over pre-cloned fixture copies.
+
+`table_version` is meaningful only for the shared-table cases (`concurrent_table_create`, `concurrent_append_multi`). The three contended cases aggregate independent fixture copies, so they intentionally emit `table_version: null`.
+
+| Case | Description | Key metrics |
+|---|---|---|
+| `concurrent_table_create` | Workers race to create the same empty table in a fresh temp directory | elapsed_ms, ops_succeeded |
+| `concurrent_append_multi` | Workers concurrently append fixed row batches into the same new table | elapsed_ms, ops_succeeded |
+| `update_vs_compaction` | Localized update and optimize workers race on the `delete_update_small_files_delta` fixture using `region = 'us' AND id % 17 = 0` | ops_succeeded, conflict_delete_read, elapsed_ms |
+| `delete_vs_compaction` | Scattered delete and optimize workers race on the `delete_update_small_files_delta` fixture using `id % 20 = 0` | ops_succeeded, conflict_delete_read, elapsed_ms |
+| `optimize_vs_optimize_overlap` | Two optimize workers race on overlapping small-file compaction work | conflict_delete_delete, ops_succeeded, elapsed_ms |
+
 ### tpcds (4 queries)
 
 TPC-DS analytical queries against the `store_sales` table. Requires `tpcds_duckdb` dataset.
@@ -140,7 +154,7 @@ Emitted by all suites.
 | `rows_processed` | u64 | Number of rows read or written |
 | `bytes_processed` | u64 | Number of bytes read or written |
 | `operations` | u64 | Number of Delta operations executed |
-| `table_version` | u64 | Delta table version after the operation |
+| `table_version` | u64 | Delta table version after the operation when the sample targets one logical table; null for aggregated multi-table races |
 
 ### Scan and rewrite metrics
 
@@ -167,6 +181,27 @@ Optional metrics for deeper performance analysis.
 | `files_touched` | u64 | Number of files accessed |
 | `files_skipped` | u64 | Number of files skipped |
 | `spill_bytes` | u64 | Bytes spilled to disk |
+
+### Contention metrics
+
+Emitted by the `concurrency` suite as a nested `metrics.contention` object. These counters reflect terminal returned outcomes from public Delta operations only; they do not claim visibility into internal retry attempts.
+
+| Metric | Type | Description |
+|---|---|---|
+| `worker_count` | u64 | Number of concurrent workers launched per measured sample |
+| `race_count` | u64 | Number of independent races aggregated into one measured sample |
+| `ops_attempted` | u64 | Total public operations attempted across all workers and races |
+| `ops_succeeded` | u64 | Operations that returned success |
+| `ops_failed` | u64 | Operations that returned a terminal error outcome |
+| `conflict_append` | u64 | Classified append-conflict outcomes |
+| `conflict_delete_read` | u64 | Classified delete-read conflict outcomes |
+| `conflict_delete_delete` | u64 | Classified overlapping remove/delete conflict outcomes |
+| `conflict_metadata_changed` | u64 | Classified metadata-changed conflict outcomes |
+| `conflict_protocol_changed` | u64 | Classified protocol-changed conflict outcomes |
+| `conflict_transaction` | u64 | Classified concurrent transaction conflict outcomes |
+| `version_already_exists` | u64 | Version-collision outcomes returned by the public operation |
+| `max_commit_attempts_exceeded` | u64 | Operations that exhausted the public commit-attempt budget |
+| `other_errors` | u64 | Unclassified or unexpected errors; non-zero fails the benchmark case |
 
 ### Result integrity metrics
 
@@ -407,6 +442,7 @@ Additional fixture artifacts:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `schema_version` | u32 | yes | Context schema version (always `2`) |
 | `host` | string | yes | Machine hostname |
 | `label` | string | yes | Run label identifier |
 | `git_sha` | string | no | Git SHA of the revision under test |
@@ -443,11 +479,11 @@ These are populated when running on cloud/hardened infrastructure.
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | string | Case name (e.g., `scan_full_narrow`) |
+| `case` | string | Case name (e.g., `scan_full_narrow`) |
 | `success` | bool | Whether the case completed without error |
 | `classification` | string | `supported` or `expected_failure` |
 | `samples` | array | Per-iteration timing and metrics |
-| `failure` | string | Error message if the case failed |
+| `failure` | object | Failure payload with a `message` field when the case failed |
 | `elapsed_stats` | object | Timing statistics across samples (see [Elapsed statistics](#elapsed-statistics)) |
 
 ### Sample-level fields
@@ -457,7 +493,10 @@ Each sample represents one measured iteration.
 | Field | Type | Description |
 |---|---|---|
 | `elapsed_ms` | f64 | Wall-clock time for this iteration |
-| `metrics` | object | Metric fields (see [Metrics Reference](#metrics-reference)) |
+| `rows` | u64 | Optional row count captured directly on the sample |
+| `bytes` | u64 | Optional byte count captured directly on the sample |
+| `metrics` | object | Optional flat and nested metric fields (see [Metrics Reference](#metrics-reference)) |
+| `metrics.contention` | object | Optional nested contention metrics domain emitted by `concurrency` |
 
 ## Manifest Format
 

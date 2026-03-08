@@ -63,6 +63,7 @@ def _pandas_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     started = time.perf_counter()
     df = pd.DataFrame(rows)
+    started = time.perf_counter()
     grouped = (
         df[df["flag"]]
         .groupby("region", as_index=False)["value_i64"]
@@ -97,6 +98,7 @@ def _polars_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     started = time.perf_counter()
     frame = pl.DataFrame(rows)
+    started = time.perf_counter()
     grouped = (
         frame.filter(pl.col("flag") == True)
         .group_by("region")
@@ -137,6 +139,7 @@ def _pyarrow_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "value_i64": [row["value_i64"] for row in rows],
         }
     )
+    started = time.perf_counter()
     mask = pc.and_(
         pc.equal(table["flag"], pa.scalar(True)),
         pc.greater(table["value_i64"], pa.scalar(0)),

@@ -5,6 +5,8 @@ use chrono::Duration as ChronoDuration;
 use serde_json::json;
 use url::Url;
 
+use deltalake_core::DeltaTable;
+
 use super::{copy_dir_all, fixture_error_cases, into_case_result};
 use crate::data::fixtures::{
     load_rows, optimize_compacted_table_path, optimize_small_files_table_path,
@@ -14,7 +16,7 @@ use crate::data::fixtures::{
 use crate::error::{BenchError, BenchResult};
 use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
-use crate::runner::{run_case_async_with_async_setup, run_case_async_with_setup};
+use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
 
 const OPTIMIZE_COMPACT_TARGET_SIZE: u64 = 1_000_000;
@@ -22,7 +24,7 @@ const OPTIMIZE_HEAVY_TARGET_SIZE: u64 = 64_000;
 
 struct IterationSetup {
     _temp: tempfile::TempDir,
-    table_url: Url,
+    table: DeltaTable,
 }
 
 pub fn case_names() -> Vec<String> {
@@ -59,96 +61,116 @@ pub async fn run(
 
         let mut out = Vec::new();
 
-        let optimize = run_case_async_with_setup(
+        let optimize = run_case_async_with_async_setup(
             "optimize_compact_small_files",
             warmup,
             iterations,
-            || prepare_iteration(&optimize_source).map_err(|e| e.to_string()),
-            |setup| {
+            || {
+                let source = optimize_source.clone();
                 let storage = storage.clone();
                 async move {
-                    let table_url = setup.table_url.clone();
-                    let _keep_temp = setup;
-                    run_optimize_case(table_url, OPTIMIZE_COMPACT_TARGET_SIZE, &storage)
+                    prepare_iteration(&source, &storage)
                         .await
                         .map_err(|e| e.to_string())
                 }
+            },
+            |setup| async move {
+                let _keep_temp = setup._temp;
+                run_optimize_case(setup.table, OPTIMIZE_COMPACT_TARGET_SIZE)
+                    .await
+                    .map_err(|e| e.to_string())
             },
         )
         .await;
         out.push(into_case_result(optimize));
 
-        let noop = run_case_async_with_setup(
+        let noop = run_case_async_with_async_setup(
             "optimize_noop_already_compact",
             warmup,
             iterations,
-            || prepare_iteration(&optimize_compacted_source).map_err(|e| e.to_string()),
-            |setup| {
+            || {
+                let source = optimize_compacted_source.clone();
                 let storage = storage.clone();
                 async move {
-                    let table_url = setup.table_url.clone();
-                    let _keep_temp = setup;
-                    run_optimize_case(table_url, OPTIMIZE_COMPACT_TARGET_SIZE, &storage)
+                    prepare_iteration(&source, &storage)
                         .await
                         .map_err(|e| e.to_string())
                 }
+            },
+            |setup| async move {
+                let _keep_temp = setup._temp;
+                run_optimize_case(setup.table, OPTIMIZE_COMPACT_TARGET_SIZE)
+                    .await
+                    .map_err(|e| e.to_string())
             },
         )
         .await;
         out.push(into_case_result(noop));
 
-        let heavy = run_case_async_with_setup(
+        let heavy = run_case_async_with_async_setup(
             "optimize_heavy_compaction",
             warmup,
             iterations,
-            || prepare_iteration(&optimize_source).map_err(|e| e.to_string()),
-            |setup| {
+            || {
+                let source = optimize_source.clone();
                 let storage = storage.clone();
                 async move {
-                    let table_url = setup.table_url.clone();
-                    let _keep_temp = setup;
-                    run_optimize_case(table_url, OPTIMIZE_HEAVY_TARGET_SIZE, &storage)
+                    prepare_iteration(&source, &storage)
                         .await
                         .map_err(|e| e.to_string())
                 }
+            },
+            |setup| async move {
+                let _keep_temp = setup._temp;
+                run_optimize_case(setup.table, OPTIMIZE_HEAVY_TARGET_SIZE)
+                    .await
+                    .map_err(|e| e.to_string())
             },
         )
         .await;
         out.push(into_case_result(heavy));
 
-        let dry_run = run_case_async_with_setup(
+        let dry_run = run_case_async_with_async_setup(
             "vacuum_dry_run_lite",
             warmup,
             iterations,
-            || prepare_iteration(&vacuum_source).map_err(|e| e.to_string()),
-            |setup| {
+            || {
+                let source = vacuum_source.clone();
                 let storage = storage.clone();
                 async move {
-                    let table_url = setup.table_url.clone();
-                    let _keep_temp = setup;
-                    run_vacuum_case(table_url, true, &storage)
+                    prepare_iteration(&source, &storage)
                         .await
                         .map_err(|e| e.to_string())
                 }
+            },
+            |setup| async move {
+                let _keep_temp = setup._temp;
+                run_vacuum_case(setup.table, true)
+                    .await
+                    .map_err(|e| e.to_string())
             },
         )
         .await;
         out.push(into_case_result(dry_run));
 
-        let execute = run_case_async_with_setup(
+        let execute = run_case_async_with_async_setup(
             "vacuum_execute_lite",
             warmup,
             iterations,
-            || prepare_iteration(&vacuum_source).map_err(|e| e.to_string()),
-            |setup| {
+            || {
+                let source = vacuum_source.clone();
                 let storage = storage.clone();
                 async move {
-                    let table_url = setup.table_url.clone();
-                    let _keep_temp = setup;
-                    run_vacuum_case(table_url, false, &storage)
+                    prepare_iteration(&source, &storage)
                         .await
                         .map_err(|e| e.to_string())
                 }
+            },
+            |setup| async move {
+                let _keep_temp = setup._temp;
+                run_vacuum_case(setup.table, false)
+                    .await
+                    .map_err(|e| e.to_string())
             },
         )
         .await;
@@ -193,16 +215,17 @@ pub async fn run(
                 write_delta_table_small_files(table_url.clone(), rows.as_slice(), 128, &storage)
                     .await
                     .map_err(|e| e.to_string())?;
-                Ok::<Url, String>(table_url)
+                let table = storage
+                    .open_table(table_url)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<DeltaTable, String>(table)
             }
         },
-        |table_url| {
-            let storage = storage.clone();
-            async move {
-                run_optimize_case(table_url, OPTIMIZE_COMPACT_TARGET_SIZE, &storage)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
+        |table| async move {
+            run_optimize_case(table, OPTIMIZE_COMPACT_TARGET_SIZE)
+                .await
+                .map_err(|e| e.to_string())
         },
     )
     .await;
@@ -226,16 +249,17 @@ pub async fn run(
                 write_delta_table(table_url.clone(), rows.as_slice(), &storage)
                     .await
                     .map_err(|e| e.to_string())?;
-                Ok::<Url, String>(table_url)
+                let table = storage
+                    .open_table(table_url)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<DeltaTable, String>(table)
             }
         },
-        |table_url| {
-            let storage = storage.clone();
-            async move {
-                run_optimize_case(table_url, OPTIMIZE_COMPACT_TARGET_SIZE, &storage)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
+        |table| async move {
+            run_optimize_case(table, OPTIMIZE_COMPACT_TARGET_SIZE)
+                .await
+                .map_err(|e| e.to_string())
         },
     )
     .await;
@@ -259,16 +283,17 @@ pub async fn run(
                 write_delta_table_small_files(table_url.clone(), rows.as_slice(), 128, &storage)
                     .await
                     .map_err(|e| e.to_string())?;
-                Ok::<Url, String>(table_url)
+                let table = storage
+                    .open_table(table_url)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<DeltaTable, String>(table)
             }
         },
-        |table_url| {
-            let storage = storage.clone();
-            async move {
-                run_optimize_case(table_url, OPTIMIZE_HEAVY_TARGET_SIZE, &storage)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
+        |table| async move {
+            run_optimize_case(table, OPTIMIZE_HEAVY_TARGET_SIZE)
+                .await
+                .map_err(|e| e.to_string())
         },
     )
     .await;
@@ -288,16 +313,17 @@ pub async fn run(
                 write_vacuum_ready_table(table_url.clone(), rows.as_slice(), &storage)
                     .await
                     .map_err(|e| e.to_string())?;
-                Ok::<Url, String>(table_url)
+                let table = storage
+                    .open_table(table_url)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<DeltaTable, String>(table)
             }
         },
-        |table_url| {
-            let storage = storage.clone();
-            async move {
-                run_vacuum_case(table_url, true, &storage)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
+        |table| async move {
+            run_vacuum_case(table, true)
+                .await
+                .map_err(|e| e.to_string())
         },
     )
     .await;
@@ -317,16 +343,17 @@ pub async fn run(
                 write_vacuum_ready_table(table_url.clone(), rows.as_slice(), &storage)
                     .await
                     .map_err(|e| e.to_string())?;
-                Ok::<Url, String>(table_url)
+                let table = storage
+                    .open_table(table_url)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok::<DeltaTable, String>(table)
             }
         },
-        |table_url| {
-            let storage = storage.clone();
-            async move {
-                run_vacuum_case(table_url, false, &storage)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
+        |table| async move {
+            run_vacuum_case(table, false)
+                .await
+                .map_err(|e| e.to_string())
         },
     )
     .await;
@@ -335,12 +362,7 @@ pub async fn run(
     Ok(out)
 }
 
-async fn run_optimize_case(
-    table_url: Url,
-    target_size: u64,
-    storage: &StorageConfig,
-) -> BenchResult<SampleMetrics> {
-    let table = storage.open_table(table_url).await?;
+async fn run_optimize_case(table: DeltaTable, target_size: u64) -> BenchResult<SampleMetrics> {
     let (table, metrics) = table.optimize().with_target_size(target_size).await?;
     let table_version = table.version().map(|v| v as u64);
     let result_hash = hash_json(&json!({
@@ -387,12 +409,7 @@ async fn run_optimize_case(
     }))
 }
 
-async fn run_vacuum_case(
-    table_url: Url,
-    dry_run: bool,
-    storage: &StorageConfig,
-) -> BenchResult<SampleMetrics> {
-    let table = storage.open_table(table_url).await?;
+async fn run_vacuum_case(table: DeltaTable, dry_run: bool) -> BenchResult<SampleMetrics> {
     let (table, metrics) = table
         .vacuum()
         .with_dry_run(dry_run)
@@ -431,7 +448,10 @@ async fn run_vacuum_case(
     }))
 }
 
-fn prepare_iteration(source_table_path: &Path) -> BenchResult<IterationSetup> {
+async fn prepare_iteration(
+    source_table_path: &Path,
+    storage: &StorageConfig,
+) -> BenchResult<IterationSetup> {
     let temp = tempfile::tempdir()?;
     let table_dir = temp.path().join("table");
     copy_dir_all(source_table_path, &table_dir)?;
@@ -441,8 +461,6 @@ fn prepare_iteration(source_table_path: &Path) -> BenchResult<IterationSetup> {
             table_dir.display()
         ))
     })?;
-    Ok(IterationSetup {
-        _temp: temp,
-        table_url,
-    })
+    let table = storage.open_table(table_url).await?;
+    Ok(IterationSetup { _temp: temp, table })
 }

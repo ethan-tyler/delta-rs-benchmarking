@@ -4,6 +4,8 @@ use std::sync::Arc;
 use serde_json::json;
 use url::Url;
 
+use deltalake_core::DeltaTable;
+
 use super::{copy_dir_all, fixture_error_cases, into_case_result};
 use crate::data::fixtures::{
     delete_update_small_files_table_path, load_rows, read_partitioned_table_path,
@@ -12,7 +14,7 @@ use crate::data::fixtures::{
 use crate::error::{BenchError, BenchResult};
 use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
-use crate::runner::{run_case_async_with_async_setup, run_case_async_with_setup};
+use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
 
 #[derive(Clone, Copy)]
@@ -34,7 +36,7 @@ struct DeleteUpdateCase {
 
 struct IterationSetup {
     _temp: tempfile::TempDir,
-    table_url: Url,
+    table: DeltaTable,
 }
 
 const DELETE_UPDATE_CASES: [DeleteUpdateCase; 7] = [
@@ -116,25 +118,29 @@ pub async fn run(
         let mut out = Vec::new();
         for case in DELETE_UPDATE_CASES {
             let source = if case.small_files_seed {
-                &small_files_source
+                small_files_source.clone()
             } else {
-                &standard_source
+                standard_source.clone()
             };
 
-            let c = run_case_async_with_setup(
+            let c = run_case_async_with_async_setup(
                 case.name,
                 warmup,
                 iterations,
-                || prepare_iteration(source).map_err(|e| e.to_string()),
-                |setup| {
+                || {
+                    let source = source.clone();
                     let storage = storage.clone();
                     async move {
-                        let table_url = setup.table_url.clone();
-                        let _keep_temp = setup;
-                        run_delete_update_case(table_url, case, &storage)
+                        prepare_iteration(&source, &storage)
                             .await
                             .map_err(|e| e.to_string())
                     }
+                },
+                |setup| async move {
+                    let _keep_temp = setup._temp;
+                    run_delete_update_case(setup.table, case)
+                        .await
+                        .map_err(|e| e.to_string())
                 },
             )
             .await;
@@ -176,16 +182,17 @@ pub async fn run(
                     )
                     .await
                     .map_err(|e| e.to_string())?;
-                    Ok::<Url, String>(table_url)
+                    let table = storage
+                        .open_table(table_url)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    Ok::<DeltaTable, String>(table)
                 }
             },
-            |table_url| {
-                let storage = storage.clone();
-                async move {
-                    run_delete_update_case(table_url, case, &storage)
-                        .await
-                        .map_err(|e| e.to_string())
-                }
+            |table| async move {
+                run_delete_update_case(table, case)
+                    .await
+                    .map_err(|e| e.to_string())
             },
         )
         .await;
@@ -196,12 +203,9 @@ pub async fn run(
 }
 
 async fn run_delete_update_case(
-    table_url: Url,
+    table: DeltaTable,
     case: DeleteUpdateCase,
-    storage: &StorageConfig,
 ) -> BenchResult<SampleMetrics> {
-    let table = storage.open_table(table_url).await?;
-
     match case.operation {
         DmlOperation::Delete => {
             let predicate = case_predicate(case).ok_or_else(|| {
@@ -409,7 +413,10 @@ fn case_predicate(case: DeleteUpdateCase) -> Option<String> {
     }
 }
 
-fn prepare_iteration(source_table_path: &Path) -> BenchResult<IterationSetup> {
+async fn prepare_iteration(
+    source_table_path: &Path,
+    storage: &StorageConfig,
+) -> BenchResult<IterationSetup> {
     let temp = tempfile::tempdir()?;
     let table_dir = temp.path().join("table");
     copy_dir_all(source_table_path, &table_dir)?;
@@ -419,9 +426,7 @@ fn prepare_iteration(source_table_path: &Path) -> BenchResult<IterationSetup> {
             table_dir.display()
         ))
     })?;
+    let table = storage.open_table(table_url).await?;
 
-    Ok(IterationSetup {
-        _temp: temp,
-        table_url,
-    })
+    Ok(IterationSetup { _temp: temp, table })
 }

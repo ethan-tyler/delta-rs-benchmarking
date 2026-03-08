@@ -157,6 +157,7 @@ async fn run_case(
         match run_python_case_with_runtime(case, fixtures_dir, scale, runtime, None).await {
             Ok(output) => {
                 classification = output.classification.clone();
+                // Older runners may omit elapsed_ms; preserve the legacy wall-clock fallback.
                 let elapsed_ms = output
                     .elapsed_ms
                     .unwrap_or_else(|| started.elapsed().as_secs_f64() * 1000.0);
@@ -305,6 +306,13 @@ async fn run_python_case_once(
             "failed to parse interop output for case '{case}': {error}"
         ))
     })?;
+    if let Some(elapsed_ms) = parsed.elapsed_ms {
+        if !elapsed_ms.is_finite() || elapsed_ms < 0.0 {
+            return Err(BenchError::InvalidArgument(format!(
+                "failed to parse interop output for case '{case}': elapsed_ms must be finite and >= 0 (found {elapsed_ms})"
+            )));
+        }
+    }
     Ok(parsed)
 }
 
@@ -427,6 +435,38 @@ print('{{"rows_processed":1,"bytes_processed":1,"operations":1,"classification":
         .await
         .expect("one retry should recover");
         assert_eq!(out.classification, "supported");
+    }
+
+    #[tokio::test]
+    async fn python_runtime_rejects_negative_elapsed_override() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let script = temp.path().join("negative_elapsed.py");
+        fs::write(
+            &script,
+            r#"#!/usr/bin/env python3
+print('{"rows_processed":1,"bytes_processed":1,"operations":1,"classification":"supported","elapsed_ms":-1.0}')
+"#,
+        )
+        .expect("write script");
+
+        let runtime = InteropRuntimeConfig {
+            timeout: Duration::from_secs(1),
+            retries: 0,
+            python_executable: "python3".to_string(),
+        };
+        let err = run_python_case_with_runtime(
+            "negative_elapsed",
+            temp.path(),
+            "sf1",
+            &runtime,
+            Some(script.as_path()),
+        )
+        .await
+        .expect_err("negative elapsed should be rejected");
+        assert!(
+            err.to_string().contains("elapsed_ms"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]

@@ -7,7 +7,7 @@ use delta_bench::data::fixtures::{
     generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
 };
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{delete_update, interop_py, merge, optimize_vacuum, write};
+use delta_bench::suites::{concurrency, delete_update, interop_py, merge, optimize_vacuum, write};
 
 use env_lock_support::env_lock;
 use env_vars_support::with_env_vars;
@@ -35,6 +35,34 @@ async fn write_suite_non_local_backend_returns_explicit_failures() {
         .expect("valid s3 storage config");
 
     let cases = write::run(temp.path(), "sf1", 0, 1, &storage)
+        .await
+        .expect("suite should not hard-fail");
+    assert!(!cases.is_empty());
+    assert!(cases.iter().all(|c| !c.success));
+    for case in cases {
+        let failure = case
+            .failure
+            .expect("non-local backend should emit explicit failure");
+        assert!(
+            failure.message.contains("non-local storage backend"),
+            "expected unsupported backend failure message, got: {}",
+            failure.message
+        );
+    }
+}
+
+#[tokio::test]
+async fn concurrency_suite_non_local_backend_returns_explicit_failures() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let mut options = std::collections::HashMap::new();
+    options.insert(
+        "table_root".to_string(),
+        "s3://bench-bucket/path".to_string(),
+    );
+    let storage = StorageConfig::new(delta_bench::cli::StorageBackend::S3, options)
+        .expect("valid s3 storage config");
+
+    let cases = concurrency::run(temp.path(), "sf1", 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
@@ -114,6 +142,61 @@ async fn delete_update_suite_missing_fixtures_returns_case_failures() {
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
     assert!(cases.iter().all(|c| !c.success));
+}
+
+#[tokio::test]
+async fn concurrency_suite_missing_contended_fixtures_returns_targeted_case_failures() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+    std::fs::remove_dir_all(
+        temp.path()
+            .join("sf1")
+            .join("delete_update_small_files_delta"),
+    )
+    .expect("remove delete/update fixture");
+    std::fs::remove_dir_all(temp.path().join("sf1").join("optimize_small_files_delta"))
+        .expect("remove optimize fixture");
+
+    let cases = concurrency::run(temp.path(), "sf1", 0, 1, &storage)
+        .await
+        .expect("suite should not hard-fail");
+    assert_eq!(cases.len(), 5);
+
+    let create_case = cases
+        .iter()
+        .find(|case| case.case == "concurrent_table_create")
+        .expect("create case should be present");
+    assert!(create_case.success, "create case should still succeed");
+
+    let append_case = cases
+        .iter()
+        .find(|case| case.case == "concurrent_append_multi")
+        .expect("append case should be present");
+    assert!(append_case.success, "append case should still succeed");
+
+    for case_name in [
+        "update_vs_compaction",
+        "delete_vs_compaction",
+        "optimize_vs_optimize_overlap",
+    ] {
+        let case = cases
+            .iter()
+            .find(|case| case.case == case_name)
+            .unwrap_or_else(|| panic!("missing concurrency case '{case_name}'"));
+        assert!(!case.success, "{case_name} should fail without its fixture");
+        let failure = case
+            .failure
+            .as_ref()
+            .expect("failure payload should be present");
+        assert!(
+            failure.message.contains("fixture load failed"),
+            "expected normalized fixture failure for {case_name}, got: {}",
+            failure.message
+        );
+    }
 }
 
 #[tokio::test]

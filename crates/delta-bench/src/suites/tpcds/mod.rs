@@ -10,11 +10,18 @@ use crate::fingerprint::{hash_arrow_schema, hash_record_batches_unordered};
 use crate::results::{
     CaseFailure, CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics,
 };
-use crate::runner::{run_case_async_custom_timing, CaseExecutionResult};
+use crate::runner::{run_case_async_with_async_setup_custom_timing, CaseExecutionResult};
 use crate::storage::StorageConfig;
 use crate::suites::scan_metrics::extract_scan_metrics;
+use deltalake_core::datafusion::execution::context::TaskContext;
 use deltalake_core::datafusion::physical_plan::collect;
+use deltalake_core::datafusion::physical_plan::ExecutionPlan;
 use deltalake_core::datafusion::prelude::SessionContext;
+
+struct PreparedTpcdsQuery {
+    plan: Arc<dyn ExecutionPlan>,
+    task_ctx: Arc<TaskContext>,
+}
 
 pub fn case_names() -> Vec<String> {
     catalog::phase1_query_catalog()
@@ -85,17 +92,27 @@ pub(crate) async fn run_with_specs_and_sql_dir(
         let fixture_root = fixtures_dir.to_path_buf();
         let scale = scale.to_string();
         let storage = storage.clone();
-        let result = run_case_async_custom_timing(&case_name, warmup, iterations, || {
-            let sql = sql.clone();
-            let fixture_root = fixture_root.clone();
-            let scale = scale.clone();
-            let storage = storage.clone();
-            async move {
-                execute_query(&fixture_root, &scale, &storage, &sql)
+        let result = run_case_async_with_async_setup_custom_timing(
+            &case_name,
+            warmup,
+            iterations,
+            || {
+                let sql = sql.clone();
+                let fixture_root = fixture_root.clone();
+                let scale = scale.clone();
+                let storage = storage.clone();
+                async move {
+                    prepare_query(&fixture_root, &scale, &storage, &sql)
+                        .await
+                        .map_err(|err| err.to_string())
+                }
+            },
+            |prepared| async move {
+                execute_prepared_query(prepared)
                     .await
                     .map_err(|err| err.to_string())
-            }
-        })
+            },
+        )
         .await;
         out.push(into_case_result(result));
     }
@@ -114,26 +131,33 @@ fn load_case_sql(spec: &catalog::TpcdsQuerySpec, sql_dir: &Path) -> BenchResult<
     Ok(query.sql)
 }
 
-async fn execute_query(
+async fn prepare_query(
     fixtures_dir: &Path,
     scale: &str,
     storage: &StorageConfig,
     sql: &str,
-) -> BenchResult<(SampleMetrics, Option<f64>)> {
-    let timed_start = std::time::Instant::now();
+) -> BenchResult<PreparedTpcdsQuery> {
     let ctx = SessionContext::new();
     registration::register_tables_for_sql(&ctx, fixtures_dir, scale, storage, sql).await?;
 
     let df = ctx.sql(sql).await?;
     let task_ctx = Arc::new(df.task_ctx());
     let plan = df.create_physical_plan().await?;
-    let batches = collect(plan.clone(), task_ctx).await?;
+
+    Ok(PreparedTpcdsQuery { plan, task_ctx })
+}
+
+async fn execute_prepared_query(
+    prepared: PreparedTpcdsQuery,
+) -> BenchResult<(SampleMetrics, Option<f64>)> {
+    let timed_start = std::time::Instant::now();
+    let batches = collect(prepared.plan.clone(), prepared.task_ctx).await?;
     let elapsed_ms = timed_start.elapsed().as_secs_f64() * 1000.0;
 
     let rows_processed = batches.iter().map(|batch| batch.num_rows() as u64).sum();
-    let scan = extract_scan_metrics(&plan);
+    let scan = extract_scan_metrics(&prepared.plan);
     let result_hash = hash_record_batches_unordered(&batches)?;
-    let schema_hash = hash_arrow_schema(plan.schema().as_ref())?;
+    let schema_hash = hash_arrow_schema(prepared.plan.schema().as_ref())?;
 
     Ok((
         SampleMetrics::base(Some(rows_processed), None, None, None)
@@ -183,7 +207,10 @@ fn into_case_result(result: CaseExecutionResult) -> CaseResult {
 
 #[cfg(test)]
 mod tests {
-    use super::{catalog::TpcdsQuerySpec, run_with_specs_and_sql_dir};
+    use super::{
+        catalog::TpcdsQuerySpec, execute_prepared_query, prepare_query, run_with_specs_and_sql_dir,
+    };
+    use crate::data::fixtures::generate_fixtures;
     use crate::storage::StorageConfig;
     use crate::suites::scan_metrics::sum_pruned_metrics;
     use deltalake_core::datafusion::physical_plan::metrics::{
@@ -200,6 +227,31 @@ mod tests {
             sum_pruned_metrics(&metrics.clone_inner(), &["files_ranges_pruned_statistics"]),
             Some(9)
         );
+    }
+
+    #[tokio::test]
+    async fn prepared_query_setup_and_execute_path_produces_metrics() {
+        let temp = tempfile::tempdir().expect("fixtures tempdir");
+        let storage = StorageConfig::local();
+        generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+            .await
+            .expect("generate fixtures");
+
+        let prepared = prepare_query(
+            temp.path(),
+            "sf1",
+            &storage,
+            "SELECT COUNT(*) FROM store_sales",
+        )
+        .await
+        .expect("prepare query");
+        let (metrics, elapsed_override) = execute_prepared_query(prepared)
+            .await
+            .expect("execute query");
+
+        assert!(elapsed_override.is_some());
+        assert!(metrics.rows_processed.is_some());
+        assert!(metrics.rows_processed.unwrap_or(0) > 0);
     }
 
     #[tokio::test]

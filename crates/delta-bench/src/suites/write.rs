@@ -11,7 +11,7 @@ use crate::data::fixtures::{load_rows, rows_to_batch};
 use crate::error::{BenchError, BenchResult};
 use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics};
-use crate::runner::run_case_async;
+use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
 
 pub fn case_names() -> Vec<String> {
@@ -20,6 +20,11 @@ pub fn case_names() -> Vec<String> {
         "write_append_large".to_string(),
         "write_overwrite".to_string(),
     ]
+}
+
+struct WriteIterationSetup {
+    _temp: tempfile::TempDir,
+    table: DeltaTable,
 }
 
 pub async fn run(
@@ -42,46 +47,61 @@ pub async fn run(
     };
     let mut results = Vec::new();
 
-    let small = run_case_async("write_append_small", warmup, iterations, || {
-        let rows = Arc::clone(&rows);
-        async move {
-            run_append_case(rows.as_slice(), 128)
-                .await
-                .map_err(|e| e.to_string())
-        }
-    })
+    let small = run_case_async_with_async_setup(
+        "write_append_small",
+        warmup,
+        iterations,
+        || async { prepare_write_iteration().await.map_err(|e| e.to_string()) },
+        |setup| {
+            let rows = Arc::clone(&rows);
+            async move {
+                run_append_case(setup, rows.as_slice(), 128)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        },
+    )
     .await;
     results.push(into_case_result(small));
 
-    let large = run_case_async("write_append_large", warmup, iterations, || {
-        let rows = Arc::clone(&rows);
-        async move {
-            run_append_case(rows.as_slice(), 4096)
-                .await
-                .map_err(|e| e.to_string())
-        }
-    })
+    let large = run_case_async_with_async_setup(
+        "write_append_large",
+        warmup,
+        iterations,
+        || async { prepare_write_iteration().await.map_err(|e| e.to_string()) },
+        |setup| {
+            let rows = Arc::clone(&rows);
+            async move {
+                run_append_case(setup, rows.as_slice(), 4096)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        },
+    )
     .await;
     results.push(into_case_result(large));
 
-    let overwrite = run_case_async("write_overwrite", warmup, iterations, || {
-        let rows = Arc::clone(&rows);
-        async move {
-            run_overwrite_case(rows.as_slice())
-                .await
-                .map_err(|e| e.to_string())
-        }
-    })
+    let overwrite = run_case_async_with_async_setup(
+        "write_overwrite",
+        warmup,
+        iterations,
+        || async { prepare_write_iteration().await.map_err(|e| e.to_string()) },
+        |setup| {
+            let rows = Arc::clone(&rows);
+            async move {
+                run_overwrite_case(setup, rows.as_slice())
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        },
+    )
     .await;
     results.push(into_case_result(overwrite));
 
     Ok(results)
 }
 
-async fn run_append_case(
-    rows: &[crate::data::datasets::NarrowSaleRow],
-    chunk: usize,
-) -> BenchResult<SampleMetrics> {
+async fn prepare_write_iteration() -> BenchResult<WriteIterationSetup> {
     let temp = tempfile::tempdir()?;
     let table_url = Url::from_directory_path(temp.path()).map_err(|()| {
         BenchError::InvalidArgument(format!(
@@ -89,9 +109,18 @@ async fn run_append_case(
             temp.path().display()
         ))
     })?;
+    let table = DeltaTable::try_from_url(table_url).await?;
+    Ok(WriteIterationSetup { _temp: temp, table })
+}
 
+async fn run_append_case(
+    setup: WriteIterationSetup,
+    rows: &[crate::data::datasets::NarrowSaleRow],
+    chunk: usize,
+) -> BenchResult<SampleMetrics> {
     let mut operations = 0_u64;
-    let mut table = DeltaTable::try_from_url(table_url).await?;
+    let mut table = setup.table;
+    let _keep_temp = setup._temp;
     for (idx, r) in rows.chunks(chunk).enumerate() {
         operations += 1;
         let mode = if idx == 0 {
@@ -135,16 +164,11 @@ async fn run_append_case(
 }
 
 async fn run_overwrite_case(
+    setup: WriteIterationSetup,
     rows: &[crate::data::datasets::NarrowSaleRow],
 ) -> BenchResult<SampleMetrics> {
-    let temp = tempfile::tempdir()?;
-    let table_url = Url::from_directory_path(temp.path()).map_err(|()| {
-        BenchError::InvalidArgument(format!(
-            "failed to create URL for {}",
-            temp.path().display()
-        ))
-    })?;
-    let mut table = DeltaTable::try_from_url(table_url).await?;
+    let mut table = setup.table;
+    let _keep_temp = setup._temp;
 
     let first = rows_to_batch(rows)?;
     table = table

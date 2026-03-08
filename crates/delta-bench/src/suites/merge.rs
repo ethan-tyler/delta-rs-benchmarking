@@ -6,6 +6,8 @@ use deltalake_core::datafusion::prelude::{DataFrame, SessionContext};
 use serde_json::json;
 use url::Url;
 
+use deltalake_core::DeltaTable;
+
 use super::{copy_dir_all, fixture_error_cases, into_case_result};
 use crate::data::datasets::NarrowSaleRow;
 use crate::data::fixtures::{
@@ -15,7 +17,7 @@ use crate::data::fixtures::{
 use crate::error::{BenchError, BenchResult};
 use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
-use crate::runner::{run_case_async_with_async_setup, run_case_async_with_setup};
+use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
 
 #[derive(Clone, Copy, Debug)]
@@ -42,7 +44,9 @@ pub enum MergeTargetProfile {
 
 struct MergeIterationSetup {
     _temp: tempfile::TempDir,
-    table_url: Url,
+    table: DeltaTable,
+    source: DataFrame,
+    source_rows: usize,
 }
 
 const MERGE_CASES: [MergeCase; 6] = [
@@ -135,21 +139,25 @@ pub async fn run(
         for case in MERGE_CASES {
             let fixture_table_dir =
                 merge_fixture_table_path(fixtures_dir, scale, case.target_profile)?;
-            let c = run_case_async_with_setup(
+            let c = run_case_async_with_async_setup(
                 case.name,
                 warmup,
                 iterations,
-                || prepare_merge_iteration(&fixture_table_dir).map_err(|e| e.to_string()),
-                |setup| {
+                || {
+                    let fixture_table_dir = fixture_table_dir.clone();
                     let rows = Arc::clone(&rows);
                     let storage = storage.clone();
                     async move {
-                        let table_url = setup.table_url.clone();
-                        let _keep_temp = setup;
-                        run_merge_case(rows.as_slice(), table_url, case, &storage)
+                        prepare_merge_iteration(&fixture_table_dir, rows.as_slice(), case, &storage)
                             .await
                             .map_err(|e| e.to_string())
                     }
+                },
+                |setup| async move {
+                    let _keep_temp = setup._temp;
+                    run_merge_case(setup.table, setup.source, setup.source_rows, case)
+                        .await
+                        .map_err(|e| e.to_string())
                 },
             )
             .await;
@@ -178,17 +186,24 @@ pub async fn run(
                     seed_merge_target_table(rows.as_slice(), table_url.clone(), case, &storage)
                         .await
                         .map_err(|e| e.to_string())?;
-                    Ok::<Url, String>(table_url)
+                    let table = storage
+                        .open_table(table_url)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let (source, source_rows) = build_source_df(
+                        rows.as_slice(),
+                        case.match_ratio,
+                        case.mode,
+                        case.source_region,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    Ok::<(DeltaTable, DataFrame, usize), String>((table, source, source_rows))
                 }
             },
-            |table_url| {
-                let rows = Arc::clone(&rows);
-                let storage = storage.clone();
-                async move {
-                    run_merge_case(rows.as_slice(), table_url, case, &storage)
-                        .await
-                        .map_err(|e| e.to_string())
-                }
+            |(table, source, source_rows)| async move {
+                run_merge_case(table, source, source_rows, case)
+                    .await
+                    .map_err(|e| e.to_string())
             },
         )
         .await;
@@ -211,7 +226,12 @@ fn merge_fixture_table_path(
     }
 }
 
-fn prepare_merge_iteration(fixture_table_dir: &Path) -> BenchResult<MergeIterationSetup> {
+async fn prepare_merge_iteration(
+    fixture_table_dir: &Path,
+    rows: &[NarrowSaleRow],
+    case: MergeCase,
+    storage: &StorageConfig,
+) -> BenchResult<MergeIterationSetup> {
     let temp = tempfile::tempdir()?;
     let table_dir = temp.path().join("target");
     copy_dir_all(fixture_table_dir, &table_dir)?;
@@ -221,23 +241,24 @@ fn prepare_merge_iteration(fixture_table_dir: &Path) -> BenchResult<MergeIterati
             table_dir.display()
         ))
     })?;
-
-    Ok(MergeIterationSetup {
-        _temp: temp,
-        table_url,
-    })
-}
-
-async fn run_merge_case(
-    rows: &[NarrowSaleRow],
-    table_url: Url,
-    case: MergeCase,
-    storage: &StorageConfig,
-) -> BenchResult<SampleMetrics> {
     let table = storage.open_table(table_url).await?;
     let (source, source_rows) =
         build_source_df(rows, case.match_ratio, case.mode, case.source_region)?;
 
+    Ok(MergeIterationSetup {
+        _temp: temp,
+        table,
+        source,
+        source_rows,
+    })
+}
+
+async fn run_merge_case(
+    table: DeltaTable,
+    source: DataFrame,
+    source_rows: usize,
+    case: MergeCase,
+) -> BenchResult<SampleMetrics> {
     let mut predicate = col("target.id").eq(col("source.id"));
     if case.include_partition_predicate {
         predicate = predicate.and(col("target.region").eq(col("source.region")));

@@ -21,6 +21,13 @@ To compare your branch against main with decision-grade defaults:
 ./scripts/compare_branch.sh --current-vs-main all
 ```
 
+Before opening a pull request, run the same baseline checks enforced by `.github/workflows/ci.yml`:
+
+```bash
+cargo test
+cd python && pytest -q tests
+```
+
 ## What You Can Do
 
 | Goal | Guide | When to use it |

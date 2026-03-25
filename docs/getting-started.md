@@ -75,6 +75,17 @@ Run `doctor` at any time to verify that the workspace is wired up correctly:
 
 This checks that the delta-rs checkout exists, the harness is synced, Cargo can resolve the benchmark crate, and whether Python interop dependencies are available.
 
+### Local CI baseline
+
+Before you push changes, run the same baseline checks enforced by `.github/workflows/ci.yml`:
+
+```bash
+cargo test
+cd python && pytest -q tests
+```
+
+Treat these as the minimum regression screen before asking CI or a reviewer to validate a change.
+
 ## Your First Benchmark Run
 
 ### Step 1: Generate fixture data

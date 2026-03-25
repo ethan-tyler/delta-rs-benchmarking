@@ -1,6 +1,8 @@
 target/
 .worktrees/
 .delta-rs-under-test/
+*.delta_bench_checkout.lock
+*.delta_bench_checkout.lock.dir/
 fixtures/
 results/
 __pycache__/

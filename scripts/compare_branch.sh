@@ -283,7 +283,24 @@ esac
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
 RUNNER_RESULTS_DIR="${DELTA_BENCH_RESULTS:-${RUNNER_ROOT}/results}"
-DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-${DELTA_RS_DIR}/.delta_bench_checkout.lock}"
+
+default_checkout_lock_file() {
+  local checkout_dir="${1:-}"
+  local checkout_parent
+  checkout_parent="$(dirname "${checkout_dir}")"
+  local checkout_name
+  checkout_name="$(basename "${checkout_dir}")"
+  checkout_name="${checkout_name#/}"
+  while [[ "${checkout_name}" == .* ]]; do
+    checkout_name="${checkout_name#.}"
+  done
+  if [[ -z "${checkout_name}" ]]; then
+    checkout_name="delta-rs-under-test"
+  fi
+  printf '%s/.%s.delta_bench_checkout.lock\n' "${checkout_parent}" "${checkout_name}"
+}
+
+DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_DIR}")}"
 DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS:-7200}"
 CHECKOUT_LOCK_FD=""
 CHECKOUT_LOCK_DIR=""
@@ -409,6 +426,34 @@ exec_on_runner() {
   fi
 }
 
+path_is_within_dir() {
+  python3 - "$1" "$2" <<'PY'
+import os
+import sys
+
+candidate = os.path.realpath(sys.argv[1])
+root = os.path.realpath(sys.argv[2])
+try:
+    inside = os.path.commonpath([candidate, root]) == root
+except ValueError:
+    inside = False
+raise SystemExit(0 if inside else 1)
+PY
+}
+
+ensure_checkout_lock_path_safe_for_initial_clone() {
+  if [[ -n "${REMOTE_RUNNER}" ]]; then
+    return
+  fi
+  if [[ -d "${DELTA_RS_DIR}/.git" ]]; then
+    return
+  fi
+  if path_is_within_dir "${DELTA_BENCH_CHECKOUT_LOCK_FILE}" "${DELTA_RS_DIR}"; then
+    echo "DELTA_BENCH_CHECKOUT_LOCK_FILE must be outside DELTA_RS_DIR before initial clone: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+    exit 1
+  fi
+}
+
 release_checkout_lock() {
   if [[ -n "${CHECKOUT_LOCK_FD}" ]]; then
     eval "exec ${CHECKOUT_LOCK_FD}>&-" >/dev/null 2>&1 || true
@@ -428,6 +473,8 @@ acquire_checkout_lock() {
   if [[ "${DELTA_BENCH_CHECKOUT_LOCK_HELD:-0}" == "1" ]]; then
     return
   fi
+
+  ensure_checkout_lock_path_safe_for_initial_clone
 
   if command -v flock >/dev/null 2>&1; then
     mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"

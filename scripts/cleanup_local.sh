@@ -5,9 +5,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROOT_DIR_REAL="$(cd "${ROOT_DIR}" && pwd -P)"
 
+default_checkout_lock_file() {
+  local checkout_dir="${1:-}"
+  local checkout_parent
+  checkout_parent="$(dirname "${checkout_dir}")"
+  local checkout_name
+  checkout_name="$(basename "${checkout_dir}")"
+  checkout_name="${checkout_name#/}"
+  while [[ "${checkout_name}" == .* ]]; do
+    checkout_name="${checkout_name#.}"
+  done
+  if [[ -z "${checkout_name}" ]]; then
+    checkout_name="delta-rs-under-test"
+  fi
+  printf '%s/.%s.delta_bench_checkout.lock\n' "${checkout_parent}" "${checkout_name}"
+}
+
 RESULTS_DIR="${DELTA_BENCH_RESULTS:-${ROOT_DIR}/results}"
 FIXTURES_DIR="${DELTA_BENCH_FIXTURES:-${ROOT_DIR}/fixtures}"
 DELTA_RS_DIR="${DELTA_RS_DIR:-${ROOT_DIR}/.delta-rs-under-test}"
+DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_DIR}")}"
 
 MODE="dry-run"
 TARGET_RESULTS=0
@@ -274,6 +291,12 @@ if (( TARGET_DELTA_RS_UNDER_TEST != 0 )); then
     paths_to_remove+=( "${DELTA_RS_DIR}" )
   else
     echo "SKIP: delta-rs-under-test directory not found at ${DELTA_RS_DIR}"
+  fi
+  if [[ -e "${DELTA_BENCH_CHECKOUT_LOCK_FILE}" ]]; then
+    paths_to_remove+=( "${DELTA_BENCH_CHECKOUT_LOCK_FILE}" )
+  fi
+  if [[ -d "${DELTA_BENCH_CHECKOUT_LOCK_FILE}.dir" ]]; then
+    paths_to_remove+=( "${DELTA_BENCH_CHECKOUT_LOCK_FILE}.dir" )
   fi
 fi
 

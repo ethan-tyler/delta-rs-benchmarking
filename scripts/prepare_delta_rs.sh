@@ -4,11 +4,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DELTA_RS_DIR="${DELTA_RS_DIR:-${ROOT_DIR}/.delta-rs-under-test}"
+
+default_checkout_lock_file() {
+  local checkout_dir="${1:-}"
+  local checkout_parent
+  checkout_parent="$(dirname "${checkout_dir}")"
+  local checkout_name
+  checkout_name="$(basename "${checkout_dir}")"
+  checkout_name="${checkout_name#/}"
+  while [[ "${checkout_name}" == .* ]]; do
+    checkout_name="${checkout_name#.}"
+  done
+  if [[ -z "${checkout_name}" ]]; then
+    checkout_name="delta-rs-under-test"
+  fi
+  printf '%s/.%s.delta_bench_checkout.lock\n' "${checkout_parent}" "${checkout_name}"
+}
+
 DELTA_RS_REPO_URL="${DELTA_RS_REPO_URL:-https://github.com/delta-io/delta-rs}"
 DELTA_RS_BRANCH="${DELTA_RS_BRANCH:-main}"
 DELTA_RS_REF="${DELTA_RS_REF:-}"
 DELTA_RS_REF_TYPE="${DELTA_RS_REF_TYPE:-auto}"
-DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-${DELTA_RS_DIR}/.delta_bench_checkout.lock}"
+DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_DIR}")}"
 DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS:-300}"
 CHECKOUT_LOCK_FD=""
 CHECKOUT_LOCK_DIR=""

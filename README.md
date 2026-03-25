@@ -24,8 +24,8 @@ To compare your branch against main with decision-grade defaults:
 Before opening a pull request, run the same baseline checks enforced by `.github/workflows/ci.yml`:
 
 ```bash
-cargo test
-cd python && pytest -q tests
+cargo test --locked
+(cd python && python3 -m pytest -q tests)
 ```
 
 ## What You Can Do

@@ -80,8 +80,8 @@ This checks that the delta-rs checkout exists, the harness is synced, Cargo can 
 Before you push changes, run the same baseline checks enforced by `.github/workflows/ci.yml`:
 
 ```bash
-cargo test
-cd python && pytest -q tests
+cargo test --locked
+(cd python && python3 -m pytest -q tests)
 ```
 
 Treat these as the minimum regression screen before asking CI or a reviewer to validate a change.

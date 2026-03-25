@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -18,6 +19,7 @@ GITIGNORE = REPO_ROOT / ".gitignore"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark.yml"
 NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
+LABEL_CONTRACT = REPO_ROOT / "python" / "tests" / "fixtures" / "label_contract.json"
 
 
 def wait_for_condition(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
@@ -44,6 +46,24 @@ def test_compare_branch_sanitizes_branch_labels_for_cli() -> None:
     assert re.search(
         r"cand_label=\"cand-\$\(sanitize_label \"\$\{candidate_ref\}\"\)\"", script
     )
+
+
+def test_compare_branch_label_contract_matches_shared_fixture() -> None:
+    contract = json.loads(LABEL_CONTRACT.read_text(encoding="utf-8"))
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    start = script.index("sanitize_label() {")
+    end = script.index("\n}\n\nis_positive_integer", start) + 2
+    function_body = script[start:end]
+    runner = f"set -euo pipefail\n{function_body}\nsanitize_label \"$1\"\n"
+
+    for raw, expected in contract["sanitized"].items():
+        result = subprocess.run(
+            ["bash", "-c", runner, "sanitize_label_test", raw],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert result.stdout == expected
 
 
 def test_benchmark_workflow_defines_job_timeout() -> None:

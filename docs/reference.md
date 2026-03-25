@@ -26,13 +26,26 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 | **Scale** | The size factor for fixture data: `sf1` (10K rows), `sf10` (100K rows), `sf100` (1M rows). |
 | **Fixture** | Deterministic test data generated from a seed. Includes Delta tables, JSON row snapshots, and a manifest. |
 | **Fixture profile** | Controls how fixtures are generated: `Standard` (normal), `ManyVersions` (12 commits for version history), `TpcdsDuckdb` (DuckDB TPC-DS source). |
-| **Label** | A run identifier used in result paths (e.g., `results/<label>/<suite>.json`). Must match `[A-Za-z0-9._-]`. |
+| **Label** | A run identifier used in result paths (e.g., `results/<label>/<suite>.json`). Must match `[A-Za-z0-9._-]` and cannot be `.` or `..`. |
 | **Schema v2** | The normalized JSON result format that all benchmark output follows. Includes context, cases, and per-sample metrics. |
 | **Manifest** | A YAML or JSON file that declares which benchmark cases to execute and what assertions to validate. |
 | **Backend profile** | A `.env` file under `backends/` with storage configuration defaults (S3 bucket, locking, region). |
 | **Lane** | A release-tag track for longitudinal benchmarking (e.g., `rust` lane for `rust-v*` tags, `python` lane for `python-v*`). |
 | **Fidelity** | System-level metadata (CPU model, kernel, run mode) captured alongside results to ensure reproducibility. |
 | **cv_pct** | Coefficient of variation as a percentage. Measures result noise. Below 5% is good; above 10% warrants rerunning. |
+
+### Label Contract
+
+Labels are validated strictly at the Rust CLI boundary and sanitized in Bash/Python helper paths to produce Rust-valid labels.
+
+| Input | Behavior |
+|---|---|
+| `local-main_20260325` | valid |
+| `bench.v1` | valid |
+| `""`, `.`, `..`, `bad/slash`, `bad space` | invalid |
+| `feature/foo` | sanitizes to `feature_foo` |
+| `___` | sanitizes to `label` |
+| `...` | sanitizes to `...` |
 
 ## Benchmark Suites and Cases
 

@@ -12,10 +12,15 @@ import pytest
 from delta_bench_longitudinal.matrix_runner import (
     MatrixArtifact,
     MatrixRunConfig,
+    _validate_tokens,
     load_matrix_state,
     run_matrix,
+    sanitize_label,
     save_matrix_state,
 )
+
+
+LABEL_CONTRACT = Path(__file__).with_name("fixtures") / "label_contract.json"
 
 
 def _state_config_fingerprint(
@@ -37,6 +42,10 @@ def _state_config_fingerprint(
         "results_dir": str(results_dir),
         "label_prefix": label_prefix,
     }
+
+
+def _load_label_contract() -> dict[str, object]:
+    return json.loads(LABEL_CONTRACT.read_text(encoding="utf-8"))
 
 
 def test_resume_skips_successful_cases(tmp_path: Path) -> None:
@@ -448,3 +457,18 @@ def test_invalid_parallelism_is_rejected(tmp_path: Path) -> None:
             config=config,
             executor=lambda *_args: (0, ""),
         )
+
+
+def test_python_label_contract_matches_shared_fixture() -> None:
+    contract = _load_label_contract()
+
+    for valid in contract["valid"]:
+        _validate_tokens([valid], "label")
+        assert sanitize_label(valid) == valid
+
+    for invalid in contract["invalid"]:
+        with pytest.raises(ValueError):
+            _validate_tokens([invalid], "label")
+
+    for raw, expected in contract["sanitized"].items():
+        assert sanitize_label(raw) == expected

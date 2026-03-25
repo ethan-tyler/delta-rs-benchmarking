@@ -318,7 +318,9 @@ def _default_executor(
 
 def _validate_tokens(values: Iterable[str], field: str) -> None:
     for value in values:
-        if not SAFE_TOKEN.match(value):
+        if value in {"", ".", ".."}:
+            raise ValueError(f"{field} '{value}' is not allowed")
+        if not SAFE_TOKEN.fullmatch(value):
             raise ValueError(
                 f"{field} '{value}' contains invalid characters; allowed [A-Za-z0-9._-]"
             )
@@ -334,9 +336,10 @@ def matrix_result_label(label_prefix: str, revision: str, scale: str) -> str:
 
 def sanitize_label(value: str) -> str:
     out = "".join(ch if SAFE_TOKEN.match(ch) else "_" for ch in value)
-    trimmed = out.strip("_")
+    collapsed = re.sub(r"_+", "_", out)
+    trimmed = collapsed.strip("_")
     if not trimmed or trimmed in {".", ".."}:
-        return "longitudinal"
+        return "label"
     return trimmed
 
 

@@ -30,6 +30,7 @@ def ingest_benchmark_result(
     commit_timestamp: str,
 ) -> dict[str, Any]:
     store_root = Path(store_dir)
+    _raise_if_unmigrated_legacy_store(store_root)
     source = Path(result_path)
     payload = load_benchmark_payload(source)
     context = payload.get("context", {})
@@ -90,6 +91,7 @@ def ingest_benchmark_result(
 
 def load_longitudinal_rows(store_dir: Path | str) -> list[dict[str, Any]]:
     store_root = Path(store_dir)
+    _raise_if_unmigrated_legacy_store(store_root)
     db_path = store_db_path(store_root)
     if not db_path.exists():
         return []
@@ -249,6 +251,19 @@ def _run_id(
 
 def store_db_path(store_dir: Path | str) -> Path:
     return Path(store_dir) / STORE_DB_FILENAME
+
+
+def _raise_if_unmigrated_legacy_store(store_dir: Path) -> None:
+    db_path = store_db_path(store_dir)
+    if db_path.exists():
+        return
+    legacy_paths = [store_dir / "rows.jsonl", store_dir / "index.json"]
+    present = [path.name for path in legacy_paths if path.exists()]
+    if present:
+        names = ", ".join(present)
+        raise ValueError(
+            f"legacy longitudinal store detected at {store_dir}; migrate or remove {names} before using store.sqlite3"
+        )
 
 
 def _connect_store(store_dir: Path) -> sqlite3.Connection:

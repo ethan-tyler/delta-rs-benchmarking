@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .store import store_db_path, store_lock
+from .store import _connect_store, _raise_if_unmigrated_legacy_store, store_db_path, store_lock
 
 
 def prune_artifacts(
@@ -71,6 +70,7 @@ def prune_store(
     )
     reference = now or datetime.now(timezone.utc)
     root = Path(store_dir)
+    _raise_if_unmigrated_legacy_store(root)
     db_path = store_db_path(root)
     with store_lock(root):
         if not db_path.exists():
@@ -83,7 +83,7 @@ def prune_store(
                 "applied": apply,
             }
 
-        conn = sqlite3.connect(db_path)
+        conn = _connect_store(root)
         try:
             run_timestamps = _load_run_timestamps(conn)
 

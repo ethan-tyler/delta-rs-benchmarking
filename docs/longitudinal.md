@@ -108,6 +108,8 @@ Normalize the raw JSON results into a SQLite-backed time-series store:
 
 Duplicate ingests are deduplicated by run-id in the SQLite store, so this is safe to rerun.
 
+If you still have a legacy `rows.jsonl` / `index.json` store from an older checkout, migrate or remove it before running new ingest/report/prune commands. The current pipeline fails fast rather than silently ignoring legacy store data.
+
 ### Generate reports
 
 Create markdown and HTML trend reports from the ingested data:

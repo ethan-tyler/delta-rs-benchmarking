@@ -173,8 +173,32 @@ def test_prune_store_apply_deletes_runs_without_rows_rewrite(tmp_path: Path) -> 
     assert summary["removed_runs"] == 1
     rows = load_longitudinal_rows(store_dir)
     assert {row["run_id"] for row in rows} == {"run-2", "run-3"}
+    with closing(_connect_store(store_dir)) as conn:
+        remaining_case_runs = {
+            run_id for (run_id,) in conn.execute("SELECT DISTINCT run_id FROM case_rows")
+        }
+    assert remaining_case_runs == {"run-2", "run-3"}
     assert not (store_dir / "rows.jsonl").exists()
     assert not (store_dir / "index.json").exists()
+
+
+def test_prune_store_rejects_legacy_jsonl_store_until_migrated(tmp_path: Path) -> None:
+    store_dir = tmp_path / "store"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    (store_dir / "rows.jsonl").write_text("{}", encoding="utf-8")
+    (store_dir / "index.json").write_text(
+        json.dumps({"schema_version": 1, "run_ids": []}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="legacy longitudinal store"):
+        prune_store(
+            store_dir=store_dir,
+            max_age_days=None,
+            max_runs=2,
+            apply=False,
+            now=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
+        )
 
 
 def test_prune_store_blocks_when_store_lock_is_held(tmp_path: Path) -> None:

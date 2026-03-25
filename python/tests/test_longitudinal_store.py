@@ -133,33 +133,24 @@ def test_ingest_dedupes_identical_payload_from_different_paths(tmp_path: Path) -
     assert len(load_longitudinal_rows(store_dir)) == 2
 
 
-def test_ingest_recovers_when_index_missing_but_rows_exist(tmp_path: Path) -> None:
+def test_ingest_rejects_legacy_jsonl_store_until_migrated(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
     result_path.write_text(json.dumps(_result_payload()), encoding="utf-8")
     store_dir = tmp_path / "store"
-
-    first = ingest_benchmark_result(
-        store_dir=store_dir,
-        result_path=result_path,
-        revision="rev1",
-        commit_timestamp="2026-01-01T00:00:00+00:00",
-    )
-    assert first["rows_appended"] == 2
-
-    assert store_db_path(store_dir).exists()
-    assert not (store_dir / "rows.jsonl").exists()
-    assert not (store_dir / "index.json").exists()
-
-    second = ingest_benchmark_result(
-        store_dir=store_dir,
-        result_path=result_path,
-        revision="rev1",
-        commit_timestamp="2026-01-01T00:00:00+00:00",
+    store_dir.mkdir(parents=True, exist_ok=True)
+    (store_dir / "rows.jsonl").write_text("{}", encoding="utf-8")
+    (store_dir / "index.json").write_text(
+        json.dumps({"schema_version": 1, "run_ids": []}),
+        encoding="utf-8",
     )
 
-    assert second["rows_appended"] == 0
-    assert second["deduped"] is True
-    assert len(load_longitudinal_rows(store_dir)) == 2
+    with pytest.raises(ValueError, match="legacy longitudinal store"):
+        ingest_benchmark_result(
+            store_dir=store_dir,
+            result_path=result_path,
+            revision="rev1",
+            commit_timestamp="2026-01-01T00:00:00+00:00",
+        )
 
 
 def test_ingest_uses_queryable_sqlite_backend(tmp_path: Path) -> None:

@@ -96,7 +96,7 @@ The matrix state file also stores a fingerprint of the matrix configuration. Reu
 
 ### Ingest results
 
-Normalize the raw JSON results into an append-safe time-series store:
+Normalize the raw JSON results into a SQLite-backed time-series store:
 
 ```bash
 ./scripts/longitudinal_bench.sh ingest-results \
@@ -106,7 +106,7 @@ Normalize the raw JSON results into an append-safe time-series store:
   --store-dir longitudinal/store
 ```
 
-Duplicate ingests are deduplicated by run-id, so this is safe to rerun.
+Duplicate ingests are deduplicated by run-id in the SQLite store, so this is safe to rerun.
 
 ### Generate reports
 
@@ -313,7 +313,7 @@ If you intentionally change matrix configuration such as suites, scales, warmup,
 
 ### Ingest or report gaps
 
-**Symptoms:** Expected rows are missing from `rows.jsonl`, or the report is missing expected revisions.
+**Symptoms:** Expected rows are missing from `store.sqlite3`, or the report is missing expected revisions.
 
 **Diagnose:** Verify that the expected result files exist:
 
@@ -343,8 +343,7 @@ longitudinal/
   manifests/                  # revision manifests (JSON)
   artifacts/<sha>/            # built delta-bench binary + metadata.json per revision
   state/matrix-state.json     # resumable matrix status, config fingerprint, attempts, and failure reasons
-  store/rows.jsonl            # normalized append-safe time-series rows
-  store/index.json            # ingested run-id dedupe index
+  store/store.sqlite3         # normalized time-series runs + case rows
   reports/summary.md          # CI-friendly markdown summary
   reports/trends.html         # HTML trend report with inline charts
   releases/<lane>/            # release-tag workflow artifacts (per lane)

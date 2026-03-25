@@ -9,6 +9,7 @@ import pytest
 from delta_bench_longitudinal.store import (
     ingest_benchmark_result,
     load_longitudinal_rows,
+    store_db_path,
 )
 
 
@@ -145,8 +146,9 @@ def test_ingest_recovers_when_index_missing_but_rows_exist(tmp_path: Path) -> No
     )
     assert first["rows_appended"] == 2
 
-    # Simulate a crash window where rows are written but index is missing.
-    (store_dir / "index.json").unlink()
+    assert store_db_path(store_dir).exists()
+    assert not (store_dir / "rows.jsonl").exists()
+    assert not (store_dir / "index.json").exists()
 
     second = ingest_benchmark_result(
         store_dir=store_dir,
@@ -160,7 +162,7 @@ def test_ingest_recovers_when_index_missing_but_rows_exist(tmp_path: Path) -> No
     assert len(load_longitudinal_rows(store_dir)) == 2
 
 
-def test_ingest_dedupes_without_rows_rescan_when_index_is_fresh(tmp_path: Path) -> None:
+def test_ingest_uses_queryable_sqlite_backend(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
     result_path.write_text(json.dumps(_result_payload()), encoding="utf-8")
     store_dir = tmp_path / "store"
@@ -173,20 +175,12 @@ def test_ingest_dedupes_without_rows_rescan_when_index_is_fresh(tmp_path: Path) 
     )
     assert first["rows_appended"] == 2
 
-    rows_path = store_dir / "rows.jsonl"
-    try:
-        rows_path.chmod(0)
-        second = ingest_benchmark_result(
-            store_dir=store_dir,
-            result_path=result_path,
-            revision="rev1",
-            commit_timestamp="2026-01-01T00:00:00+00:00",
-        )
-    finally:
-        rows_path.chmod(0o644)
-
-    assert second["rows_appended"] == 0
-    assert second["deduped"] is True
+    db_path = store_db_path(store_dir)
+    assert db_path.exists()
+    rows = load_longitudinal_rows(store_dir)
+    assert len(rows) == 2
+    assert not (store_dir / "rows.jsonl").exists()
+    assert not (store_dir / "index.json").exists()
 
 
 def test_ingest_rejects_non_v2_payload(tmp_path: Path) -> None:

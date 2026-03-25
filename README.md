@@ -39,6 +39,13 @@ cargo test --locked
 | Look up suites, metrics, flags, env vars | [Reference](docs/reference.md) | You need to find a specific configuration option or metric name. |
 | Understand internals and architecture | [Architecture](docs/architecture.md) | You want to know how the harness is structured and how data flows. |
 
+## Project Governance
+
+- [Contributing](CONTRIBUTING.md)
+- [Security Policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
+- [License](LICENSE)
+
 ## Command Quick Reference
 
 | Script | Purpose |

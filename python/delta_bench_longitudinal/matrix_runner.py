@@ -58,6 +58,11 @@ def load_matrix_state(path: Path | str) -> dict:
         raise ValueError(
             f"invalid matrix state at {state_path}: expected 'cases' to be an object"
         )
+    for key, case in cases.items():
+        if not isinstance(case, dict):
+            raise ValueError(
+                f"invalid matrix state at {state_path}: expected case {key!r} to be an object"
+            )
     return state
 
 

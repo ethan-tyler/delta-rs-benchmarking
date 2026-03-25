@@ -148,7 +148,15 @@ def test_load_matrix_state_wraps_invalid_json(tmp_path: Path) -> None:
         load_matrix_state(state_path)
 
 
-@pytest.mark.parametrize("raw_state", ["[]", '"oops"', '{"cases": []}'])
+@pytest.mark.parametrize(
+    "raw_state",
+    [
+        "[]",
+        '"oops"',
+        '{"cases": []}',
+        '{"cases": {"rev|read_scan|sf1": [1]}}',
+    ],
+)
 def test_load_matrix_state_rejects_invalid_shapes(
     tmp_path: Path, raw_state: str
 ) -> None:

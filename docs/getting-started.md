@@ -60,7 +60,7 @@ DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
 If you plan to run `interop_py` cases (or use `--suite all --runner all`), install Python dependencies in the interpreter used by `DELTA_BENCH_INTEROP_PYTHON` (defaults to `python3`):
 
 ```bash
-python3 -m pip install pandas polars pyarrow
+python3 -m pip install -r python/requirements-audit.txt
 ```
 
 Without these packages, interop cases are classified as `expected_failure` instead of `supported`. `./scripts/bench.sh doctor` now reports missing interop dependencies and an install hint.

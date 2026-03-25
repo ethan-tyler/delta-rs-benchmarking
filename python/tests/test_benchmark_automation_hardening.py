@@ -422,6 +422,9 @@ def test_gitignore_ignores_checkout_lock_artifacts() -> None:
     gitignore = GITIGNORE.read_text(encoding="utf-8")
     assert "*.delta_bench_checkout.lock" in gitignore
     assert "*.delta_bench_checkout.lock.dir/" in gitignore
+    assert "Best-in-Class Benchmark Suite" not in gitignore
+    assert "Research Prompt: Design and Build" not in gitignore
+    assert "Below is a **complete, production-qualit" not in gitignore
 
 
 def test_compare_branch_default_checkout_lock_does_not_block_initial_clone() -> None:

@@ -43,3 +43,44 @@ jobs:
           set -euo pipefail
           cd python
           python3 -m pytest -q tests
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install cargo-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-audit --locked
+
+      - name: Audit Rust dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo audit
+
+      - name: Install pip-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pip-audit
+
+      - name: Audit Python dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip_audit ./python

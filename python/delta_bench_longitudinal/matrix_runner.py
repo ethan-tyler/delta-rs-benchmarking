@@ -48,9 +48,17 @@ def load_matrix_state(path: Path | str) -> dict:
     if not state_path.exists():
         return {"schema_version": 1, "cases": {}}
     try:
-        return json.loads(state_path.read_text(encoding="utf-8"))
+        state = json.loads(state_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid matrix state at {state_path}: {exc}") from exc
+    if not isinstance(state, dict):
+        raise ValueError(f"invalid matrix state at {state_path}: expected object")
+    cases = state.get("cases", {})
+    if not isinstance(cases, dict):
+        raise ValueError(
+            f"invalid matrix state at {state_path}: expected 'cases' to be an object"
+        )
+    return state
 
 
 def save_matrix_state(path: Path | str, data: dict) -> None:
@@ -70,9 +78,21 @@ def save_matrix_state(path: Path | str, data: dict) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         temp_path.replace(state_path)
+        _fsync_parent_directory(state_path)
     finally:
         if temp_path.exists():
             temp_path.unlink()
+
+
+def _fsync_parent_directory(path: Path) -> None:
+    if os.name != "posix":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    dir_fd = os.open(path.parent, flags)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def run_matrix(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import threading
 import time
@@ -147,6 +148,17 @@ def test_load_matrix_state_wraps_invalid_json(tmp_path: Path) -> None:
         load_matrix_state(state_path)
 
 
+@pytest.mark.parametrize("raw_state", ["[]", '"oops"', '{"cases": []}'])
+def test_load_matrix_state_rejects_invalid_shapes(
+    tmp_path: Path, raw_state: str
+) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    state_path.write_text(raw_state, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid matrix state"):
+        load_matrix_state(state_path)
+
+
 def test_save_matrix_state_uses_atomic_replace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     state_path = tmp_path / "matrix_state.json"
     recorded_replace: dict[str, Path] = {}
@@ -166,6 +178,44 @@ def test_save_matrix_state_uses_atomic_replace(tmp_path: Path, monkeypatch: pyte
     assert recorded_replace["source"] != state_path
     assert not recorded_replace["source"].exists()
     assert load_matrix_state(state_path) == data
+
+
+def test_save_matrix_state_fsyncs_parent_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    original_open = os.open
+    original_fsync = os.fsync
+    original_close = os.close
+    directory_fd = 98765
+    fsynced_fds: list[int] = []
+    closed_fds: list[int] = []
+
+    def tracking_open(path: str | bytes, flags: int, mode: int = 0o777) -> int:
+        if Path(path) == state_path.parent:
+            return directory_fd
+        return original_open(path, flags, mode)
+
+    def tracking_fsync(fd: int) -> None:
+        fsynced_fds.append(fd)
+        if fd == directory_fd:
+            return
+        original_fsync(fd)
+
+    def tracking_close(fd: int) -> None:
+        closed_fds.append(fd)
+        if fd == directory_fd:
+            return
+        original_close(fd)
+
+    monkeypatch.setattr(os, "open", tracking_open)
+    monkeypatch.setattr(os, "fsync", tracking_fsync)
+    monkeypatch.setattr(os, "close", tracking_close)
+
+    save_matrix_state(state_path, {"schema_version": 1, "cases": {}})
+
+    assert directory_fd in fsynced_fds
+    assert directory_fd in closed_fds
 
 
 def test_failed_case_is_retried_on_subsequent_run(tmp_path: Path) -> None:

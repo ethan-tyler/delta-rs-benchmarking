@@ -4,6 +4,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 
@@ -15,6 +16,15 @@ GITIGNORE = REPO_ROOT / ".gitignore"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark.yml"
 NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
+
+
+def wait_for_condition(predicate: callable, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
 
 
 def test_compare_branch_sanitizes_branch_labels_for_cli() -> None:
@@ -232,6 +242,109 @@ def test_prepare_delta_rs_defaults_checkout_lock_outside_managed_checkout() -> N
     assert 'dirname "${checkout_dir}"' in script
     assert 'basename "${checkout_dir}"' in script
     assert ".delta_bench_checkout.lock" in script
+
+
+def test_prepare_delta_rs_initial_clone_locking() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        prepare_copy.chmod(0o755)
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        clone_log = temp_root / "clone.log"
+        release_clone = temp_root / "release-clone"
+        fake_git.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+
+clone_log={str(clone_log)!r}
+release_clone={str(release_clone)!r}
+
+if [[ "$1" == "clone" ]]; then
+  printf 'clone\\n' >> "$clone_log"
+  while [[ ! -f "$release_clone" ]]; do
+    sleep 0.05
+  done
+  dest="${{@: -1}}"
+  if [[ -e "$dest" ]] && [[ -n "$(find "$dest" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+    printf "fatal: destination path '%s' already exists and is not an empty directory.\\n" "$dest" >&2
+    exit 128
+  fi
+  mkdir -p "$dest/.git"
+  exit 0
+fi
+
+if [[ "$1" == "-C" ]]; then
+  shift 2
+  case "${{1:-}}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    rev-parse)
+      if [[ "${{*: -1}}" == "HEAD" ]]; then
+        printf '0123456789abcdef0123456789abcdef01234567\\n'
+        exit 0
+      fi
+      exit 1
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        checkout_dir = temp_root / "delta-rs-under-test"
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["DELTA_RS_DIR"] = str(checkout_dir)
+
+        first = subprocess.Popen(
+            ["bash", str(prepare_copy)],
+            cwd=temp_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert wait_for_condition(
+            lambda: clone_log.exists()
+            and len(clone_log.read_text(encoding="utf-8").splitlines()) >= 1
+        )
+
+        second = subprocess.Popen(
+            ["bash", str(prepare_copy)],
+            cwd=temp_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        wait_for_condition(
+            lambda: clone_log.exists()
+            and len(clone_log.read_text(encoding="utf-8").splitlines()) >= 2,
+            timeout=3.0,
+        )
+
+        release_clone.write_text("ok\n", encoding="utf-8")
+        first_stdout, first_stderr = first.communicate(timeout=10)
+        second_stdout, second_stderr = second.communicate(timeout=10)
+
+        clone_count = len(clone_log.read_text(encoding="utf-8").splitlines())
+        assert first.returncode == 0, first_stderr or first_stdout
+        assert second.returncode == 0, second_stderr or second_stdout
+        assert clone_count == 1
+        assert (checkout_dir / ".git").exists()
 
 
 def test_gitignore_ignores_checkout_lock_artifacts() -> None:

@@ -93,12 +93,13 @@ cleanup_harness_overlay_untracked() {
 
 trap release_checkout_lock EXIT
 
+acquire_checkout_lock
+
 if [[ ! -d "${DELTA_RS_DIR}/.git" ]]; then
   echo "cloning ${DELTA_RS_REPO_URL} into ${DELTA_RS_DIR}"
   git clone --origin origin "${DELTA_RS_REPO_URL}" "${DELTA_RS_DIR}"
 fi
 
-acquire_checkout_lock
 cleanup_harness_overlay_untracked
 git -C "${DELTA_RS_DIR}" fetch origin
 

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -18,13 +20,19 @@ NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
 
 
-def wait_for_condition(predicate: callable, timeout: float = 5.0) -> bool:
+def wait_for_condition(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
             return True
         time.sleep(0.05)
     return predicate()
+
+
+def symlink_command(fake_bin: Path, name: str) -> None:
+    resolved = shutil.which(name)
+    assert resolved is not None, f"missing system command for test: {name}"
+    (fake_bin / name).symlink_to(resolved)
 
 
 def test_compare_branch_sanitizes_branch_labels_for_cli() -> None:
@@ -258,6 +266,22 @@ def test_prepare_delta_rs_initial_clone_locking() -> None:
         fake_git = fake_bin / "git"
         clone_log = temp_root / "clone.log"
         release_clone = temp_root / "release-clone"
+        lock_wait_log = temp_root / "lock-wait.log"
+        for command in ("bash", "basename", "dirname", "find", "mkdir", "python3", "rm", "rmdir"):
+            symlink_command(fake_bin, command)
+        fake_sleep = fake_bin / "sleep"
+        fake_sleep.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${{1:-}}" == "1" ]]; then
+  printf 'lock-wait\\n' >> {str(lock_wait_log)!r}
+fi
+exec {shutil.which("sleep")!r} "$@"
+""",
+            encoding="utf-8",
+        )
+        fake_sleep.chmod(0o755)
         fake_git.write_text(
             f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -306,7 +330,7 @@ exit 99
 
         checkout_dir = temp_root / "delta-rs-under-test"
         env = os.environ.copy()
-        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["PATH"] = str(fake_bin)
         env["DELTA_RS_DIR"] = str(checkout_dir)
 
         first = subprocess.Popen(
@@ -330,11 +354,12 @@ exit 99
             stderr=subprocess.PIPE,
             text=True,
         )
-        wait_for_condition(
-            lambda: clone_log.exists()
-            and len(clone_log.read_text(encoding="utf-8").splitlines()) >= 2,
+        assert wait_for_condition(
+            lambda: lock_wait_log.exists()
+            and len(lock_wait_log.read_text(encoding="utf-8").splitlines()) >= 1,
             timeout=3.0,
         )
+        assert len(clone_log.read_text(encoding="utf-8").splitlines()) == 1
 
         release_clone.write_text("ok\n", encoding="utf-8")
         first_stdout, first_stderr = first.communicate(timeout=10)
@@ -345,6 +370,52 @@ exit 99
         assert second.returncode == 0, second_stderr or second_stdout
         assert clone_count == 1
         assert (checkout_dir / ".git").exists()
+
+
+def test_prepare_delta_rs_rejects_checkout_lock_override_inside_managed_checkout_before_first_clone() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        prepare_copy.chmod(0o755)
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+printf "git should not be invoked\\n" >&2
+exit 99
+""",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_BENCH_CHECKOUT_LOCK_FILE"] = str(
+            temp_root / ".delta-rs-under-test" / ".delta_bench_checkout.lock"
+        )
+
+        result = subprocess.run(
+            ["bash", str(prepare_copy)],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "DELTA_BENCH_CHECKOUT_LOCK_FILE must be outside DELTA_RS_DIR before initial clone"
+            in result.stderr
+        )
+        assert "git should not be invoked" not in result.stderr
 
 
 def test_gitignore_ignores_checkout_lock_artifacts() -> None:

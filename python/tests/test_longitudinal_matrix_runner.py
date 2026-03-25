@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 import threading
 import time
@@ -134,6 +135,7 @@ def test_state_roundtrip(tmp_path: Path) -> None:
     state_path = tmp_path / "matrix_state.json"
     data = {"schema_version": 1, "cases": {}}
     save_matrix_state(state_path, data)
+    assert json.loads(state_path.read_text(encoding="utf-8")) == data
     assert load_matrix_state(state_path) == data
 
 

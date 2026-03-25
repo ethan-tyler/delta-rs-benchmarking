@@ -137,6 +137,35 @@ def test_state_roundtrip(tmp_path: Path) -> None:
     assert load_matrix_state(state_path) == data
 
 
+def test_load_matrix_state_wraps_invalid_json(tmp_path: Path) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    state_path.write_text("{not valid json\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid matrix state"):
+        load_matrix_state(state_path)
+
+
+def test_save_matrix_state_uses_atomic_replace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    recorded_replace: dict[str, Path] = {}
+    original_replace = Path.replace
+
+    def tracking_replace(self: Path, target: Path | str) -> Path:
+        recorded_replace["source"] = self
+        recorded_replace["target"] = Path(target)
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", tracking_replace)
+
+    data = {"schema_version": 1, "cases": {"rev|suite|sf1": {"status": "success"}}}
+    save_matrix_state(state_path, data)
+
+    assert recorded_replace["target"] == state_path
+    assert recorded_replace["source"] != state_path
+    assert not recorded_replace["source"].exists()
+    assert load_matrix_state(state_path) == data
+
+
 def test_failed_case_is_retried_on_subsequent_run(tmp_path: Path) -> None:
     state_path = tmp_path / "matrix_state.json"
     config = MatrixRunConfig(

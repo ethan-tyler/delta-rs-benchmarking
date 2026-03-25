@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -46,15 +47,32 @@ def load_matrix_state(path: Path | str) -> dict:
     state_path = Path(path)
     if not state_path.exists():
         return {"schema_version": 1, "cases": {}}
-    return json.loads(state_path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid matrix state at {state_path}: {exc}") from exc
 
 
 def save_matrix_state(path: Path | str, data: dict) -> None:
     state_path = Path(path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    fd, temp_name = tempfile.mkstemp(
+        dir=state_path.parent,
+        prefix=f".{state_path.name}.",
+        suffix=".tmp",
+        text=True,
     )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp_path.replace(state_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
 
 
 def run_matrix(

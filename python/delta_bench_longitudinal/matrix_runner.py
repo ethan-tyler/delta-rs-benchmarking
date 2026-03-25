@@ -53,6 +53,11 @@ def load_matrix_state(path: Path | str) -> dict:
         raise ValueError(f"invalid matrix state at {state_path}: {exc}") from exc
     if not isinstance(state, dict):
         raise ValueError(f"invalid matrix state at {state_path}: expected object")
+    stored_config = state.get("config")
+    if stored_config is not None and not isinstance(stored_config, dict):
+        raise ValueError(
+            f"invalid matrix state at {state_path}: expected 'config' to be an object"
+        )
     cases = state.get("cases", {})
     if not isinstance(cases, dict):
         raise ValueError(
@@ -124,6 +129,7 @@ def run_matrix(
     _validate_tokens(config.scales, "scale")
 
     state = load_matrix_state(config.state_path)
+    _ensure_matrix_state_config(state, config)
     cases = state.setdefault("cases", {})
     run_exec = executor or (
         lambda a, s, sc, at, to: _default_executor(a, s, sc, at, to, config)
@@ -195,6 +201,34 @@ def run_matrix(
             save_matrix_state(config.state_path, state)
 
     return state
+
+
+def _ensure_matrix_state_config(state: dict, config: MatrixRunConfig) -> None:
+    expected = _matrix_state_config_fingerprint(config)
+    stored = state.get("config")
+    if stored is None:
+        if state.get("cases"):
+            raise ValueError(
+                f"state file was created with different config: {config.state_path}"
+            )
+        state["config"] = expected
+        return
+    if stored != expected:
+        raise ValueError(
+            f"state file was created with different config: {config.state_path}"
+        )
+
+
+def _matrix_state_config_fingerprint(config: MatrixRunConfig) -> dict[str, object]:
+    return {
+        "suites": list(config.suites),
+        "scales": list(config.scales),
+        "warmup": config.warmup,
+        "iterations": config.iterations,
+        "fixtures_dir": str(config.fixtures_dir),
+        "results_dir": str(config.results_dir),
+        "label_prefix": config.label_prefix,
+    }
 
 
 def _execute_case(

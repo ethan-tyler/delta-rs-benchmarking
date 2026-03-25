@@ -18,12 +18,37 @@ from delta_bench_longitudinal.matrix_runner import (
 )
 
 
+def _state_config_fingerprint(
+    *,
+    suites: list[str],
+    scales: list[str],
+    warmup: int = 1,
+    iterations: int = 5,
+    fixtures_dir: Path | str = "fixtures",
+    results_dir: Path | str = "results",
+    label_prefix: str = "longitudinal",
+) -> dict[str, object]:
+    return {
+        "suites": suites,
+        "scales": scales,
+        "warmup": warmup,
+        "iterations": iterations,
+        "fixtures_dir": str(fixtures_dir),
+        "results_dir": str(results_dir),
+        "label_prefix": label_prefix,
+    }
+
+
 def test_resume_skips_successful_cases(tmp_path: Path) -> None:
     state_path = tmp_path / "matrix_state.json"
     save_matrix_state(
         state_path,
         {
             "schema_version": 1,
+            "config": _state_config_fingerprint(
+                suites=["read_scan"],
+                scales=["sf1"],
+            ),
             "cases": {
                 "revA|read_scan|sf1": {
                     "revision": "revA",
@@ -96,6 +121,59 @@ def test_retry_until_success_within_bound(tmp_path: Path) -> None:
     assert case["status"] == "success"
     assert case["attempts"] == 3
     assert attempts["count"] == 3
+
+
+def test_run_matrix_rejects_resume_state_from_different_config(tmp_path: Path) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    fixtures_dir = tmp_path / "fixtures"
+    results_dir = tmp_path / "results"
+    artifact = MatrixArtifact(
+        revision="revCfg", commit_timestamp="t", artifact_path="/tmp/cfg"
+    )
+
+    initial_config = MatrixRunConfig(
+        suites=["read_scan"],
+        scales=["sf1"],
+        timeout_seconds=1,
+        max_retries=0,
+        state_path=state_path,
+        fixtures_dir=fixtures_dir,
+        results_dir=results_dir,
+        iterations=5,
+    )
+    run_matrix(
+        artifacts=[artifact],
+        config=initial_config,
+        executor=lambda *_args: (0, ""),
+    )
+
+    state = load_matrix_state(state_path)
+    assert state["config"] == _state_config_fingerprint(
+        suites=["read_scan"],
+        scales=["sf1"],
+        fixtures_dir=fixtures_dir,
+        results_dir=results_dir,
+        iterations=5,
+    )
+
+    changed_config = MatrixRunConfig(
+        suites=["read_scan"],
+        scales=["sf1"],
+        timeout_seconds=1,
+        max_retries=0,
+        state_path=state_path,
+        fixtures_dir=fixtures_dir,
+        results_dir=results_dir,
+        iterations=9,
+    )
+    with pytest.raises(
+        ValueError, match="state file was created with different config"
+    ):
+        run_matrix(
+            artifacts=[artifact],
+            config=changed_config,
+            executor=lambda *_args: (0, ""),
+        )
 
 
 def test_timeout_is_recorded_as_failure_reason(tmp_path: Path) -> None:

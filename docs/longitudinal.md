@@ -92,6 +92,8 @@ Execute benchmark suites across all revisions:
 
 The `--state-path` file tracks which (revision, suite, scale) cells have completed, failed, or are pending. If the run is interrupted, rerunning this command resumes from where it left off.
 
+The matrix state file also stores a fingerprint of the matrix configuration. Reuse the same `--state-path` only when `--suite`, `--scale`, warmup, iterations, fixtures directory, results directory, and label prefix are unchanged.
+
 ### Ingest results
 
 Normalize the raw JSON results into an append-safe time-series store:
@@ -295,6 +297,8 @@ Look at the `(revision, suite, scale)` keys with failure status and their `failu
 
 **Recover:** Fix the root cause (increase timeout for legitimately slow cases, or fix the underlying issue) and rerun `run-matrix` with the same manifest and state path. Successful cells are skipped; failed cells resume with bounded retry.
 
+If you intentionally change matrix configuration such as suites, scales, warmup, iterations, fixtures directory, results directory, or label prefix, start with a new `--state-path` instead of reusing the old file. The runner now rejects configuration-mismatched state files to prevent partial resumes from mixing incompatible runs.
+
 ```bash
 ./scripts/longitudinal_bench.sh run-matrix \
   --manifest longitudinal/manifests/<manifest>.json \
@@ -338,7 +342,7 @@ ls results/<label-prefix>-<revision>/<suite>.json
 longitudinal/
   manifests/                  # revision manifests (JSON)
   artifacts/<sha>/            # built delta-bench binary + metadata.json per revision
-  state/matrix-state.json     # resumable matrix status, attempts, and failure reasons
+  state/matrix-state.json     # resumable matrix status, config fingerprint, attempts, and failure reasons
   store/rows.jsonl            # normalized append-safe time-series rows
   store/index.json            # ingested run-id dedupe index
   reports/summary.md          # CI-friendly markdown summary

@@ -29,6 +29,18 @@ def _run_script(
     )
 
 
+def _self_hosted_benchmark_workflows() -> list[Path]:
+    workflows = []
+    for workflow_path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        workflow = workflow_path.read_text(encoding="utf-8")
+        if "runs-on: [self-hosted, delta-bench]" not in workflow:
+            continue
+        if "./scripts/" not in workflow:
+            continue
+        workflows.append(workflow_path)
+    return workflows
+
+
 def test_security_check_requires_explicit_expected_egress_hash() -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -83,32 +95,35 @@ def test_security_mode_uses_locking_for_state_transitions() -> None:
 
 
 def test_self_hosted_benchmark_workflows_enforce_runner_preflight() -> None:
-    compare_workflows = (
-        "benchmark.yml",
-        "benchmark-prerelease.yml",
-    )
-    explicit_preflight_workflows = (
-        "benchmark-nightly.yml",
-        "longitudinal-nightly.yml",
-    )
-
     required_flags = (
         "--enforce-run-mode",
         "--require-no-public-ipv4",
         "--require-egress-policy",
     )
+    explicit_preflight = (
+        "./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy"
+    )
 
-    for workflow_name in compare_workflows:
-        workflow = (WORKFLOWS_DIR / workflow_name).read_text(encoding="utf-8")
-        for flag in required_flags:
-            assert flag in workflow, f"{workflow_name} missing {flag}"
-        assert "./scripts/compare_branch.sh" in workflow
+    workflows = _self_hosted_benchmark_workflows()
+    assert workflows, "expected at least one self-hosted benchmark workflow"
 
-    for workflow_name in explicit_preflight_workflows:
-        workflow = (WORKFLOWS_DIR / workflow_name).read_text(encoding="utf-8")
+    for workflow_path in workflows:
+        workflow = workflow_path.read_text(encoding="utf-8")
         for flag in required_flags:
-            assert flag in workflow, f"{workflow_name} missing {flag}"
+            assert flag in workflow, f"{workflow_path.name} missing {flag}"
         assert (
-            "./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy"
-            in workflow
-        ), f"{workflow_name} missing explicit security_check preflight"
+            "DELTA_BENCH_EGRESS_POLICY_SHA256" in workflow
+        ), f"{workflow_path.name} missing DELTA_BENCH_EGRESS_POLICY_SHA256 wiring"
+        if "./scripts/compare_branch.sh" in workflow:
+            continue
+        assert explicit_preflight in workflow, (
+            f"{workflow_path.name} missing explicit security_check preflight"
+        )
+        preflight_index = workflow.index(explicit_preflight)
+        run_index = len(workflow)
+        for benchmark_cmd in ("./scripts/bench.sh run", "./scripts/longitudinal_bench.sh run-matrix"):
+            if benchmark_cmd in workflow:
+                run_index = min(run_index, workflow.index(benchmark_cmd))
+        assert preflight_index < run_index, (
+            f"{workflow_path.name} runs benchmark execution before security_check preflight"
+        )

@@ -7,6 +7,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 README = REPO_ROOT / "README.md"
 DOCS_DIR = REPO_ROOT / "docs"
+WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 DOC_FILES = [README, *sorted(DOCS_DIR.glob("*.md"))]
 DOCS_CHECK = REPO_ROOT / "scripts" / "docs_check.sh"
 
@@ -91,6 +92,18 @@ def _assert_relative_link_resolves(source_file: Path, link_target: str) -> None:
     assert resolved.exists(), f"broken relative link in {source_file}: {link_target}"
 
 
+def _self_hosted_benchmark_workflow_names() -> list[str]:
+    workflow_names = []
+    for workflow_path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        workflow = workflow_path.read_text(encoding="utf-8")
+        if "runs-on: [self-hosted, delta-bench]" not in workflow:
+            continue
+        if "./scripts/" not in workflow:
+            continue
+        workflow_names.append(workflow_path.name)
+    return workflow_names
+
+
 def test_docs_check_entrypoint_exists_and_is_executable() -> None:
     assert DOCS_CHECK.exists(), "missing scripts/docs_check.sh"
     assert DOCS_CHECK.stat().st_mode & 0o111, "scripts/docs_check.sh must be executable"
@@ -143,15 +156,13 @@ def test_longitudinal_state_path_uses_matrix_state_json_consistently() -> None:
 
 def test_cloud_runner_docs_cover_enforced_workflows_and_required_env() -> None:
     markdown = (DOCS_DIR / "cloud-runner.md").read_text(encoding="utf-8")
-    for workflow_name in (
-        "benchmark.yml",
-        "benchmark-nightly.yml",
-        "benchmark-prerelease.yml",
-        "longitudinal-nightly.yml",
-    ):
+    workflow_names = _self_hosted_benchmark_workflow_names()
+    assert workflow_names, "expected at least one self-hosted benchmark workflow"
+    for workflow_name in workflow_names:
         assert workflow_name in markdown
 
     for env_var in (
+        "DELTA_BENCH_EGRESS_POLICY_SHA256",
         "BENCH_RUNNER_MODE",
         "BENCH_STORAGE_BACKEND",
         "BENCH_STORAGE_OPTIONS",

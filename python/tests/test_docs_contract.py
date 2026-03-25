@@ -139,3 +139,27 @@ def test_longitudinal_state_path_uses_matrix_state_json_consistently() -> None:
     for file_path in markdown_files:
         content = file_path.read_text(encoding="utf-8")
         assert "matrix.json" not in content, f"{file_path} still references matrix.json"
+
+
+def test_cloud_runner_docs_cover_enforced_workflows_and_required_env() -> None:
+    markdown = (DOCS_DIR / "cloud-runner.md").read_text(encoding="utf-8")
+    for workflow_name in (
+        "benchmark.yml",
+        "benchmark-nightly.yml",
+        "benchmark-prerelease.yml",
+        "longitudinal-nightly.yml",
+    ):
+        assert workflow_name in markdown
+
+    for env_var in (
+        "BENCH_RUNNER_MODE",
+        "BENCH_STORAGE_BACKEND",
+        "BENCH_STORAGE_OPTIONS",
+        "BENCH_BACKEND_PROFILE",
+    ):
+        assert env_var in markdown
+
+    assert (
+        "./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy"
+        in markdown
+    )

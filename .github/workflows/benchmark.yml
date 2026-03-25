@@ -181,6 +181,7 @@ jobs:
           BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
           BENCH_BACKEND_PROFILE: ${{ vars.BENCH_BACKEND_PROFILE }}
           BENCH_RUNNER_MODE: ${{ vars.BENCH_RUNNER_MODE }}
+          DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
         run: |
           set -euo pipefail
           status=0
@@ -205,6 +206,9 @@ jobs:
           ./scripts/compare_branch.sh \
             "${storage_args[@]}" \
             "${bench_args[@]}" \
+            --enforce-run-mode \
+            --require-no-public-ipv4 \
+            --require-egress-policy \
             --base-sha "$BASE_SHA" \
             --candidate-sha "$HEAD_SHA" \
             "$SUITE" > benchmark_output.md 2>&1

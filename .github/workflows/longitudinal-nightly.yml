@@ -44,6 +44,7 @@ jobs:
       LONGITUDINAL_RETENTION_MAX_ARTIFACTS: ${{ vars.LONGITUDINAL_RETENTION_MAX_ARTIFACTS || '120' }}
       LONGITUDINAL_RETENTION_RUN_DAYS: ${{ vars.LONGITUDINAL_RETENTION_RUN_DAYS || '60' }}
       LONGITUDINAL_RETENTION_MAX_RUNS: ${{ vars.LONGITUDINAL_RETENTION_MAX_RUNS || '200' }}
+      DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
 
     steps:
       - name: Checkout repository
@@ -78,6 +79,12 @@ jobs:
           ./scripts/longitudinal_bench.sh build-artifacts \
             --manifest "${MANIFEST_PATH}" \
             --artifacts-dir "${ARTIFACTS_DIR}"
+
+      - name: Enforce runner security preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
 
       - name: Run nightly matrix
         shell: bash

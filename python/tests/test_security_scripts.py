@@ -9,6 +9,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
+WORKFLOWS_DIR = REPO_ROOT / ".github" / "workflows"
 
 
 def _run_script(
@@ -79,3 +80,35 @@ def test_security_mode_uses_locking_for_state_transitions() -> None:
     script = (SCRIPTS_DIR / "security_mode.sh").read_text(encoding="utf-8")
     assert "flock" in script
     assert "security-mode.lock" in script
+
+
+def test_self_hosted_benchmark_workflows_enforce_runner_preflight() -> None:
+    compare_workflows = (
+        "benchmark.yml",
+        "benchmark-prerelease.yml",
+    )
+    explicit_preflight_workflows = (
+        "benchmark-nightly.yml",
+        "longitudinal-nightly.yml",
+    )
+
+    required_flags = (
+        "--enforce-run-mode",
+        "--require-no-public-ipv4",
+        "--require-egress-policy",
+    )
+
+    for workflow_name in compare_workflows:
+        workflow = (WORKFLOWS_DIR / workflow_name).read_text(encoding="utf-8")
+        for flag in required_flags:
+            assert flag in workflow, f"{workflow_name} missing {flag}"
+        assert "./scripts/compare_branch.sh" in workflow
+
+    for workflow_name in explicit_preflight_workflows:
+        workflow = (WORKFLOWS_DIR / workflow_name).read_text(encoding="utf-8")
+        for flag in required_flags:
+            assert flag in workflow, f"{workflow_name} missing {flag}"
+        assert (
+            "./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy"
+            in workflow
+        ), f"{workflow_name} missing explicit security_check preflight"

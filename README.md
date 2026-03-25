@@ -28,6 +28,22 @@ cargo test --locked
 (cd python && python3 -m pytest -q tests)
 ```
 
+For the dependency audit baseline that runs beside those tests:
+
+```bash
+cargo audit \
+  --ignore RUSTSEC-2026-0037 \
+  --ignore RUSTSEC-2026-0041 \
+  --ignore RUSTSEC-2026-0049
+python3 -m pip_audit -r python/requirements-audit.txt
+```
+
+Self-hosted benchmark workflows also block execution unless runner preflight passes:
+
+```bash
+./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
+```
+
 ## What You Can Do
 
 | Goal | Guide | When to use it |
@@ -67,5 +83,6 @@ Pass `--help` to any script for full usage details.
 | Runners | Rust native and Python interop (pandas, polars, pyarrow) |
 | Fixtures | Deterministic seed-based generation with normalized result schema |
 | Comparison | Branch-to-branch with multi-run aggregation and grouped reporting |
-| Longitudinal | Revision benchmarking with resumable execution and trend reports |
+| Longitudinal | Revision benchmarking with resumable `matrix-state.json` checkpoints, SQLite-backed history, and trend reports |
+| Workflow hardening | Self-hosted runs require run mode, no public IPv4, and egress-policy preflight before execution |
 | Release tracking | `rust-v*` and `python-v*` tag history |

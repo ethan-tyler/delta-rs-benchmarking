@@ -8,7 +8,9 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 - [Benchmark Suites and Cases](#benchmark-suites-and-cases)
 - [Metrics Reference](#metrics-reference)
 - [CLI Commands and Flags](#cli-commands-and-flags)
+- [Repository Verification Baseline](#repository-verification-baseline)
 - [Environment Variables](#environment-variables)
+- [Longitudinal State and Store](#longitudinal-state-and-store)
 - [Datasets and Scales](#datasets-and-scales)
 - [Fixture Tables](#fixture-tables)
 - [Result Schema v2](#result-schema-v2)
@@ -31,6 +33,8 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 | **Manifest** | A YAML or JSON file that declares which benchmark cases to execute and what assertions to validate. |
 | **Backend profile** | A `.env` file under `backends/` with storage configuration defaults (S3 bucket, locking, region). |
 | **Lane** | A release-tag track for longitudinal benchmarking (e.g., `rust` lane for `rust-v*` tags, `python` lane for `python-v*`). |
+| **Matrix state** | The resumable JSON checkpoint written by `run-matrix`, including per-cell execution status and a configuration fingerprint. |
+| **Longitudinal store** | The SQLite database (`store.sqlite3`) that holds normalized run metadata and case rows for ingest/report/prune. |
 | **Fidelity** | System-level metadata (CPU model, kernel, run mode) captured alongside results to ensure reproducibility. |
 | **cv_pct** | Coefficient of variation as a percentage. Measures result noise. Below 5% is good; above 10% warrants rerunning. |
 
@@ -280,7 +284,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 
 ### `longitudinal_bench.sh` — Longitudinal pipeline
 
-Subcommands: `select-revisions`, `build-artifacts`, `run-matrix`, `ingest-results`, `report`, `prune`, `orchestrate`. See [Longitudinal Benchmarking](longitudinal.md) for full flag documentation per subcommand.
+Subcommands: `select-revisions`, `build-artifacts`, `run-matrix`, `ingest-results`, `report`, `prune`, `orchestrate`. `run-matrix` writes a resumable `matrix-state.json` checkpoint, and `ingest-results` / `report` / `prune` operate on a SQLite `store.sqlite3` store. See [Longitudinal Benchmarking](longitudinal.md) for full flag documentation per subcommand.
 
 ### `cleanup_local.sh` — Safe artifact cleanup
 
@@ -293,6 +297,18 @@ Subcommands: `select-revisions`, `build-artifacts`, `run-matrix`, `ingest-result
 | `--older-than-days N` | — | Only remove items older than N days |
 | `--allow-outside-root` | — | Allow cleanup outside repo root |
 | `--apply` | `false` | Execute deletions (dry-run without this) |
+
+## Repository Verification Baseline
+
+These commands are the current repo-wide baseline for code, dependency, and self-hosted control-plane verification.
+
+| Scope | Command | Notes |
+|---|---|---|
+| Rust tests | `cargo test --locked` | Matches the primary CI test job. |
+| Python tests | `(cd python && python3 -m pytest -q tests)` | Matches the primary CI test job. |
+| Rust dependency audit | `cargo audit --ignore RUSTSEC-2026-0037 --ignore RUSTSEC-2026-0041 --ignore RUSTSEC-2026-0049` | Temporary triage for known upstream advisories; new advisories still fail the job. |
+| Python dependency audit | `python3 -m pip_audit -r python/requirements-audit.txt` | Audits the actual interop/runtime dependency set. |
+| Self-hosted preflight | `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` | Required by self-hosted benchmark and longitudinal workflows before execution. |
 
 ## Environment Variables
 
@@ -357,6 +373,17 @@ These are captured in result metadata when running on cloud/hardened infrastruct
 | `DELTA_BENCH_RUN_MODE` | — | Security/execution mode |
 | `DELTA_BENCH_RUN_MODE_PATH` | — | Path to run mode configuration |
 | `DELTA_BENCH_MAINTENANCE_WINDOW_ID` | — | Maintenance window identifier |
+
+## Longitudinal State and Store
+
+The longitudinal pipeline persists two primary artifacts beyond the raw `results/<label>/<suite>.json` files:
+
+| Artifact | Typical location | Description |
+|---|---|---|
+| `matrix-state.json` | `longitudinal/state/matrix-state.json` or lane-specific `longitudinal/releases/<lane>/state/matrix-state.json` | JSON checkpoint for `run-matrix`. Stores per-cell status and a top-level `config` fingerprint so resume only happens against the same suite/scale/warmup/iteration/output contract. |
+| `store.sqlite3` | `longitudinal/store/store.sqlite3` or lane-specific `longitudinal/releases/<lane>/store/store.sqlite3` | SQLite database populated by `ingest-results`. Holds normalized run metadata and case rows used by `report` and `prune`. Duplicate ingests are deduplicated by run id. |
+
+Legacy `rows.jsonl` / `index.json` stores are no longer a supported primary path. If those files exist without `store.sqlite3`, ingest/report/prune fail fast so the operator can migrate or remove the stale state intentionally.
 
 ## Datasets and Scales
 

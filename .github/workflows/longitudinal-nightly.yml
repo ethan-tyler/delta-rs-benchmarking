@@ -52,6 +52,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Enforce runner security preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
+
       - name: Prepare delta-rs checkout
         shell: bash
         run: |
@@ -79,12 +85,6 @@ jobs:
           ./scripts/longitudinal_bench.sh build-artifacts \
             --manifest "${MANIFEST_PATH}" \
             --artifacts-dir "${ARTIFACTS_DIR}"
-
-      - name: Enforce runner security preflight
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
 
       - name: Run nightly matrix
         shell: bash

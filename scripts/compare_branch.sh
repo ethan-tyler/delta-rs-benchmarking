@@ -369,6 +369,13 @@ prepare_delta_rs_ref() {
   return 1
 }
 
+pin_ref_to_commit() {
+  local ref="${1:-}"
+  local mode="${2:-auto}"
+  prepare_delta_rs_ref "${ref}" "${mode}" >/dev/null
+  exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD
+}
+
 if [[ -n "${BASE_SHA_OVERRIDE}" ]] && ! is_commit_sha "${BASE_SHA_OVERRIDE}"; then
   echo "invalid --base-sha '${BASE_SHA_OVERRIDE}'; expected 7-40 hex characters" >&2
   exit 1
@@ -591,13 +598,13 @@ run_benchmark_suite_for_ref() {
   local quiet="${7:-0}"
 
   if (( quiet != 0 )); then
+    run_security_check >/dev/null
     prepare_delta_rs_ref "${ref}" "${mode}" >/dev/null
     run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh >/dev/null
-    run_security_check >/dev/null
   else
+    run_security_check
     prepare_delta_rs_ref "${ref}" "${mode}"
     run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-    run_security_check
   fi
 
   local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup "${warmup}" --iters "${iters}")
@@ -650,9 +657,6 @@ aggregate_run_labels() {
   run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.aggregate --output "${out_json}" --label "${out_label}" "${input_paths[@]}"
 }
 
-base_label="base-$(sanitize_label "${base_ref}")"
-cand_label="cand-$(sanitize_label "${candidate_ref}")"
-
 # Calculate total phases for progress display
 total_phases=$(( 1 + (BENCH_PREWARM_ITERS > 0 ? 1 : 0) + BENCH_COMPARE_RUNS + 1 + 1 ))
 current_phase=1
@@ -660,14 +664,26 @@ current_phase=1
 phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"
 current_phase=$((current_phase + 1))
 
+run_security_check
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 
 ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"
 ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"
 
+base_requested_ref="${base_ref}"
+candidate_requested_ref="${candidate_ref}"
+base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"
+base_ref_mode="commit"
+candidate_ref="$(pin_ref_to_commit "${candidate_ref}" "${candidate_ref_mode}")"
+candidate_ref_mode="commit"
+echo "Pinned base ref: ${base_requested_ref} -> ${base_ref}"
+echo "Pinned candidate ref: ${candidate_requested_ref} -> ${candidate_ref}"
+
+base_label="base-$(sanitize_label "${base_ref}")"
+cand_label="cand-$(sanitize_label "${candidate_ref}")"
+
 prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-run_security_check
 run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
 if (( BENCH_PREWARM_ITERS > 0 )); then

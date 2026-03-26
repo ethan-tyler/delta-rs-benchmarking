@@ -44,6 +44,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Enforce runner security preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
+
       - name: Run branch comparison
         shell: bash
         run: |

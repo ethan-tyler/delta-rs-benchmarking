@@ -19,6 +19,12 @@ GITIGNORE = REPO_ROOT / ".gitignore"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark.yml"
 NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
+LONGITUDINAL_NIGHTLY_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "longitudinal-nightly.yml"
+)
+LONGITUDINAL_RELEASE_HISTORY_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "longitudinal-release-history.yml"
+)
 LABEL_CONTRACT = REPO_ROOT / "python" / "tests" / "fixtures" / "label_contract.json"
 
 
@@ -35,6 +41,12 @@ def symlink_command(fake_bin: Path, name: str) -> None:
     resolved = shutil.which(name)
     assert resolved is not None, f"missing system command for test: {name}"
     (fake_bin / name).symlink_to(resolved)
+
+
+def assert_order(content: str, earlier: str, later: str) -> None:
+    assert earlier in content, f"missing earlier marker: {earlier}"
+    assert later in content, f"missing later marker: {later}"
+    assert content.index(earlier) < content.index(later)
 
 
 def test_compare_branch_sanitizes_branch_labels_for_cli() -> None:
@@ -90,6 +102,50 @@ def test_benchmark_workflow_uses_sha_pins_for_compare_refs() -> None:
     assert '"$BASE_SHA"' in workflow
     assert '"$HEAD_SHA"' in workflow
     assert '"$SUITE"' in workflow
+
+
+def test_benchmark_workflows_run_security_preflight_before_compare_execution() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert_order(
+        workflow,
+        "- name: Enforce runner security preflight",
+        "- name: Run branch compare",
+    )
+
+    prerelease = PRERELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert_order(
+        prerelease,
+        "- name: Enforce runner security preflight",
+        "- name: Run branch comparison",
+    )
+
+
+def test_longitudinal_workflows_run_security_preflight_before_checkout_prep() -> None:
+    nightly = LONGITUDINAL_NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    assert_order(
+        nightly,
+        "- name: Enforce runner security preflight",
+        "- name: Prepare delta-rs checkout",
+    )
+    assert_order(
+        nightly,
+        "- name: Enforce runner security preflight",
+        "- name: Build missing artifacts",
+    )
+
+    release_history = LONGITUDINAL_RELEASE_HISTORY_WORKFLOW.read_text(
+        encoding="utf-8"
+    )
+    assert_order(
+        release_history,
+        "- name: Enforce runner security preflight",
+        "- name: Prepare delta-rs checkout",
+    )
+    assert_order(
+        release_history,
+        "- name: Enforce runner security preflight",
+        "- name: Build missing artifacts",
+    )
 
 
 def test_compare_branch_supports_storage_backend_passthrough() -> None:
@@ -154,6 +210,52 @@ def test_compare_branch_supports_reliable_multi_run_controls() -> None:
         r'BENCH_MEASURE_ORDER="\$\{BENCH_MEASURE_ORDER:-alternate\}"', script
     )
     assert "python3 -m delta_bench_compare.aggregate" in script
+
+
+def test_compare_branch_runs_security_preflight_before_initial_checkout_prep() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    start = script.index(
+        'phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"'
+    )
+    end = script.index(
+        'ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"', start
+    )
+    initial_block = script[start:end]
+    assert_order(
+        initial_block,
+        "run_security_check",
+        'run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh',
+    )
+
+
+def test_compare_branch_runs_security_preflight_before_per_ref_checkout() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    start = script.index("run_benchmark_suite_for_ref() {")
+    end = script.index("\n}\n\nrun_order_for_iteration", start) + 2
+    function_body = script[start:end]
+    assert_order(
+        function_body,
+        "run_security_check",
+        'prepare_delta_rs_ref "${ref}" "${mode}"',
+    )
+
+
+def test_compare_branch_pins_refs_once_before_labels_and_measured_runs() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "pin_ref_to_commit()" in script
+    assert re.search(
+        r'base_ref="\$\(pin_ref_to_commit \"\$\{base_ref\}\" \"\$\{base_ref_mode\}\"\)"',
+        script,
+    )
+    assert re.search(
+        r'candidate_ref="\$\(pin_ref_to_commit \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"\)"',
+        script,
+    )
+    assert_order(
+        script,
+        'base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"',
+        'base_label="base-$(sanitize_label "${base_ref}")"',
+    )
 
 
 def test_compare_branch_supports_explicit_sha_flags() -> None:
@@ -454,10 +556,16 @@ def test_compare_branch_default_checkout_lock_does_not_block_initial_clone() -> 
         scripts_dir.mkdir(parents=True)
         compare_copy = scripts_dir / "compare_branch.sh"
         prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        security_copy = scripts_dir / "security_check.sh"
         compare_copy.write_text(COMPARE_BRANCH.read_text(encoding="utf-8"), encoding="utf-8")
         prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        security_copy.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+            encoding="utf-8",
+        )
         compare_copy.chmod(0o755)
         prepare_copy.chmod(0o755)
+        security_copy.chmod(0o755)
 
         fake_bin = temp_root / "bin"
         fake_bin.mkdir()

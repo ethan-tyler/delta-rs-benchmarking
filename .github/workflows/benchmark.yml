@@ -169,6 +169,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Enforce runner security preflight
+        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
+        shell: bash
+        env:
+          DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
+        run: |
+          set -euo pipefail
+          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
+
       - name: Run branch compare
         id: bench
         if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'

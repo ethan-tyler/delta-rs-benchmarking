@@ -1,3 +1,4 @@
+use delta_bench::cli::TimingPhase;
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::results::CaseResult;
 use delta_bench::storage::StorageConfig;
@@ -12,9 +13,17 @@ async fn run_delete_update_suite_once() -> Vec<CaseResult> {
         .await
         .expect("fixtures should be generated");
 
-    run_target(&fixtures_dir, "delete_update", "sf1", 0, 1, &storage)
-        .await
-        .expect("delete_update suite should run")
+    run_target(
+        &fixtures_dir,
+        "delete_update",
+        "sf1",
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect("delete_update suite should run")
 }
 
 #[tokio::test]
@@ -72,9 +81,17 @@ async fn delete_update_does_not_depend_on_merge_partitioned_fixture() {
         .join("merge_partitioned_target_delta");
     std::fs::remove_dir_all(&merge_partitioned).expect("remove merge fixture dir");
 
-    let cases = run_target(&fixtures_dir, "delete_update", "sf1", 0, 1, &storage)
-        .await
-        .expect("delete_update suite should run");
+    let cases = run_target(
+        &fixtures_dir,
+        "delete_update",
+        "sf1",
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect("delete_update suite should run");
     assert!(
         !cases.is_empty(),
         "expected delete_update suite to return cases"

@@ -5,15 +5,18 @@ use deltalake_core::datafusion::execution::context::TaskContext;
 use deltalake_core::datafusion::physical_plan::collect;
 use deltalake_core::datafusion::physical_plan::ExecutionPlan;
 use deltalake_core::datafusion::prelude::SessionContext;
+use url::Url;
 
+use crate::cli::TimingPhase;
 use crate::data::fixtures::{narrow_sales_table_url, read_partitioned_table_url};
 use crate::error::BenchResult;
 use crate::fingerprint::{hash_arrow_schema, hash_record_batches_unordered};
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
-use crate::runner::{run_case_async_with_async_setup_custom_timing, CaseExecutionResult};
+use crate::runner::{
+    run_case_async_with_timing_phase, CaseExecutionResult, PhaseTiming, TimedSample,
+};
 use crate::storage::StorageConfig;
 use crate::suites::scan_metrics::extract_scan_metrics;
-use url::Url;
 
 pub fn case_names() -> Vec<String> {
     vec![
@@ -34,6 +37,7 @@ struct PreparedSqlQuery {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -43,8 +47,9 @@ pub async fn run(
 
     let mut results = Vec::new();
 
-    let full_scan = run_prepared_case(
+    let full_scan = run_query_case(
         "scan_full_narrow",
+        timing_phase,
         warmup,
         iterations,
         storage,
@@ -54,8 +59,9 @@ pub async fn run(
     .await;
     results.push(into_case_result(full_scan));
 
-    let projection = run_prepared_case(
+    let projection = run_query_case(
         "scan_projection_region",
+        timing_phase,
         warmup,
         iterations,
         storage,
@@ -65,8 +71,9 @@ pub async fn run(
     .await;
     results.push(into_case_result(projection));
 
-    let filtered = run_prepared_case(
+    let filtered = run_query_case(
         "scan_filter_flag",
+        timing_phase,
         warmup,
         iterations,
         storage,
@@ -76,8 +83,9 @@ pub async fn run(
     .await;
     results.push(into_case_result(filtered));
 
-    let partition_hit = run_prepared_case(
+    let partition_hit = run_query_case(
         "scan_pruning_hit",
+        timing_phase,
         warmup,
         iterations,
         storage,
@@ -87,8 +95,9 @@ pub async fn run(
     .await;
     results.push(into_case_result(partition_hit));
 
-    let partition_miss = run_prepared_case(
+    let partition_miss = run_query_case(
         "scan_pruning_miss",
+        timing_phase,
         warmup,
         iterations,
         storage,
@@ -101,33 +110,35 @@ pub async fn run(
     Ok(results)
 }
 
-async fn run_prepared_case(
+async fn run_query_case(
     case_name: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
     table_url: Url,
     sql: &'static str,
 ) -> CaseExecutionResult {
-    run_case_async_with_async_setup_custom_timing(
-        case_name,
-        warmup,
-        iterations,
-        || {
-            let storage = storage.clone();
-            let table_url = table_url.clone();
-            async move {
-                prepare_sql_query(&storage, table_url, sql)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
-        },
-        |prepared| async move {
-            execute_prepared_query(prepared)
+    run_case_async_with_timing_phase(case_name, warmup, iterations, timing_phase, || {
+        let storage = storage.clone();
+        let table_url = table_url.clone();
+        async move {
+            let planning_start = std::time::Instant::now();
+            let prepared = prepare_sql_query(&storage, table_url, sql)
                 .await
-                .map_err(|e| e.to_string())
-        },
-    )
+                .map_err(|e| e.to_string())?;
+            let planning_elapsed_ms = planning_start.elapsed().as_secs_f64() * 1000.0;
+            let (metrics, execution_elapsed_ms) = execute_prepared_query(prepared)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok::<TimedSample<SampleMetrics>, String>(TimedSample::new(
+                metrics,
+                PhaseTiming::default()
+                    .with_plan_ms(planning_elapsed_ms)
+                    .with_execute_ms(execution_elapsed_ms),
+            ))
+        }
+    })
     .await
 }
 
@@ -154,9 +165,7 @@ async fn prepare_sql_query(
     })
 }
 
-async fn execute_prepared_query(
-    prepared: PreparedSqlQuery,
-) -> BenchResult<(SampleMetrics, Option<f64>)> {
+async fn execute_prepared_query(prepared: PreparedSqlQuery) -> BenchResult<(SampleMetrics, f64)> {
     let query_start = std::time::Instant::now();
     let batches = collect(prepared.plan.clone(), prepared.task_ctx).await?;
     let query_elapsed_ms = query_start.elapsed().as_secs_f64() * 1000.0;
@@ -192,41 +201,12 @@ async fn execute_prepared_query(
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
             }),
-        Some(query_elapsed_ms),
+        query_elapsed_ms,
     ))
 }
 
 fn into_case_result(result: CaseExecutionResult) -> CaseResult {
     match result {
-        CaseExecutionResult::Success(c) | CaseExecutionResult::Failure(c) => c,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{execute_prepared_query, prepare_sql_query};
-    use crate::data::fixtures::generate_fixtures;
-    use crate::storage::StorageConfig;
-
-    #[tokio::test]
-    async fn prepared_query_setup_and_execute_path_produces_metrics() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let storage = StorageConfig::local();
-        generate_fixtures(temp.path(), "sf1", 42, true, &storage)
-            .await
-            .expect("generate fixtures");
-        let table_url = crate::data::fixtures::narrow_sales_table_url(temp.path(), "sf1", &storage)
-            .expect("table URL");
-
-        let prepared = prepare_sql_query(&storage, table_url, "SELECT COUNT(*) FROM bench")
-            .await
-            .expect("prepare query");
-        let (metrics, elapsed_override) = execute_prepared_query(prepared)
-            .await
-            .expect("execute query");
-
-        assert!(elapsed_override.is_some());
-        assert!(metrics.rows_processed.is_some());
-        assert!(metrics.rows_processed.unwrap_or(0) > 0);
+        CaseExecutionResult::Success(case) | CaseExecutionResult::Failure(case) => case,
     }
 }

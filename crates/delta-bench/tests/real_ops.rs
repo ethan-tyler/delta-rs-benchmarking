@@ -1,3 +1,4 @@
+use delta_bench::cli::TimingPhase;
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::{merge, optimize_vacuum, scan};
@@ -10,7 +11,7 @@ async fn generated_fixtures_support_real_scan_suite() {
         .await
         .expect("generate fixtures");
 
-    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("scan suite run");
     assert!(!cases.is_empty());
@@ -25,7 +26,7 @@ async fn scan_samples_include_physical_scan_metrics() {
         .await
         .expect("generate fixtures");
 
-    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("scan suite run");
     assert!(!cases.is_empty());
@@ -66,7 +67,7 @@ async fn scan_pruning_hit_scans_fewer_files_than_miss() {
         .await
         .expect("generate fixtures");
 
-    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("scan suite run");
 
@@ -121,6 +122,81 @@ async fn scan_pruning_hit_scans_fewer_files_than_miss() {
     assert!(
         hit_pruned > miss_pruned,
         "expected hit files_pruned > miss files_pruned, got {hit_pruned} vs {miss_pruned}"
+    );
+}
+
+#[tokio::test]
+async fn scan_plan_phase_preserves_case_identity_and_hashes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let plan_cases = scan::run(temp.path(), "sf1", TimingPhase::Plan, 0, 1, &storage)
+        .await
+        .expect("scan suite run");
+    let execute_cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
+        .await
+        .expect("scan suite run");
+
+    assert!(
+        plan_cases.iter().all(|case| !case.case.contains("_plan_")),
+        "plan timing should not invent ad hoc case ids: {:?}",
+        plan_cases
+            .iter()
+            .map(|case| case.case.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    let planning_case = plan_cases
+        .iter()
+        .find(|case| case.case == "scan_filter_flag")
+        .expect("expected scan_filter_flag case");
+    let execute_case = execute_cases
+        .iter()
+        .find(|case| case.case == "scan_filter_flag")
+        .expect("expected scan_filter_flag case");
+    assert!(
+        planning_case.success,
+        "plan-timed case should succeed: {:?}",
+        planning_case.failure
+    );
+    assert!(
+        execute_case.success,
+        "execute-timed case should succeed: {:?}",
+        execute_case.failure
+    );
+
+    let planning_metrics = planning_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("planning metrics should exist");
+    let execute_metrics = execute_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("execute metrics should exist");
+    assert!(
+        planning_metrics.rows_processed.is_some(),
+        "plan timing should preserve result metrics"
+    );
+    assert!(
+        planning_metrics.result_hash.is_some(),
+        "planning case should include a stable result hash"
+    );
+    assert!(
+        planning_metrics.schema_hash.is_some(),
+        "planning case should include a schema hash"
+    );
+    assert_eq!(
+        planning_metrics.result_hash, execute_metrics.result_hash,
+        "plan timing should preserve exact query result hashes"
+    );
+    assert_eq!(
+        planning_metrics.schema_hash, execute_metrics.schema_hash,
+        "plan timing should preserve output schema hashes"
     );
 }
 

@@ -54,6 +54,21 @@ impl RunnerMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TimingPhase {
+    Execute,
+    Plan,
+}
+
+impl TimingPhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Execute => "execute",
+            Self::Plan => "plan",
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
     List {
@@ -81,6 +96,8 @@ pub enum Command {
         case_filter: Option<String>,
         #[arg(long, value_enum, default_value_t = RunnerMode::All)]
         runner: RunnerMode,
+        #[arg(long, value_enum, default_value_t = TimingPhase::Execute)]
+        timing_phase: TimingPhase,
         #[arg(long, default_value_t = 1)]
         warmup: u32,
         #[arg(long, default_value_t = 5)]

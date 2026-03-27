@@ -65,6 +65,8 @@ Read operations testing full scans, projections, filters, and partition pruning.
 | `scan_pruning_hit` | Scan with a filter that prunes most partitions (high selectivity) | files_scanned, files_pruned, scan_time_ms |
 | `scan_pruning_miss` | Scan with a filter that prunes no partitions (low selectivity) | files_scanned, files_pruned, scan_time_ms |
 
+`delta-bench run` also supports `--timing-phase execute|plan`. This keeps the same case IDs and result assertions while switching whether `elapsed_ms` reflects planning or execution time for phase-aware suites.
+
 ### write (3 cases)
 
 Write operations testing append and overwrite patterns. Local storage only.
@@ -276,6 +278,7 @@ These apply to all `delta-bench` subcommands and are passed through `bench.sh`:
 | `--target` | `all` | Suite to run (or `all`) |
 | `--case-filter` | — | Substring filter for case names |
 | `--runner` | `all` | Runner mode: `rust`, `python`, or `all` |
+| `--timing-phase` | `execute` | For phase-aware suites, record either execution time or planning time in `elapsed_ms` |
 | `--warmup` | `1` | Warmup iterations per case (not measured) |
 | `--iterations` | `5` | Measured iterations per case |
 | `--no-summary-table` | `false` | Suppress terminal summary table |
@@ -491,6 +494,7 @@ Additional fixture artifacts:
 | `scale` | string | yes | Scale factor |
 | `iterations` | u32 | yes | Measured iterations per case |
 | `warmup` | u32 | yes | Warmup iterations per case |
+| `timing_phase` | string | no | Selected timing phase (`execute` or `plan`) for phase-aware suites |
 | `dataset_id` | string | no | Dataset identifier |
 | `dataset_fingerprint` | string | no | Hash of the fixture data |
 | `runner` | string | no | Runner mode (rust/python) |
@@ -532,7 +536,7 @@ Each sample represents one measured iteration.
 
 | Field | Type | Description |
 |---|---|---|
-| `elapsed_ms` | f64 | Wall-clock time for this iteration |
+| `elapsed_ms` | f64 | Timed duration for this iteration; on phase-aware suites this reflects the selected `timing_phase` |
 | `rows` | u64 | Optional row count captured directly on the sample |
 | `bytes` | u64 | Optional byte count captured directly on the sample |
 | `metrics` | object | Optional flat and nested metric fields (see [Metrics Reference](#metrics-reference)) |

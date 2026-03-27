@@ -5,12 +5,15 @@ pub mod sql_loader;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::cli::TimingPhase;
 use crate::error::BenchResult;
 use crate::fingerprint::{hash_arrow_schema, hash_record_batches_unordered};
 use crate::results::{
     CaseFailure, CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics,
 };
-use crate::runner::{run_case_async_with_async_setup_custom_timing, CaseExecutionResult};
+use crate::runner::{
+    run_case_async_with_timing_phase, CaseExecutionResult, PhaseTiming, TimedSample,
+};
 use crate::storage::StorageConfig;
 use crate::suites::scan_metrics::extract_scan_metrics;
 use deltalake_core::datafusion::execution::context::TaskContext;
@@ -33,6 +36,7 @@ pub fn case_names() -> Vec<String> {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -41,6 +45,7 @@ pub async fn run(
     run_with_specs_and_sql_dir(
         fixtures_dir,
         scale,
+        timing_phase,
         warmup,
         iterations,
         storage,
@@ -53,6 +58,7 @@ pub async fn run(
 pub(crate) async fn run_with_specs_and_sql_dir(
     fixtures_dir: &Path,
     scale: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -92,28 +98,30 @@ pub(crate) async fn run_with_specs_and_sql_dir(
         let fixture_root = fixtures_dir.to_path_buf();
         let scale = scale.to_string();
         let storage = storage.clone();
-        let result = run_case_async_with_async_setup_custom_timing(
-            &case_name,
-            warmup,
-            iterations,
-            || {
+        let result =
+            run_case_async_with_timing_phase(&case_name, warmup, iterations, timing_phase, || {
                 let sql = sql.clone();
                 let fixture_root = fixture_root.clone();
                 let scale = scale.clone();
                 let storage = storage.clone();
                 async move {
-                    prepare_query(&fixture_root, &scale, &storage, &sql)
+                    let planning_start = std::time::Instant::now();
+                    let prepared = prepare_query(&fixture_root, &scale, &storage, &sql)
                         .await
-                        .map_err(|err| err.to_string())
+                        .map_err(|err| err.to_string())?;
+                    let planning_elapsed_ms = planning_start.elapsed().as_secs_f64() * 1000.0;
+                    let (metrics, execution_elapsed_ms) = execute_prepared_query(prepared)
+                        .await
+                        .map_err(|err| err.to_string())?;
+                    Ok::<TimedSample<SampleMetrics>, String>(TimedSample::new(
+                        metrics,
+                        PhaseTiming::default()
+                            .with_plan_ms(planning_elapsed_ms)
+                            .with_execute_ms(execution_elapsed_ms),
+                    ))
                 }
-            },
-            |prepared| async move {
-                execute_prepared_query(prepared)
-                    .await
-                    .map_err(|err| err.to_string())
-            },
-        )
-        .await;
+            })
+            .await;
         out.push(into_case_result(result));
     }
 
@@ -147,9 +155,7 @@ async fn prepare_query(
     Ok(PreparedTpcdsQuery { plan, task_ctx })
 }
 
-async fn execute_prepared_query(
-    prepared: PreparedTpcdsQuery,
-) -> BenchResult<(SampleMetrics, Option<f64>)> {
+async fn execute_prepared_query(prepared: PreparedTpcdsQuery) -> BenchResult<(SampleMetrics, f64)> {
     let timed_start = std::time::Instant::now();
     let batches = collect(prepared.plan.clone(), prepared.task_ctx).await?;
     let elapsed_ms = timed_start.elapsed().as_secs_f64() * 1000.0;
@@ -179,7 +185,7 @@ async fn execute_prepared_query(
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
             }),
-        Some(elapsed_ms),
+        elapsed_ms,
     ))
 }
 
@@ -210,6 +216,7 @@ mod tests {
     use super::{
         catalog::TpcdsQuerySpec, execute_prepared_query, prepare_query, run_with_specs_and_sql_dir,
     };
+    use crate::cli::TimingPhase;
     use crate::data::fixtures::generate_fixtures;
     use crate::storage::StorageConfig;
     use crate::suites::scan_metrics::sum_pruned_metrics;
@@ -245,11 +252,11 @@ mod tests {
         )
         .await
         .expect("prepare query");
-        let (metrics, elapsed_override) = execute_prepared_query(prepared)
+        let (metrics, elapsed_ms) = execute_prepared_query(prepared)
             .await
             .expect("execute query");
 
-        assert!(elapsed_override.is_some());
+        assert!(elapsed_ms > 0.0);
         assert!(metrics.rows_processed.is_some());
         assert!(metrics.rows_processed.unwrap_or(0) > 0);
     }
@@ -269,6 +276,7 @@ mod tests {
         let result = run_with_specs_and_sql_dir(
             temp_fixtures.path(),
             "sf1",
+            TimingPhase::Execute,
             0,
             1,
             &storage,

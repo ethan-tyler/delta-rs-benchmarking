@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::assertions::{apply_case_assertions, CaseAssertion};
-use crate::cli::RunnerMode;
+use crate::cli::{RunnerMode, TimingPhase};
 use crate::error::{BenchError, BenchResult};
 use crate::manifests::{load_manifest, DEFAULT_PYTHON_MANIFEST_PATH, DEFAULT_RUST_MANIFEST_PATH};
 use crate::results::{CaseFailure, CaseResult};
@@ -127,10 +127,13 @@ pub async fn run_planned_cases(
     fixtures_dir: &Path,
     planned: &[PlannedCase],
     scale: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
 ) -> BenchResult<Vec<CaseResult>> {
+    validate_timing_phase_for_planned_cases(planned, timing_phase)?;
+
     let mut target_order = Vec::<String>::new();
     let mut seen_targets = HashSet::<String>::new();
     for case in planned {
@@ -145,6 +148,7 @@ pub async fn run_planned_cases(
             fixtures_dir,
             target.as_str(),
             scale,
+            timing_phase,
             warmup,
             iterations,
             storage,
@@ -170,6 +174,21 @@ pub async fn run_planned_cases(
         ordered.push(case);
     }
     Ok(ordered)
+}
+
+fn validate_timing_phase_for_planned_cases(
+    planned: &[PlannedCase],
+    timing_phase: TimingPhase,
+) -> BenchResult<()> {
+    for case in planned {
+        if timing_phase == TimingPhase::Plan && !matches!(case.target.as_str(), "scan" | "tpcds") {
+            return Err(BenchError::InvalidArgument(format!(
+                "planned run cannot use timing_phase=plan because target='{}' is not phase-aware yet",
+                case.target
+            )));
+        }
+    }
+    Ok(())
 }
 
 pub fn list_cases_for_target(target: &str) -> BenchResult<Vec<String>> {
@@ -310,12 +329,24 @@ async fn run_single_suite(
     fixtures_dir: &Path,
     suite: &str,
     scale: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
 ) -> BenchResult<Vec<CaseResult>> {
+    validate_timing_phase_for_suite(suite, timing_phase)?;
     match suite {
-        "scan" => scan::run(fixtures_dir, scale, warmup, iterations, storage).await,
+        "scan" => {
+            scan::run(
+                fixtures_dir,
+                scale,
+                timing_phase,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
         "write" => write::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "delete_update" => {
             delete_update::run(fixtures_dir, scale, warmup, iterations, storage).await
@@ -326,7 +357,17 @@ async fn run_single_suite(
             optimize_vacuum::run(fixtures_dir, scale, warmup, iterations, storage).await
         }
         "concurrency" => concurrency::run(fixtures_dir, scale, warmup, iterations, storage).await,
-        "tpcds" => tpcds::run(fixtures_dir, scale, warmup, iterations, storage).await,
+        "tpcds" => {
+            tpcds::run(
+                fixtures_dir,
+                scale,
+                timing_phase,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
         "interop_py" => interop_py::run(fixtures_dir, scale, warmup, iterations, storage).await,
         other => Err(BenchError::InvalidArgument(format!(
             "unknown suite target: {other}"
@@ -334,10 +375,20 @@ async fn run_single_suite(
     }
 }
 
+fn validate_timing_phase_for_suite(suite: &str, timing_phase: TimingPhase) -> BenchResult<()> {
+    if timing_phase == TimingPhase::Plan && !matches!(suite, "scan" | "tpcds") {
+        return Err(BenchError::InvalidArgument(format!(
+            "timing_phase=plan is not supported for target='{suite}'"
+        )));
+    }
+    Ok(())
+}
+
 pub async fn run_target(
     fixtures_dir: &Path,
     target: &str,
     scale: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -353,6 +404,7 @@ pub async fn run_target(
         fixtures_dir,
         canonical_target,
         scale,
+        timing_phase,
         warmup,
         iterations,
         storage,

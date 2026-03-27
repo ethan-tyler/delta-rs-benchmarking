@@ -1,6 +1,7 @@
 use std::time::Instant;
 use std::{future::Future, time::Duration};
 
+pub use crate::cli::TimingPhase;
 use crate::results::{CaseFailure, CaseResult, ElapsedStats, IterationSample, SampleMetrics};
 use crate::stats::compute_stats;
 
@@ -9,6 +10,43 @@ use crate::stats::compute_stats;
 pub enum CaseExecutionResult {
     Success(CaseResult),
     Failure(CaseResult),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PhaseTiming {
+    plan_ms: Option<f64>,
+    execute_ms: Option<f64>,
+}
+
+impl PhaseTiming {
+    pub fn with_plan_ms(mut self, plan_ms: f64) -> Self {
+        self.plan_ms = Some(plan_ms);
+        self
+    }
+
+    pub fn with_execute_ms(mut self, execute_ms: f64) -> Self {
+        self.execute_ms = Some(execute_ms);
+        self
+    }
+
+    fn elapsed_ms_for(self, phase: TimingPhase) -> Option<f64> {
+        match phase {
+            TimingPhase::Plan => self.plan_ms,
+            TimingPhase::Execute => self.execute_ms,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TimedSample<M> {
+    pub metrics: M,
+    pub timing: PhaseTiming,
+}
+
+impl<M> TimedSample<M> {
+    pub fn new(metrics: M, timing: PhaseTiming) -> Self {
+        Self { metrics, timing }
+    }
 }
 
 pub fn run_case<F, M, E>(name: &str, warmup: u32, iterations: u32, mut op: F) -> CaseExecutionResult
@@ -91,6 +129,64 @@ where
         match op().await {
             Ok(metrics) => {
                 append_sample(&mut samples, start.elapsed(), metrics, None);
+            }
+            Err(e) => {
+                let case = failure_case_result(name, samples, e.to_string());
+                return CaseExecutionResult::Failure(case);
+            }
+        }
+    }
+
+    CaseExecutionResult::Success(success_case_result(name, samples))
+}
+
+pub async fn run_case_async_with_timing_phase<F, Fut, M, E>(
+    name: &str,
+    warmup: u32,
+    iterations: u32,
+    timing_phase: TimingPhase,
+    mut op: F,
+) -> CaseExecutionResult
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<TimedSample<M>, E>>,
+    M: Into<SampleMetrics>,
+    E: ToString,
+{
+    for warmup_idx in 0..warmup {
+        if let Err(error) = op().await {
+            return CaseExecutionResult::Failure(failure_case_result(
+                name,
+                Vec::new(),
+                format!(
+                    "warmup iteration {} failed: {}",
+                    warmup_idx + 1,
+                    error.to_string()
+                ),
+            ));
+        }
+    }
+
+    let mut samples = Vec::new();
+    for _ in 0..iterations {
+        match op().await {
+            Ok(sample) => {
+                let Some(elapsed_ms) = sample.timing.elapsed_ms_for(timing_phase) else {
+                    return CaseExecutionResult::Failure(failure_case_result(
+                        name,
+                        samples,
+                        format!(
+                            "requested timing phase '{}' is unavailable for this case",
+                            timing_phase.as_str()
+                        ),
+                    ));
+                };
+                append_sample(
+                    &mut samples,
+                    Duration::from_secs(0),
+                    sample.metrics,
+                    Some(elapsed_ms),
+                );
             }
             Err(e) => {
                 let case = failure_case_result(name, samples, e.to_string());

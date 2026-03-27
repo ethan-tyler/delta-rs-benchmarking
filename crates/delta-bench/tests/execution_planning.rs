@@ -4,7 +4,7 @@ mod env_lock_support;
 mod env_vars_support;
 
 use delta_bench::assertions::CaseAssertion;
-use delta_bench::cli::RunnerMode;
+use delta_bench::cli::{RunnerMode, TimingPhase};
 use delta_bench::data::fixtures::{
     generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
 };
@@ -74,9 +74,17 @@ async fn run_planned_cases_applies_assertions_and_can_fail_case() {
             "sha256:not-real".to_string(),
         )],
     }];
-    let cases = run_planned_cases(temp.path(), &planned, "sf1", 0, 1, &storage)
-        .await
-        .expect("planned run should execute");
+    let cases = run_planned_cases(
+        temp.path(),
+        &planned,
+        "sf1",
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect("planned run should execute");
     let only = &cases[0];
 
     assert!(!only.success, "assertion should convert case into failure");
@@ -101,9 +109,17 @@ async fn run_planned_cases_applies_expected_failure_reclassification() {
             "fixture load failed".to_string(),
         )],
     }];
-    let cases = run_planned_cases(temp.path(), &planned, "sf1", 0, 1, &storage)
-        .await
-        .expect("planned run should execute");
+    let cases = run_planned_cases(
+        temp.path(),
+        &planned,
+        "sf1",
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect("planned run should execute");
     let only = &cases[0];
 
     assert!(only.success, "expected-error assertion should mark success");
@@ -126,9 +142,17 @@ async fn manifest_hash_assertions_pass_for_write_case() {
         "expected exact_result_hash and schema_hash assertions from manifest"
     );
 
-    let cases = run_planned_cases(temp.path(), &planned, "sf1", 0, 1, &storage)
-        .await
-        .expect("planned run should execute");
+    let cases = run_planned_cases(
+        temp.path(),
+        &planned,
+        "sf1",
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect("planned run should execute");
     let only = &cases[0];
     assert!(
         only.success,
@@ -141,12 +165,80 @@ async fn manifest_hash_assertions_pass_for_write_case() {
 async fn run_target_all_requires_manifest_planning_api() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
-    let err = run_target(temp.path(), "all", "sf1", 0, 1, &storage)
-        .await
-        .expect_err("run_target(all) should be rejected");
+    let err = run_target(
+        temp.path(),
+        "all",
+        "sf1",
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect_err("run_target(all) should be rejected");
     assert!(
         err.to_string().contains("plan_run_cases"),
         "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn plan_timing_rejects_non_phase_aware_suite() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    let err = run_target(
+        temp.path(),
+        "write",
+        "sf1",
+        TimingPhase::Plan,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect_err("plan timing should reject unsupported suites");
+    assert!(
+        err.to_string().contains("timing_phase=plan"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn plan_timing_rejects_unsupported_target_before_running_supported_ones() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    let planned = vec![
+        PlannedCase {
+            id: "scan_filter_flag".to_string(),
+            target: "scan".to_string(),
+            assertions: Vec::new(),
+        },
+        PlannedCase {
+            id: "write_append_small".to_string(),
+            target: "write".to_string(),
+            assertions: Vec::new(),
+        },
+    ];
+
+    let err = run_planned_cases(
+        temp.path(),
+        &planned,
+        "sf1",
+        TimingPhase::Plan,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect_err("plan timing should fail during preflight for unsupported targets");
+
+    assert!(
+        err.to_string().contains("planned run"),
+        "unexpected error: {err}"
+    );
+    assert!(
+        err.to_string().contains("write"),
+        "preflight error should identify unsupported target: {err}"
     );
 }
 
@@ -286,9 +378,17 @@ path.write_text(
         "schema hash should remain for tpcds_duckdb"
     );
 
-    let cases = run_planned_cases(temp.path(), &planned, "sf1", 0, 1, &storage)
-        .await
-        .expect("planned run should execute");
+    let cases = run_planned_cases(
+        temp.path(),
+        &planned,
+        "sf1",
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect("planned run should execute");
     assert_eq!(cases.len(), 1);
     let only = &cases[0];
     assert!(!only.success, "schema hash mismatch should fail");

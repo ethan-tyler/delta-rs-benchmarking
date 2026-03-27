@@ -201,6 +201,8 @@ pub struct BenchContext {
     pub iterations: u32,
     pub warmup: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing_phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dataset_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dataset_fingerprint: Option<String>,

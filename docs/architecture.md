@@ -7,6 +7,7 @@ How the benchmark harness is structured, how data flows through it, and what con
 - [Key Concepts](#key-concepts)
 - [Components](#components)
 - [Data Flow](#data-flow)
+- [Longitudinal State and Storage](#longitudinal-state-and-storage)
 - [Result Schema v2](#result-schema-v2)
 - [Benchmark Coverage](#benchmark-coverage)
 - [Reproducibility Controls](#reproducibility-controls)
@@ -45,9 +46,9 @@ The harness is organized into three layers: execution, comparison/analysis, and 
 | `python/delta_bench_interop` | Python interop benchmark cases using pandas, polars, and pyarrow. |
 | `python/delta_bench_tpcds` | DuckDB-backed `store_sales` fixture generation script for the `tpcds_duckdb` dataset. |
 
-### Automation scripts
+### Automation and workflows
 
-| Script | Description |
+| Component | Description |
 |---|---|
 | `scripts/prepare_delta_rs.sh` | Manages the delta-rs checkout at `.delta-rs-under-test`. |
 | `scripts/sync_harness_to_delta_rs.sh` | Syncs benchmark crate and configs into the delta-rs workspace. |
@@ -56,6 +57,8 @@ The harness is organized into three layers: execution, comparison/analysis, and 
 | `scripts/security_mode.sh` | Toggles benchmark run mode vs maintenance mode on cloud runners. |
 | `scripts/security_check.sh` | Preflight guardrails for mode, network, and egress policy. |
 | `scripts/provision_runner.sh` | Terraform orchestration wrapper for runner provisioning. |
+| `.github/workflows/ci.yml` | Enforces the shared Rust/Python test baseline plus dependency audit jobs on pushes and pull requests. |
+| `.github/workflows/benchmark*.yml`, `.github/workflows/longitudinal-*.yml` | Self-hosted benchmark workflows that enforce runner preflight before branch comparison or `run-matrix`. |
 
 ## Data Flow
 
@@ -73,11 +76,26 @@ Benchmark execution follows this pipeline:
 
 5. **Comparison (optional).** `compare.py` reads baseline and candidate JSON files, computes relative changes, and classifies each case as regression, improvement, stable, or needs attention.
 
-6. **Security validation (optional).** `security_check.sh` validates fidelity invariants (run mode, network, egress) before allowing benchmark execution on cloud runners.
+6. **Security validation.** `security_check.sh` validates fidelity invariants (run mode, network, egress). Self-hosted GitHub Actions workflows enforce this preflight before branch comparison and longitudinal execution.
 
 7. **Report output.** The compare workflow produces grouped text output. `compare.py` also supports markdown output for CI integration.
 
+8. **Longitudinal matrix checkpointing (optional).** `run-matrix` writes `matrix-state.json` through an atomic temp-file replace. The state file records per-cell progress plus a configuration fingerprint so resume only happens against the same suite/scale/output contract.
+
+9. **Longitudinal ingest, reporting, and retention (optional).** `ingest-results` normalizes schema v2 suite outputs into a SQLite store. `report` and `prune` operate on the same database and reject legacy `rows.jsonl` / `index.json`-only stores to avoid silent split state.
+
 Marketplace datasets are a document-only path: place externally provisioned Delta tables under the expected `fixtures/<scale>/...` roots.
+
+## Longitudinal State and Storage
+
+The longitudinal pipeline persists two control-plane artifacts:
+
+| Artifact | Format | Purpose |
+|---|---|---|
+| `matrix-state.json` | JSON | Resume ledger for `(revision, suite, scale)` cells. Written atomically and guarded by a stored configuration fingerprint. |
+| `store.sqlite3` | SQLite | Normalized time-series store for ingested runs and case rows. Reporting and retention use the same database, and ingest deduplicates by run id. |
+
+If a store directory still contains only legacy `rows.jsonl` or `index.json` artifacts, the current pipeline fails fast instead of silently treating that state as empty.
 
 ## Result Schema v2
 
@@ -114,13 +132,16 @@ For the complete list of all 40 benchmark cases across 9 suites, see [Reference]
 These mechanisms ensure that benchmark results are comparable across runs:
 
 - **Deterministic fixtures.** Seed-based data generation produces identical tables regardless of when or where you run.
+- **Managed checkout locking.** Prepare/compare flows serialize access to `.delta-rs-under-test` so concurrent control-plane actions cannot corrupt the managed checkout.
 - **Deterministic manifest ordering.** The `core-rust` and `core-python` manifests define a fixed case execution order.
 - **Single-machine comparisons.** Branch comparisons run both refs on the same hardware to eliminate machine-to-machine variance.
 - **Prewarm runs.** Optional unreported iterations stabilize caches and thermal state before measurement begins.
 - **Multi-run aggregation.** Multiple measured runs per ref are aggregated (default: median) before change classification.
 - **Configurable run order.** `base-first`, `candidate-first`, or `alternate` ordering to reduce systematic bias from execution order.
 - **Stable thresholds.** Default no-change threshold of `0.05` (5%) prevents false positives from normal measurement noise.
-- **Explicit run mode.** Cloud runners can enforce a dedicated benchmark mode that pauses noisy system services.
+- **Explicit run mode and network guardrails.** Cloud runners can enforce benchmark mode, no-public-IPv4, and egress-policy checks before self-hosted workloads start.
+- **Durable longitudinal checkpoints.** Matrix state writes use atomic replacement plus fsync so resume metadata survives process interruption.
+- **Configuration fingerprinting.** Longitudinal resume state is bound to the original suite/scale/warmup/iteration/output configuration and fails closed on mismatches.
 
 ## Advanced Fixture Profiles
 

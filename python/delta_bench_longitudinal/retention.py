@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .store import store_lock
+from .store import _connect_store, _raise_if_unmigrated_legacy_store, store_db_path, store_lock
 
 
 def prune_artifacts(
@@ -71,10 +70,10 @@ def prune_store(
     )
     reference = now or datetime.now(timezone.utc)
     root = Path(store_dir)
-    rows_path = root / "rows.jsonl"
-    index_path = root / "index.json"
+    _raise_if_unmigrated_legacy_store(root)
+    db_path = store_db_path(root)
     with store_lock(root):
-        if not rows_path.exists():
+        if not db_path.exists():
             return {
                 "total_runs": 0,
                 "candidate_runs": [],
@@ -84,35 +83,45 @@ def prune_store(
                 "applied": apply,
             }
 
-        run_timestamps, invalid_rows = _scan_run_timestamps(rows_path)
+        conn = _connect_store(root)
+        try:
+            run_timestamps = _load_run_timestamps(conn)
 
-        ordered = sorted(
-            list(run_timestamps.items()),
-            key=lambda item: item[1],
-            reverse=True,
-        )
-        candidate_runs = _select_candidates(
-            entries=ordered,
-            max_age_days=max_age_days,
-            max_count=max_runs,
-            now=reference,
-        )
-        candidate_set = set(candidate_runs)
+            ordered = sorted(
+                list(run_timestamps.items()),
+                key=lambda item: item[1],
+                reverse=True,
+            )
+            candidate_runs = _select_candidates(
+                entries=ordered,
+                max_age_days=max_age_days,
+                max_count=max_runs,
+                now=reference,
+            )
 
-        if apply:
-            kept_runs = _rewrite_rows_without_candidates(rows_path, candidate_set)
-            _write_index(index_path, sorted(kept_runs))
+            if apply and candidate_runs:
+                with conn:
+                    conn.executemany(
+                        "DELETE FROM runs WHERE run_id = ?",
+                        [(run_id,) for run_id in candidate_runs],
+                    )
 
-        return {
-            "total_runs": len(run_timestamps),
-            "candidate_runs": candidate_runs,
-            "removed_runs": len(candidate_runs) if apply else 0,
-            "remaining_runs": len(run_timestamps) - len(candidate_runs)
-            if apply
-            else len(run_timestamps),
-            "invalid_rows_skipped": invalid_rows,
-            "applied": apply,
-        }
+            remaining_runs = (
+                conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+                if apply
+                else len(run_timestamps)
+            )
+
+            return {
+                "total_runs": len(run_timestamps),
+                "candidate_runs": candidate_runs,
+                "removed_runs": len(candidate_runs) if apply else 0,
+                "remaining_runs": remaining_runs,
+                "invalid_rows_skipped": 0,
+                "applied": apply,
+            }
+        finally:
+            conn.close()
 
 
 def _validate_policies(
@@ -161,64 +170,21 @@ def _artifact_timestamp(path: Path) -> datetime:
     return datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
 
 
-def _scan_run_timestamps(path: Path) -> tuple[dict[str, datetime], int]:
+def _load_run_timestamps(conn: sqlite3.Connection) -> dict[str, datetime]:
+    rows = conn.execute(
+        """
+        SELECT run_id, benchmark_created_at, ingested_at
+        FROM runs
+        """
+    ).fetchall()
     runs: dict[str, datetime] = {}
-    skipped = 0
-    with path.open("r", encoding="utf-8") as fh:
-        for line in fh:
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                skipped += 1
-                continue
-            run_id = str(row.get("run_id", ""))
-            if not run_id:
-                continue
-            ts = _row_timestamp(row)
-            previous = runs.get(run_id)
-            if previous is None or ts > previous:
-                runs[run_id] = ts
-    return runs, skipped
-
-
-def _rewrite_rows_without_candidates(path: Path, candidate_runs: set[str]) -> set[str]:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name(f".{path.name}.tmp")
-    kept_runs: set[str] = set()
-    with temp.open("w", encoding="utf-8") as fh:
-        with path.open("r", encoding="utf-8") as src:
-            for line in src:
-                if not line.strip():
-                    continue
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                run_id = str(row.get("run_id", ""))
-                if run_id and run_id in candidate_runs:
-                    continue
-                if run_id:
-                    kept_runs.add(run_id)
-                # Normalize line format during retention rewrite.
-                fh.write(json.dumps(row, sort_keys=True))
-                fh.write("\n")
-        fh.flush()
-        os.fsync(fh.fileno())
-    temp.replace(path)
-    return kept_runs
-
-
-def _write_index(path: Path, run_ids: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {"schema_version": 1, "run_ids": run_ids}
-    temp = path.with_name(f".{path.name}.tmp")
-    with temp.open("w", encoding="utf-8") as fh:
-        fh.write(json.dumps(payload, sort_keys=True))
-        fh.flush()
-        os.fsync(fh.fileno())
-    temp.replace(path)
+    for run_id, benchmark_created_at, ingested_at in rows:
+        row = {
+            "benchmark_created_at": benchmark_created_at,
+            "ingested_at": ingested_at,
+        }
+        runs[str(run_id)] = _row_timestamp(row)
+    return runs
 
 
 def _row_timestamp(row: dict[str, Any]) -> datetime:

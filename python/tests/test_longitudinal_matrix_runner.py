@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import threading
 import time
@@ -10,10 +12,40 @@ import pytest
 from delta_bench_longitudinal.matrix_runner import (
     MatrixArtifact,
     MatrixRunConfig,
+    _validate_tokens,
     load_matrix_state,
     run_matrix,
+    sanitize_label,
     save_matrix_state,
 )
+
+
+LABEL_CONTRACT = Path(__file__).with_name("fixtures") / "label_contract.json"
+
+
+def _state_config_fingerprint(
+    *,
+    suites: list[str],
+    scales: list[str],
+    warmup: int = 1,
+    iterations: int = 5,
+    fixtures_dir: Path | str = "fixtures",
+    results_dir: Path | str = "results",
+    label_prefix: str = "longitudinal",
+) -> dict[str, object]:
+    return {
+        "suites": suites,
+        "scales": scales,
+        "warmup": warmup,
+        "iterations": iterations,
+        "fixtures_dir": str(fixtures_dir),
+        "results_dir": str(results_dir),
+        "label_prefix": label_prefix,
+    }
+
+
+def _load_label_contract() -> dict[str, object]:
+    return json.loads(LABEL_CONTRACT.read_text(encoding="utf-8"))
 
 
 def test_resume_skips_successful_cases(tmp_path: Path) -> None:
@@ -22,6 +54,10 @@ def test_resume_skips_successful_cases(tmp_path: Path) -> None:
         state_path,
         {
             "schema_version": 1,
+            "config": _state_config_fingerprint(
+                suites=["read_scan"],
+                scales=["sf1"],
+            ),
             "cases": {
                 "revA|read_scan|sf1": {
                     "revision": "revA",
@@ -96,6 +132,59 @@ def test_retry_until_success_within_bound(tmp_path: Path) -> None:
     assert attempts["count"] == 3
 
 
+def test_run_matrix_rejects_resume_state_from_different_config(tmp_path: Path) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    fixtures_dir = tmp_path / "fixtures"
+    results_dir = tmp_path / "results"
+    artifact = MatrixArtifact(
+        revision="revCfg", commit_timestamp="t", artifact_path="/tmp/cfg"
+    )
+
+    initial_config = MatrixRunConfig(
+        suites=["read_scan"],
+        scales=["sf1"],
+        timeout_seconds=1,
+        max_retries=0,
+        state_path=state_path,
+        fixtures_dir=fixtures_dir,
+        results_dir=results_dir,
+        iterations=5,
+    )
+    run_matrix(
+        artifacts=[artifact],
+        config=initial_config,
+        executor=lambda *_args: (0, ""),
+    )
+
+    state = load_matrix_state(state_path)
+    assert state["config"] == _state_config_fingerprint(
+        suites=["read_scan"],
+        scales=["sf1"],
+        fixtures_dir=fixtures_dir,
+        results_dir=results_dir,
+        iterations=5,
+    )
+
+    changed_config = MatrixRunConfig(
+        suites=["read_scan"],
+        scales=["sf1"],
+        timeout_seconds=1,
+        max_retries=0,
+        state_path=state_path,
+        fixtures_dir=fixtures_dir,
+        results_dir=results_dir,
+        iterations=9,
+    )
+    with pytest.raises(
+        ValueError, match="state file was created with different config"
+    ):
+        run_matrix(
+            artifacts=[artifact],
+            config=changed_config,
+            executor=lambda *_args: (0, ""),
+        )
+
+
 def test_timeout_is_recorded_as_failure_reason(tmp_path: Path) -> None:
     def timeout_executor(
         artifact: MatrixArtifact,
@@ -134,7 +223,94 @@ def test_state_roundtrip(tmp_path: Path) -> None:
     state_path = tmp_path / "matrix_state.json"
     data = {"schema_version": 1, "cases": {}}
     save_matrix_state(state_path, data)
+    assert json.loads(state_path.read_text(encoding="utf-8")) == data
     assert load_matrix_state(state_path) == data
+
+
+def test_load_matrix_state_wraps_invalid_json(tmp_path: Path) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    state_path.write_text("{not valid json\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid matrix state"):
+        load_matrix_state(state_path)
+
+
+@pytest.mark.parametrize(
+    "raw_state",
+    [
+        "[]",
+        '"oops"',
+        '{"cases": []}',
+        '{"cases": {"rev|read_scan|sf1": [1]}}',
+    ],
+)
+def test_load_matrix_state_rejects_invalid_shapes(
+    tmp_path: Path, raw_state: str
+) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    state_path.write_text(raw_state, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid matrix state"):
+        load_matrix_state(state_path)
+
+
+def test_save_matrix_state_uses_atomic_replace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    recorded_replace: dict[str, Path] = {}
+    original_replace = Path.replace
+
+    def tracking_replace(self: Path, target: Path | str) -> Path:
+        recorded_replace["source"] = self
+        recorded_replace["target"] = Path(target)
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", tracking_replace)
+
+    data = {"schema_version": 1, "cases": {"rev|suite|sf1": {"status": "success"}}}
+    save_matrix_state(state_path, data)
+
+    assert recorded_replace["target"] == state_path
+    assert recorded_replace["source"] != state_path
+    assert not recorded_replace["source"].exists()
+    assert load_matrix_state(state_path) == data
+
+
+def test_save_matrix_state_fsyncs_parent_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    original_open = os.open
+    original_fsync = os.fsync
+    original_close = os.close
+    directory_fd = 98765
+    fsynced_fds: list[int] = []
+    closed_fds: list[int] = []
+
+    def tracking_open(path: str | bytes, flags: int, mode: int = 0o777) -> int:
+        if Path(path) == state_path.parent:
+            return directory_fd
+        return original_open(path, flags, mode)
+
+    def tracking_fsync(fd: int) -> None:
+        fsynced_fds.append(fd)
+        if fd == directory_fd:
+            return
+        original_fsync(fd)
+
+    def tracking_close(fd: int) -> None:
+        closed_fds.append(fd)
+        if fd == directory_fd:
+            return
+        original_close(fd)
+
+    monkeypatch.setattr(os, "open", tracking_open)
+    monkeypatch.setattr(os, "fsync", tracking_fsync)
+    monkeypatch.setattr(os, "close", tracking_close)
+
+    save_matrix_state(state_path, {"schema_version": 1, "cases": {}})
+
+    assert directory_fd in fsynced_fds
+    assert directory_fd in closed_fds
 
 
 def test_failed_case_is_retried_on_subsequent_run(tmp_path: Path) -> None:
@@ -281,3 +457,18 @@ def test_invalid_parallelism_is_rejected(tmp_path: Path) -> None:
             config=config,
             executor=lambda *_args: (0, ""),
         )
+
+
+def test_python_label_contract_matches_shared_fixture() -> None:
+    contract = _load_label_contract()
+
+    for valid in contract["valid"]:
+        _validate_tokens([valid], "label")
+        assert sanitize_label(valid) == valid
+
+    for invalid in contract["invalid"]:
+        with pytest.raises(ValueError):
+            _validate_tokens([invalid], "label")
+
+    for raw, expected in contract["sanitized"].items():
+        assert sanitize_label(raw) == expected

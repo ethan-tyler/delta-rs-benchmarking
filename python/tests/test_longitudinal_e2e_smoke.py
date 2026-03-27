@@ -16,7 +16,7 @@ from delta_bench_longitudinal.revisions import (
     RevisionManifest,
     write_manifest,
 )
-from delta_bench_longitudinal.store import load_longitudinal_rows
+from delta_bench_longitudinal.store import load_longitudinal_rows, store_db_path
 
 
 def _make_fake_build(
@@ -146,6 +146,7 @@ def test_smoke_build_run_report_flow(tmp_path: Path) -> None:
 
     assert summary["built"] == 1
     assert summary["ingested_rows"] == 1
+    assert store_db_path(store_dir).exists()
     assert (reports_dir / "summary.md").exists()
     assert (reports_dir / "report.html").exists()
 
@@ -261,6 +262,7 @@ def test_orchestrate_ingests_distinct_scales(tmp_path: Path) -> None:
 
     rows = load_longitudinal_rows(store_dir)
     assert summary["ingested_rows"] == 2
+    assert store_db_path(store_dir).exists()
     assert {row["scale"] for row in rows} == {"sf1", "sf10"}
 
 

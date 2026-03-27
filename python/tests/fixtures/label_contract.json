@@ -1,0 +1,9 @@
+{
+  "valid": ["local-main_20260325", "bench.v1"],
+  "invalid": ["", ".", "..", "bad/slash", "bad space"],
+  "sanitized": {
+    "feature/foo": "feature_foo",
+    "___": "label",
+    "...": "..."
+  }
+}

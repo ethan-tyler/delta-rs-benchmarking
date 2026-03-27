@@ -1412,8 +1412,6 @@ def test_terminal_set_color_mode() -> None:
 
     set_color_mode(False)
     assert red("test") == "test"
-
-
 def test_compare_runs_handles_deterministic_tpcds_case_names() -> None:
     base = _run(
         [

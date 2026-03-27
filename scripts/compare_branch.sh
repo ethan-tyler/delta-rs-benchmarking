@@ -283,7 +283,24 @@ esac
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
 RUNNER_RESULTS_DIR="${DELTA_BENCH_RESULTS:-${RUNNER_ROOT}/results}"
-DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-${DELTA_RS_DIR}/.delta_bench_checkout.lock}"
+
+default_checkout_lock_file() {
+  local checkout_dir="${1:-}"
+  local checkout_parent
+  checkout_parent="$(dirname "${checkout_dir}")"
+  local checkout_name
+  checkout_name="$(basename "${checkout_dir}")"
+  checkout_name="${checkout_name#/}"
+  while [[ "${checkout_name}" == .* ]]; do
+    checkout_name="${checkout_name#.}"
+  done
+  if [[ -z "${checkout_name}" ]]; then
+    checkout_name="delta-rs-under-test"
+  fi
+  printf '%s/.%s.delta_bench_checkout.lock\n' "${checkout_parent}" "${checkout_name}"
+}
+
+DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_DIR}")}"
 DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS:-7200}"
 CHECKOUT_LOCK_FD=""
 CHECKOUT_LOCK_DIR=""
@@ -352,6 +369,13 @@ prepare_delta_rs_ref() {
   return 1
 }
 
+pin_ref_to_commit() {
+  local ref="${1:-}"
+  local mode="${2:-auto}"
+  prepare_delta_rs_ref "${ref}" "${mode}" >/dev/null
+  exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD
+}
+
 if [[ -n "${BASE_SHA_OVERRIDE}" ]] && ! is_commit_sha "${BASE_SHA_OVERRIDE}"; then
   echo "invalid --base-sha '${BASE_SHA_OVERRIDE}'; expected 7-40 hex characters" >&2
   exit 1
@@ -409,6 +433,34 @@ exec_on_runner() {
   fi
 }
 
+path_is_within_dir() {
+  python3 - "$1" "$2" <<'PY'
+import os
+import sys
+
+candidate = os.path.realpath(sys.argv[1])
+root = os.path.realpath(sys.argv[2])
+try:
+    inside = os.path.commonpath([candidate, root]) == root
+except ValueError:
+    inside = False
+raise SystemExit(0 if inside else 1)
+PY
+}
+
+ensure_checkout_lock_path_safe_for_initial_clone() {
+  if [[ -n "${REMOTE_RUNNER}" ]]; then
+    return
+  fi
+  if [[ -d "${DELTA_RS_DIR}/.git" ]]; then
+    return
+  fi
+  if path_is_within_dir "${DELTA_BENCH_CHECKOUT_LOCK_FILE}" "${DELTA_RS_DIR}"; then
+    echo "DELTA_BENCH_CHECKOUT_LOCK_FILE must be outside DELTA_RS_DIR before initial clone: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+    exit 1
+  fi
+}
+
 release_checkout_lock() {
   if [[ -n "${CHECKOUT_LOCK_FD}" ]]; then
     eval "exec ${CHECKOUT_LOCK_FD}>&-" >/dev/null 2>&1 || true
@@ -428,6 +480,8 @@ acquire_checkout_lock() {
   if [[ "${DELTA_BENCH_CHECKOUT_LOCK_HELD:-0}" == "1" ]]; then
     return
   fi
+
+  ensure_checkout_lock_path_safe_for_initial_clone
 
   if command -v flock >/dev/null 2>&1; then
     mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
@@ -544,13 +598,13 @@ run_benchmark_suite_for_ref() {
   local quiet="${7:-0}"
 
   if (( quiet != 0 )); then
+    run_security_check >/dev/null
     prepare_delta_rs_ref "${ref}" "${mode}" >/dev/null
     run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh >/dev/null
-    run_security_check >/dev/null
   else
+    run_security_check
     prepare_delta_rs_ref "${ref}" "${mode}"
     run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-    run_security_check
   fi
 
   local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup "${warmup}" --iters "${iters}")
@@ -603,9 +657,6 @@ aggregate_run_labels() {
   run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.aggregate --output "${out_json}" --label "${out_label}" "${input_paths[@]}"
 }
 
-base_label="base-$(sanitize_label "${base_ref}")"
-cand_label="cand-$(sanitize_label "${candidate_ref}")"
-
 # Calculate total phases for progress display
 total_phases=$(( 1 + (BENCH_PREWARM_ITERS > 0 ? 1 : 0) + BENCH_COMPARE_RUNS + 1 + 1 ))
 current_phase=1
@@ -613,14 +664,26 @@ current_phase=1
 phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"
 current_phase=$((current_phase + 1))
 
+run_security_check
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 
 ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"
 ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"
 
+base_requested_ref="${base_ref}"
+candidate_requested_ref="${candidate_ref}"
+base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"
+base_ref_mode="commit"
+candidate_ref="$(pin_ref_to_commit "${candidate_ref}" "${candidate_ref_mode}")"
+candidate_ref_mode="commit"
+echo "Pinned base ref: ${base_requested_ref} -> ${base_ref}"
+echo "Pinned candidate ref: ${candidate_requested_ref} -> ${candidate_ref}"
+
+base_label="base-$(sanitize_label "${base_ref}")"
+cand_label="cand-$(sanitize_label "${candidate_ref}")"
+
 prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-run_security_check
 run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
 
 if (( BENCH_PREWARM_ITERS > 0 )); then

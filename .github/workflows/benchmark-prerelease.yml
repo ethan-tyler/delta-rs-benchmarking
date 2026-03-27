@@ -36,12 +36,19 @@ jobs:
     env:
       BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
       BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
+      DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Enforce runner security preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
 
       - name: Run branch comparison
         shell: bash
@@ -65,6 +72,9 @@ jobs:
           ./scripts/compare_branch.sh \
             "${storage_args[@]}" \
             "${profile_args[@]}" \
+            --enforce-run-mode \
+            --require-no-public-ipv4 \
+            --require-egress-policy \
             --runner "${{ inputs.runner_mode }}" \
             "${{ inputs.base_ref }}" \
             "${{ inputs.candidate_ref }}" \

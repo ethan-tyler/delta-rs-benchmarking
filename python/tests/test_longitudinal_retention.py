@@ -3,13 +3,20 @@ from __future__ import annotations
 import json
 import threading
 import time
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from delta_bench_longitudinal.retention import prune_artifacts, prune_store
-from delta_bench_longitudinal.store import fcntl, store_lock
+from delta_bench_longitudinal.store import (
+    _connect_store,
+    fcntl,
+    load_longitudinal_rows,
+    store_db_path,
+    store_lock,
+)
 
 
 def _write_artifact_metadata(base: Path, revision: str, build_timestamp: str) -> None:
@@ -25,6 +32,82 @@ def _write_artifact_metadata(base: Path, revision: str, build_timestamp: str) ->
         "error": None,
     }
     (rev_dir / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+
+
+def _seed_store_runs(store_dir: Path) -> None:
+    with closing(_connect_store(store_dir)) as conn:
+        with conn:
+            for run_id, created_at in (
+                ("run-1", "2026-01-01T00:00:00+00:00"),
+                ("run-2", "2026-02-01T00:00:00+00:00"),
+                ("run-3", "2026-03-01T00:00:00+00:00"),
+            ):
+                conn.execute(
+                    """
+                    INSERT INTO runs (
+                        run_id,
+                        schema_version,
+                        ingested_at,
+                        revision,
+                        revision_commit_timestamp,
+                        benchmark_created_at,
+                        label,
+                        git_sha,
+                        host,
+                        suite,
+                        scale,
+                        iterations,
+                        warmup,
+                        source_result_path
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        1,
+                        created_at,
+                        run_id,
+                        created_at,
+                        created_at,
+                        f"longitudinal-{run_id}",
+                        run_id,
+                        "bench-host",
+                        "read_scan",
+                        "sf1",
+                        1,
+                        0,
+                        str(store_dir / f"{run_id}.json"),
+                    ),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO case_rows (
+                        run_id,
+                        case_name,
+                        success,
+                        failure_reason,
+                        sample_count,
+                        sample_values_json,
+                        best_ms,
+                        min_ms,
+                        max_ms,
+                        mean_ms,
+                        median_ms
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        "scan_all",
+                        1,
+                        None,
+                        1,
+                        "[100.0]",
+                        100.0,
+                        100.0,
+                        100.0,
+                        100.0,
+                        100.0,
+                    ),
+                )
 
 
 def test_prune_artifacts_dry_run_keeps_files(tmp_path: Path) -> None:
@@ -62,41 +145,9 @@ def test_prune_artifacts_apply_enforces_count_limit(tmp_path: Path) -> None:
     assert not (artifacts / "rev-2").exists()
 
 
-def _write_store(store_dir: Path) -> None:
-    store_dir.mkdir(parents=True, exist_ok=True)
-    rows = [
-        {
-            "run_id": "run-1",
-            "benchmark_created_at": "2026-01-01T00:00:00+00:00",
-            "ingested_at": "2026-01-01T01:00:00+00:00",
-            "case": "a",
-        },
-        {
-            "run_id": "run-2",
-            "benchmark_created_at": "2026-02-01T00:00:00+00:00",
-            "ingested_at": "2026-02-01T01:00:00+00:00",
-            "case": "a",
-        },
-        {
-            "run_id": "run-3",
-            "benchmark_created_at": "2026-03-01T00:00:00+00:00",
-            "ingested_at": "2026-03-01T01:00:00+00:00",
-            "case": "a",
-        },
-    ]
-    with (store_dir / "rows.jsonl").open("w", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row))
-            fh.write("\n")
-    (store_dir / "index.json").write_text(
-        json.dumps({"schema_version": 1, "run_ids": ["run-1", "run-2", "run-3"]}),
-        encoding="utf-8",
-    )
-
-
 def test_prune_store_dry_run(tmp_path: Path) -> None:
     store_dir = tmp_path / "store"
-    _write_store(store_dir)
+    _seed_store_runs(store_dir)
     summary = prune_store(
         store_dir=store_dir,
         max_age_days=None,
@@ -105,12 +156,13 @@ def test_prune_store_dry_run(tmp_path: Path) -> None:
         now=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
     )
     assert summary["candidate_runs"] == ["run-1"]
-    assert len((store_dir / "rows.jsonl").read_text(encoding="utf-8").splitlines()) == 3
+    assert store_db_path(store_dir).exists()
+    assert len(load_longitudinal_rows(store_dir)) == 3
 
 
-def test_prune_store_apply_rewrites_rows_and_index(tmp_path: Path) -> None:
+def test_prune_store_apply_deletes_runs_without_rows_rewrite(tmp_path: Path) -> None:
     store_dir = tmp_path / "store"
-    _write_store(store_dir)
+    _seed_store_runs(store_dir)
     summary = prune_store(
         store_dir=store_dir,
         max_age_days=None,
@@ -119,57 +171,34 @@ def test_prune_store_apply_rewrites_rows_and_index(tmp_path: Path) -> None:
         now=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
     )
     assert summary["removed_runs"] == 1
-    rows = [
-        json.loads(line)
-        for line in (store_dir / "rows.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    rows = load_longitudinal_rows(store_dir)
     assert {row["run_id"] for row in rows} == {"run-2", "run-3"}
-    index = json.loads((store_dir / "index.json").read_text(encoding="utf-8"))
-    assert index["run_ids"] == ["run-2", "run-3"]
+    with closing(_connect_store(store_dir)) as conn:
+        remaining_case_runs = {
+            run_id for (run_id,) in conn.execute("SELECT DISTINCT run_id FROM case_rows")
+        }
+    assert remaining_case_runs == {"run-2", "run-3"}
+    assert not (store_dir / "rows.jsonl").exists()
+    assert not (store_dir / "index.json").exists()
 
 
-def test_prune_store_skips_invalid_json_rows(tmp_path: Path) -> None:
+def test_prune_store_rejects_legacy_jsonl_store_until_migrated(tmp_path: Path) -> None:
     store_dir = tmp_path / "store"
     store_dir.mkdir(parents=True, exist_ok=True)
-    with (store_dir / "rows.jsonl").open("w", encoding="utf-8") as fh:
-        fh.write(
-            json.dumps(
-                {
-                    "run_id": "run-1",
-                    "benchmark_created_at": "2026-01-01T00:00:00+00:00",
-                    "ingested_at": "2026-01-01T01:00:00+00:00",
-                    "case": "a",
-                }
-            )
-        )
-        fh.write("\n")
-        fh.write("{invalid json}\n")
-        fh.write(
-            json.dumps(
-                {
-                    "run_id": "run-2",
-                    "benchmark_created_at": "2026-02-01T00:00:00+00:00",
-                    "ingested_at": "2026-02-01T01:00:00+00:00",
-                    "case": "a",
-                }
-            )
-        )
-        fh.write("\n")
+    (store_dir / "rows.jsonl").write_text("{}", encoding="utf-8")
     (store_dir / "index.json").write_text(
-        json.dumps({"schema_version": 1, "run_ids": ["run-1", "run-2"]}),
+        json.dumps({"schema_version": 1, "run_ids": []}),
         encoding="utf-8",
     )
 
-    summary = prune_store(
-        store_dir=store_dir,
-        max_age_days=None,
-        max_runs=1,
-        apply=False,
-        now=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
-    )
-
-    assert summary["candidate_runs"] == ["run-1"]
-    assert summary["invalid_rows_skipped"] == 1
+    with pytest.raises(ValueError, match="legacy longitudinal store"):
+        prune_store(
+            store_dir=store_dir,
+            max_age_days=None,
+            max_runs=2,
+            apply=False,
+            now=datetime(2026, 3, 2, 0, 0, tzinfo=timezone.utc),
+        )
 
 
 def test_prune_store_blocks_when_store_lock_is_held(tmp_path: Path) -> None:
@@ -177,7 +206,7 @@ def test_prune_store_blocks_when_store_lock_is_held(tmp_path: Path) -> None:
         pytest.skip("flock unavailable on this platform")
 
     store_dir = tmp_path / "store"
-    _write_store(store_dir)
+    _seed_store_runs(store_dir)
     done = threading.Event()
 
     def run_prune() -> None:

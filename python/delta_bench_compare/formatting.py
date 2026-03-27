@@ -230,8 +230,6 @@ def _pad(value: str, width: int, right_align: bool) -> str:
     if right_align:
         return " " * padding + value
     return value + " " * padding
-
-
 def _table_lines_markdown(
     reference_rows: list[ComparisonRow],
     rows: list[ComparisonRow],
@@ -263,6 +261,7 @@ def _table_lines_plain(
         _row_cells(row, reference_rows, include_metrics=include_metrics) for row in rows
     ]
 
+    # Compute widths from raw (uncolored) values
     widths = [len(column) for column in header]
     for cells in raw_body:
         for idx, value in enumerate(cells):
@@ -271,7 +270,6 @@ def _table_lines_plain(
     right_indices = set(_RIGHT_ALIGN_INDICES)
     if include_metrics:
         right_indices.update(range(5, len(header)))
-
     lines = [
         "  ".join(
             _pad(column, widths[idx], idx in right_indices)
@@ -279,7 +277,6 @@ def _table_lines_plain(
         ),
         "  ".join("-" * widths[idx] for idx in range(len(header))),
     ]
-
     for raw_cells, row in zip(raw_body, rows):
         colored = _colorize_cells(raw_cells, row.change)
         lines.append(

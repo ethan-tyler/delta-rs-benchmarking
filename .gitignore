@@ -1,6 +1,8 @@
 target/
 .worktrees/
 .delta-rs-under-test/
+*.delta_bench_checkout.lock
+*.delta_bench_checkout.lock.dir/
 fixtures/
 results/
 __pycache__/
@@ -10,9 +12,6 @@ infra/vultr/.terraform/
 infra/vultr/*.tfstate
 infra/vultr/*.tfstate.*
 infra/vultr/terraform.tfplan
-\# Best-in-Class Benchmark Suite and Auto.md
-\# Research Prompt: Design and Build a Be.md
-Below is a **complete, production-qualit.md
 
 docs/adr/
 docs/plans/

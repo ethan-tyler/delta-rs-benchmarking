@@ -21,12 +21,12 @@ You never need to modify delta-rs source from this repo. The harness syncs itsel
 
 The main scripts are:
 
-| Script | Purpose |
-|---|---|
-| `prepare_delta_rs.sh` | Clones or updates the delta-rs checkout |
-| `sync_harness_to_delta_rs.sh` | Copies benchmark crate and configs into the checkout |
-| `bench.sh` | Generates fixtures and runs benchmark suites |
-| `compare_branch.sh` | Runs benchmarks against two revisions and compares results |
+| Script                        | Purpose                                                    |
+| ----------------------------- | ---------------------------------------------------------- |
+| `prepare_delta_rs.sh`         | Clones or updates the delta-rs checkout                    |
+| `sync_harness_to_delta_rs.sh` | Copies benchmark crate and configs into the checkout       |
+| `bench.sh`                    | Generates fixtures and runs benchmark suites               |
+| `compare_branch.sh`           | Runs benchmarks against two revisions and compares results |
 
 ## Prerequisites
 
@@ -60,7 +60,7 @@ DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
 If you plan to run `interop_py` cases (or use `--suite all --runner all`), install Python dependencies in the interpreter used by `DELTA_BENCH_INTEROP_PYTHON` (defaults to `python3`):
 
 ```bash
-python3 -m pip install pandas polars pyarrow
+python3 -m pip install -r python/requirements-audit.txt
 ```
 
 Without these packages, interop cases are classified as `expected_failure` instead of `supported`. `./scripts/bench.sh doctor` now reports missing interop dependencies and an install hint.
@@ -74,6 +74,17 @@ Run `doctor` at any time to verify that the workspace is wired up correctly:
 ```
 
 This checks that the delta-rs checkout exists, the harness is synced, Cargo can resolve the benchmark crate, and whether Python interop dependencies are available.
+
+### Local CI baseline
+
+Before you push changes, run the same baseline checks enforced by `.github/workflows/ci.yml`:
+
+```bash
+cargo test --locked
+(cd python && python3 -m pytest -q tests)
+```
+
+Treat these as the minimum regression screen before asking CI or a reviewer to validate a change.
 
 ## Your First Benchmark Run
 
@@ -99,7 +110,7 @@ This creates Delta tables under `fixtures/sf1/` including narrow sales tables, p
   --label local
 ```
 
-This runs every benchmark suite (scan, write, merge, delete_update, metadata, optimize_vacuum, tpcds, interop_py) using both Rust and Python runners. Each case gets 1 warmup iteration (not measured) followed by 5 measured iterations.
+This runs every benchmark suite (scan, write, merge, delete_update, metadata, optimize_vacuum, concurrency, tpcds, interop_py) using both Rust and Python runners. Each case gets 1 warmup iteration (not measured) followed by 5 measured iterations.
 
 ### Step 3: Read the output
 
@@ -116,13 +127,13 @@ To suppress the terminal table, pass `--no-summary-table`. Rust compiler warning
 
 Each dataset ID controls which fixtures are generated and at what scale. The seed ensures deterministic data regardless of when or where you run it.
 
-| Dataset ID | Scale | Description |
-|---|---|---|
-| `tiny_smoke` | sf1 (10K rows) | Minimal smoke test. Fast to generate, good for validating your setup. |
-| `medium_selective` | sf10 (100K rows) | Realistic workloads with selective query patterns. |
-| `small_files` | sf1 (10K rows) | Generates many small files for optimize/vacuum testing. |
-| `many_versions` | sf1 (10K rows) | Creates 12 commits to build a version history for time-travel tests. |
-| `tpcds_duckdb` | sf1 (10K rows) | TPC-DS `store_sales` table sourced from DuckDB. Requires `python3` and `pip install duckdb`. |
+| Dataset ID         | Scale            | Description                                                                                  |
+| ------------------ | ---------------- | -------------------------------------------------------------------------------------------- |
+| `tiny_smoke`       | sf1 (10K rows)   | Minimal smoke test. Fast to generate, good for validating your setup.                        |
+| `medium_selective` | sf10 (100K rows) | Realistic workloads with selective query patterns.                                           |
+| `small_files`      | sf1 (10K rows)   | Generates many small files for optimize/vacuum testing.                                      |
+| `many_versions`    | sf1 (10K rows)   | Creates 12 commits to build a version history for time-travel tests.                         |
+| `tpcds_duckdb`     | sf1 (10K rows)   | TPC-DS `store_sales` table sourced from DuckDB. Requires `python3` and `pip install duckdb`. |
 
 See [reference.md](reference.md#datasets-and-scales) for scale factors, fixture profiles, and fixture table details.
 
@@ -158,14 +169,15 @@ For benchmarking against remote storage, pass `--storage-backend s3` with the re
 
 Backend configuration can also be set through environment variables or backend profiles:
 
-| Variable | Description |
-|---|---|
-| `BENCH_STORAGE_BACKEND` | `local` or `s3` |
-| `BENCH_STORAGE_OPTIONS` | Multi-line `KEY=VALUE` pairs |
+| Variable                | Description                        |
+| ----------------------- | ---------------------------------- |
+| `BENCH_STORAGE_BACKEND` | `local` or `s3`                    |
+| `BENCH_STORAGE_OPTIONS` | Multi-line `KEY=VALUE` pairs       |
 | `BENCH_BACKEND_PROFILE` | Profile name from `backends/*.env` |
-| `BENCH_RUNNER_MODE` | `rust`, `python`, or `all` |
+| `BENCH_RUNNER_MODE`     | `rust`, `python`, or `all`         |
 
 Notes:
+
 - The `--storage-option table_root=...` flag is required for non-local backends.
 - Local fixture cache (`fixtures/<scale>/rows.jsonl`, `fixtures/<scale>/manifest.json`) is unchanged regardless of backend.
 - The `write` suite currently supports only local storage.
@@ -189,14 +201,14 @@ Apply targeted cleanup:
 ./scripts/cleanup_local.sh --apply --delta-rs-under-test
 ```
 
-| Flag | What it targets |
-|---|---|
-| `--results` | JSON result files under `results/` |
-| `--fixtures` | Generated fixture data under `fixtures/` |
-| `--delta-rs-under-test` | The managed delta-rs checkout |
-| `--keep-last N` | Retain the N most recent result sets |
-| `--older-than-days N` | Only remove items older than N days |
-| `--allow-outside-root` | Allow cleanup of results stored outside this repo root |
+| Flag                    | What it targets                                        |
+| ----------------------- | ------------------------------------------------------ |
+| `--results`             | JSON result files under `results/`                     |
+| `--fixtures`            | Generated fixture data under `fixtures/`               |
+| `--delta-rs-under-test` | The managed delta-rs checkout                          |
+| `--keep-last N`         | Retain the N most recent result sets                   |
+| `--older-than-days N`   | Only remove items older than N days                    |
+| `--allow-outside-root`  | Allow cleanup of results stored outside this repo root |
 
 ## Troubleshooting
 
@@ -210,11 +222,11 @@ This diagnoses common issues: missing checkout, un-synced harness, Cargo resolut
 
 **Need help with a specific command:**
 
-| Script | Help command |
-|---|---|
-| `bench.sh` | `./scripts/bench.sh --help` |
-| `compare_branch.sh` | `./scripts/compare_branch.sh --help` |
-| `cleanup_local.sh` | `./scripts/cleanup_local.sh --help` |
+| Script                  | Help command                             |
+| ----------------------- | ---------------------------------------- |
+| `bench.sh`              | `./scripts/bench.sh --help`              |
+| `compare_branch.sh`     | `./scripts/compare_branch.sh --help`     |
+| `cleanup_local.sh`      | `./scripts/cleanup_local.sh --help`      |
 | `longitudinal_bench.sh` | `./scripts/longitudinal_bench.sh --help` |
 
 **Noisy Rust warnings in output:**

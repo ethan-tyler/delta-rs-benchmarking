@@ -92,9 +92,11 @@ Execute benchmark suites across all revisions:
 
 The `--state-path` file tracks which (revision, suite, scale) cells have completed, failed, or are pending. If the run is interrupted, rerunning this command resumes from where it left off.
 
+The matrix state file also stores a fingerprint of the matrix configuration. Reuse the same `--state-path` only when `--suite`, `--scale`, warmup, iterations, fixtures directory, results directory, and label prefix are unchanged.
+
 ### Ingest results
 
-Normalize the raw JSON results into an append-safe time-series store:
+Normalize the raw JSON results into a SQLite-backed time-series store:
 
 ```bash
 ./scripts/longitudinal_bench.sh ingest-results \
@@ -104,7 +106,9 @@ Normalize the raw JSON results into an append-safe time-series store:
   --store-dir longitudinal/store
 ```
 
-Duplicate ingests are deduplicated by run-id, so this is safe to rerun.
+Duplicate ingests are deduplicated by run-id in the SQLite store, so this is safe to rerun.
+
+If you still have a legacy `rows.jsonl` / `index.json` store from an older checkout, migrate or remove it before running new ingest/report/prune commands. The current pipeline fails fast rather than silently ignoring legacy store data.
 
 ### Generate reports
 
@@ -295,6 +299,8 @@ Look at the `(revision, suite, scale)` keys with failure status and their `failu
 
 **Recover:** Fix the root cause (increase timeout for legitimately slow cases, or fix the underlying issue) and rerun `run-matrix` with the same manifest and state path. Successful cells are skipped; failed cells resume with bounded retry.
 
+If you intentionally change matrix configuration such as suites, scales, warmup, iterations, fixtures directory, results directory, or label prefix, start with a new `--state-path` instead of reusing the old file. The runner now rejects configuration-mismatched state files to prevent partial resumes from mixing incompatible runs.
+
 ```bash
 ./scripts/longitudinal_bench.sh run-matrix \
   --manifest longitudinal/manifests/<manifest>.json \
@@ -309,7 +315,7 @@ Look at the `(revision, suite, scale)` keys with failure status and their `failu
 
 ### Ingest or report gaps
 
-**Symptoms:** Expected rows are missing from `rows.jsonl`, or the report is missing expected revisions.
+**Symptoms:** Expected rows are missing from `store.sqlite3`, or the report is missing expected revisions.
 
 **Diagnose:** Verify that the expected result files exist:
 
@@ -338,9 +344,8 @@ ls results/<label-prefix>-<revision>/<suite>.json
 longitudinal/
   manifests/                  # revision manifests (JSON)
   artifacts/<sha>/            # built delta-bench binary + metadata.json per revision
-  state/matrix-state.json     # resumable matrix status, attempts, and failure reasons
-  store/rows.jsonl            # normalized append-safe time-series rows
-  store/index.json            # ingested run-id dedupe index
+  state/matrix-state.json     # resumable matrix status, config fingerprint, attempts, and failure reasons
+  store/store.sqlite3         # normalized time-series runs + case rows
   reports/summary.md          # CI-friendly markdown summary
   reports/trends.html         # HTML trend report with inline charts
   releases/<lane>/            # release-tag workflow artifacts (per lane)

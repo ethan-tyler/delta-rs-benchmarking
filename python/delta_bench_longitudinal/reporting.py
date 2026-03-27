@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import html
-import json
 import math
 import statistics
 from pathlib import Path
 from typing import Any
+
+from .store import load_longitudinal_rows
 
 
 def generate_trend_reports(
@@ -221,31 +222,22 @@ def _mann_whitney_one_sided_p_value(
 def _load_grouped_rows(
     store_dir: Path,
 ) -> tuple[dict[tuple[str, str, str], list[dict[str, Any]]], int]:
-    rows_path = store_dir / "rows.jsonl"
-    if not rows_path.exists():
+    rows = load_longitudinal_rows(store_dir)
+    if not rows:
         return {}, 0
     grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-    invalid_rows = 0
-    with rows_path.open("r", encoding="utf-8") as fh:
-        for line in fh:
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                invalid_rows += 1
-                continue
-            if not row.get("success"):
-                continue
-            if row.get("median_ms") is None:
-                continue
-            key = (
-                str(row.get("suite", "unknown")),
-                str(row.get("scale", "unknown")),
-                str(row.get("case", "unknown")),
-            )
-            grouped.setdefault(key, []).append(row)
-    return grouped, invalid_rows
+    for row in rows:
+        if not row.get("success"):
+            continue
+        if row.get("median_ms") is None:
+            continue
+        key = (
+            str(row.get("suite", "unknown")),
+            str(row.get("scale", "unknown")),
+            str(row.get("case", "unknown")),
+        )
+        grouped.setdefault(key, []).append(row)
+    return grouped, 0
 
 
 def _markdown_summary(

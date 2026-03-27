@@ -64,6 +64,22 @@ Example with all preflight checks enabled:
   main <candidate_ref> all
 ```
 
+The self-hosted GitHub Actions workflows enforce the same contract:
+
+- `benchmark.yml` passes `--enforce-run-mode`, `--require-no-public-ipv4`, and `--require-egress-policy` directly into `./scripts/compare_branch.sh`
+- `benchmark-prerelease.yml` passes the same hardening flags into `./scripts/compare_branch.sh`
+- `benchmark-nightly.yml` runs `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` before benchmark execution
+- `longitudinal-nightly.yml` runs `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` before `run-matrix`
+- `longitudinal-release-history.yml` runs `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` before `run-matrix`
+
+Workflow variables for self-hosted runs:
+
+- Required: `DELTA_BENCH_EGRESS_POLICY_SHA256` for the expected hash of the active nftables ruleset
+- Optional: `BENCH_STORAGE_BACKEND` for benchmark jobs that read or write remote storage
+- Optional: `BENCH_STORAGE_OPTIONS` for newline-delimited `KEY=VALUE` storage options
+- Optional: `BENCH_BACKEND_PROFILE` for nightly and compare workflows
+- Optional: `BENCH_RUNNER_MODE` for `benchmark.yml` runner selection (`rust`, `python`, or `all`)
+
 ## Backend Profile and Secret Handling
 
 Backend profiles store repeatable object-store and lock-table defaults in `backends/<profile_name>.env`. Use these to avoid passing the same `--storage-option` flags every time.

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
+import sqlite3
 import statistics
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO
@@ -19,6 +19,7 @@ except ImportError:  # pragma: no cover - non-POSIX platforms
 
 
 STORE_SCHEMA_VERSION = 1
+STORE_DB_FILENAME = "store.sqlite3"
 
 
 def ingest_benchmark_result(
@@ -29,6 +30,7 @@ def ingest_benchmark_result(
     commit_timestamp: str,
 ) -> dict[str, Any]:
     store_root = Path(store_dir)
+    _raise_if_unmigrated_legacy_store(store_root)
     source = Path(result_path)
     payload = load_benchmark_payload(source)
     context = payload.get("context", {})
@@ -39,64 +41,120 @@ def ingest_benchmark_result(
         context=context,
         payload=payload,
     )
+    ingested_at = datetime.now(timezone.utc).isoformat()
+    run_record = _normalize_run_record(
+        run_id=run_id,
+        ingested_at=ingested_at,
+        revision=revision,
+        commit_timestamp=commit_timestamp,
+        context=context,
+        source=source,
+    )
+    case_rows = [
+        _normalize_case_row(
+            case=case,
+        )
+        for case in cases
+    ]
 
     with store_lock(store_root):
-        index = _load_index(store_root)
-        if run_id in index:
-            return {"run_id": run_id, "rows_appended": 0, "deduped": True}
+        with closing(_connect_store(store_root)) as conn:
+            if _run_exists(conn, run_id):
+                return {"run_id": run_id, "rows_appended": 0, "deduped": True}
+            with conn:
+                _insert_run(conn, run_record)
+                if case_rows:
+                    conn.executemany(
+                        """
+                        INSERT INTO case_rows (
+                            run_id,
+                            case_name,
+                            success,
+                            failure_reason,
+                            sample_count,
+                            sample_values_json,
+                            best_ms,
+                            min_ms,
+                            max_ms,
+                            mean_ms,
+                            median_ms
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            _case_row_params(run_id=run_id, row=row)
+                            for row in case_rows
+                        ],
+                    )
 
-        ingested_at = datetime.now(timezone.utc).isoformat()
-        rows = [
-            _normalize_case_row(
-                run_id=run_id,
-                ingested_at=ingested_at,
-                revision=revision,
-                commit_timestamp=commit_timestamp,
-                context=context,
-                case=case,
-                source=source,
-            )
-            for case in cases
-        ]
-
-        _append_rows(_rows_path(store_root), rows)
-        index.add(run_id)
-        _save_index(store_root, index)
-
-    return {"run_id": run_id, "rows_appended": len(rows), "deduped": False}
+    return {"run_id": run_id, "rows_appended": len(case_rows), "deduped": False}
 
 
 def load_longitudinal_rows(store_dir: Path | str) -> list[dict[str, Any]]:
-    rows_path = _rows_path(Path(store_dir))
-    if not rows_path.exists():
+    store_root = Path(store_dir)
+    _raise_if_unmigrated_legacy_store(store_root)
+    db_path = store_db_path(store_root)
+    if not db_path.exists():
         return []
-    rows: list[dict[str, Any]] = []
-    for line in rows_path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        rows.append(json.loads(line))
-    return rows
+    with closing(_connect_store(store_root)) as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                r.run_id,
+                r.ingested_at,
+                r.revision,
+                r.revision_commit_timestamp,
+                r.benchmark_created_at,
+                r.label,
+                r.git_sha,
+                r.host,
+                r.suite,
+                r.scale,
+                r.iterations,
+                r.warmup,
+                r.image_version,
+                r.hardening_profile_id,
+                r.hardening_profile_sha256,
+                r.cpu_model,
+                r.cpu_microcode,
+                r.kernel,
+                r.boot_params,
+                r.cpu_steal_pct,
+                r.numa_topology,
+                r.egress_policy_sha256,
+                r.run_mode,
+                r.maintenance_window_id,
+                r.source_result_path,
+                c.case_name,
+                c.success,
+                c.failure_reason,
+                c.sample_count,
+                c.sample_values_json,
+                c.best_ms,
+                c.min_ms,
+                c.max_ms,
+                c.mean_ms,
+                c.median_ms
+            FROM runs AS r
+            LEFT JOIN case_rows AS c ON c.run_id = r.run_id
+            ORDER BY
+                COALESCE(r.benchmark_created_at, r.ingested_at, ''),
+                r.run_id,
+                c.case_name
+            """
+        ).fetchall()
+    return [_row_from_db(row) for row in rows if row["case_name"] is not None]
 
 
-def _normalize_case_row(
+def _normalize_run_record(
     *,
     run_id: str,
     ingested_at: str,
     revision: str,
     commit_timestamp: str,
     context: dict[str, Any],
-    case: dict[str, Any],
     source: Path,
 ) -> dict[str, Any]:
-    samples = case.get("samples") or []
-    elapsed = [
-        float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample
-    ]
-    metrics = _elapsed_metrics(elapsed)
-    failure = case.get("failure") or {}
-
     return {
-        "schema_version": STORE_SCHEMA_VERSION,
         "run_id": run_id,
         "ingested_at": ingested_at,
         "revision": revision,
@@ -109,16 +167,6 @@ def _normalize_case_row(
         "scale": context.get("scale"),
         "iterations": context.get("iterations"),
         "warmup": context.get("warmup"),
-        "case": case.get("case"),
-        "success": bool(case.get("success", False)),
-        "failure_reason": failure.get("message"),
-        "sample_count": len(elapsed),
-        "sample_values_ms": elapsed,
-        "best_ms": metrics["best_ms"],
-        "min_ms": metrics["min_ms"],
-        "max_ms": metrics["max_ms"],
-        "mean_ms": metrics["mean_ms"],
-        "median_ms": metrics["median_ms"],
         "image_version": context.get("image_version"),
         "hardening_profile_id": context.get("hardening_profile_id"),
         "hardening_profile_sha256": context.get("hardening_profile_sha256"),
@@ -132,6 +180,31 @@ def _normalize_case_row(
         "run_mode": context.get("run_mode"),
         "maintenance_window_id": context.get("maintenance_window_id"),
         "source_result_path": str(source),
+    }
+
+
+def _normalize_case_row(
+    *,
+    case: dict[str, Any],
+) -> dict[str, Any]:
+    samples = case.get("samples") or []
+    elapsed = [
+        float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample
+    ]
+    metrics = _elapsed_metrics(elapsed)
+    failure = case.get("failure") or {}
+
+    return {
+        "case": case.get("case"),
+        "success": bool(case.get("success", False)),
+        "failure_reason": failure.get("message"),
+        "sample_count": len(elapsed),
+        "sample_values_ms": elapsed,
+        "best_ms": metrics["best_ms"],
+        "min_ms": metrics["min_ms"],
+        "max_ms": metrics["max_ms"],
+        "mean_ms": metrics["mean_ms"],
+        "median_ms": metrics["median_ms"],
     }
 
 
@@ -176,99 +249,215 @@ def _run_id(
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _index_path(store_dir: Path) -> Path:
-    return store_dir / "index.json"
+def store_db_path(store_dir: Path | str) -> Path:
+    return Path(store_dir) / STORE_DB_FILENAME
 
 
-def _rows_path(store_dir: Path) -> Path:
-    return store_dir / "rows.jsonl"
+def _raise_if_unmigrated_legacy_store(store_dir: Path) -> None:
+    db_path = store_db_path(store_dir)
+    if db_path.exists():
+        return
+    legacy_paths = [store_dir / "rows.jsonl", store_dir / "index.json"]
+    present = [path.name for path in legacy_paths if path.exists()]
+    if present:
+        names = ", ".join(present)
+        raise ValueError(
+            f"legacy longitudinal store detected at {store_dir}; migrate or remove {names} before using store.sqlite3"
+        )
 
 
-def _load_index(store_dir: Path) -> set[str]:
-    path = _index_path(store_dir)
-    rows_path = _rows_path(store_dir)
-    run_ids: set[str]
-    rows_mtime_ns: int | None = None
-    rows_size: int | None = None
-    if not path.exists():
-        run_ids = set()
-    else:
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            payload = {}
-        run_ids = set(payload.get("run_ids", []))
-        mtime_candidate = payload.get("rows_mtime_ns")
-        size_candidate = payload.get("rows_size")
-        if isinstance(mtime_candidate, int) and isinstance(size_candidate, int):
-            rows_mtime_ns = mtime_candidate
-            rows_size = size_candidate
-
-    # Reconcile with existing rows to preserve idempotency if a prior run crashed
-    # after appending rows but before writing index.json. Skip full scan when index
-    # is newer than rows.
-    if rows_path.exists():
-        should_reconcile = True
-        if rows_mtime_ns is not None and rows_size is not None:
-            try:
-                current = rows_path.stat()
-                should_reconcile = not (
-                    current.st_mtime_ns == rows_mtime_ns
-                    and current.st_size == rows_size
-                )
-            except OSError:
-                should_reconcile = True
-        elif path.exists():
-            try:
-                should_reconcile = rows_path.stat().st_mtime > path.stat().st_mtime
-            except OSError:
-                should_reconcile = True
-        if should_reconcile:
-            run_ids.update(_scan_row_run_ids(rows_path))
-    return run_ids
+def _connect_store(store_dir: Path) -> sqlite3.Connection:
+    db_path = store_db_path(store_dir)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = FULL")
+    _ensure_schema(conn)
+    return conn
 
 
-def _scan_row_run_ids(rows_path: Path) -> set[str]:
-    run_ids: set[str] = set()
-    with rows_path.open("r", encoding="utf-8") as fh:
-        for line in fh:
-            if not line.strip():
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            run_id = row.get("run_id")
-            if isinstance(run_id, str) and run_id:
-                run_ids.add(run_id)
-    return run_ids
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY,
+            schema_version INTEGER NOT NULL,
+            ingested_at TEXT NOT NULL,
+            revision TEXT NOT NULL,
+            revision_commit_timestamp TEXT NOT NULL,
+            benchmark_created_at TEXT,
+            label TEXT,
+            git_sha TEXT,
+            host TEXT,
+            suite TEXT,
+            scale TEXT,
+            iterations INTEGER,
+            warmup INTEGER,
+            image_version TEXT,
+            hardening_profile_id TEXT,
+            hardening_profile_sha256 TEXT,
+            cpu_model TEXT,
+            cpu_microcode TEXT,
+            kernel TEXT,
+            boot_params TEXT,
+            cpu_steal_pct REAL,
+            numa_topology TEXT,
+            egress_policy_sha256 TEXT,
+            run_mode TEXT,
+            maintenance_window_id TEXT,
+            source_result_path TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS case_rows (
+            run_id TEXT NOT NULL,
+            case_name TEXT NOT NULL,
+            success INTEGER NOT NULL,
+            failure_reason TEXT,
+            sample_count INTEGER NOT NULL,
+            sample_values_json TEXT NOT NULL,
+            best_ms REAL,
+            min_ms REAL,
+            max_ms REAL,
+            mean_ms REAL,
+            median_ms REAL,
+            PRIMARY KEY (run_id, case_name),
+            FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_runs_ordering
+        ON runs (suite, scale, benchmark_created_at, ingested_at, run_id);
+        """
+    )
 
 
-def _save_index(store_dir: Path, run_ids: set[str]) -> None:
-    path = _index_path(store_dir)
-    store_dir.mkdir(parents=True, exist_ok=True)
-    data: dict[str, Any] = {
+def _run_exists(conn: sqlite3.Connection, run_id: str) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM runs WHERE run_id = ? LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    return row is not None
+
+
+def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
+    conn.execute(
+        """
+        INSERT INTO runs (
+            run_id,
+            schema_version,
+            ingested_at,
+            revision,
+            revision_commit_timestamp,
+            benchmark_created_at,
+            label,
+            git_sha,
+            host,
+            suite,
+            scale,
+            iterations,
+            warmup,
+            image_version,
+            hardening_profile_id,
+            hardening_profile_sha256,
+            cpu_model,
+            cpu_microcode,
+            kernel,
+            boot_params,
+            cpu_steal_pct,
+            numa_topology,
+            egress_policy_sha256,
+            run_mode,
+            maintenance_window_id,
+            source_result_path
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            row["run_id"],
+            STORE_SCHEMA_VERSION,
+            row["ingested_at"],
+            row["revision"],
+            row["revision_commit_timestamp"],
+            row["benchmark_created_at"],
+            row["label"],
+            row["git_sha"],
+            row["host"],
+            row["suite"],
+            row["scale"],
+            row["iterations"],
+            row["warmup"],
+            row["image_version"],
+            row["hardening_profile_id"],
+            row["hardening_profile_sha256"],
+            row["cpu_model"],
+            row["cpu_microcode"],
+            row["kernel"],
+            row["boot_params"],
+            row["cpu_steal_pct"],
+            row["numa_topology"],
+            row["egress_policy_sha256"],
+            row["run_mode"],
+            row["maintenance_window_id"],
+            row["source_result_path"],
+        ),
+    )
+
+
+def _case_row_params(*, run_id: str, row: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        run_id,
+        row["case"],
+        int(bool(row["success"])),
+        row["failure_reason"],
+        row["sample_count"],
+        json.dumps(row["sample_values_ms"]),
+        row["best_ms"],
+        row["min_ms"],
+        row["max_ms"],
+        row["mean_ms"],
+        row["median_ms"],
+    )
+
+
+def _row_from_db(row: sqlite3.Row) -> dict[str, Any]:
+    return {
         "schema_version": STORE_SCHEMA_VERSION,
-        "run_ids": sorted(run_ids),
+        "run_id": row["run_id"],
+        "ingested_at": row["ingested_at"],
+        "revision": row["revision"],
+        "revision_commit_timestamp": row["revision_commit_timestamp"],
+        "benchmark_created_at": row["benchmark_created_at"],
+        "label": row["label"],
+        "git_sha": row["git_sha"],
+        "host": row["host"],
+        "suite": row["suite"],
+        "scale": row["scale"],
+        "iterations": row["iterations"],
+        "warmup": row["warmup"],
+        "case": row["case_name"],
+        "success": bool(row["success"]),
+        "failure_reason": row["failure_reason"],
+        "sample_count": row["sample_count"],
+        "sample_values_ms": json.loads(row["sample_values_json"]),
+        "best_ms": row["best_ms"],
+        "min_ms": row["min_ms"],
+        "max_ms": row["max_ms"],
+        "mean_ms": row["mean_ms"],
+        "median_ms": row["median_ms"],
+        "image_version": row["image_version"],
+        "hardening_profile_id": row["hardening_profile_id"],
+        "hardening_profile_sha256": row["hardening_profile_sha256"],
+        "cpu_model": row["cpu_model"],
+        "cpu_microcode": row["cpu_microcode"],
+        "kernel": row["kernel"],
+        "boot_params": row["boot_params"],
+        "cpu_steal_pct": row["cpu_steal_pct"],
+        "numa_topology": row["numa_topology"],
+        "egress_policy_sha256": row["egress_policy_sha256"],
+        "run_mode": row["run_mode"],
+        "maintenance_window_id": row["maintenance_window_id"],
+        "source_result_path": row["source_result_path"],
     }
-    rows_path = _rows_path(store_dir)
-    if rows_path.exists():
-        rows_stat = rows_path.stat()
-        data["rows_mtime_ns"] = rows_stat.st_mtime_ns
-        data["rows_size"] = rows_stat.st_size
-    temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    temp.replace(path)
-
-
-def _append_rows(rows_path: Path, rows: list[dict[str, Any]]) -> None:
-    rows_path.parent.mkdir(parents=True, exist_ok=True)
-    with rows_path.open("a", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(json.dumps(row, sort_keys=True))
-            fh.write("\n")
-        fh.flush()
-        os.fsync(fh.fileno())
 
 
 @contextmanager

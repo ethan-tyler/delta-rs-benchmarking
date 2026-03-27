@@ -46,12 +46,19 @@ jobs:
       LONGITUDINAL_RETENTION_MAX_ARTIFACTS: ${{ vars.LONGITUDINAL_RETENTION_MAX_ARTIFACTS || '300' }}
       LONGITUDINAL_RETENTION_RUN_DAYS: ${{ vars.LONGITUDINAL_RETENTION_RUN_DAYS || '180' }}
       LONGITUDINAL_RETENTION_MAX_RUNS: ${{ vars.LONGITUDINAL_RETENTION_MAX_RUNS || '500' }}
+      DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Enforce runner security preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
 
       - name: Prepare delta-rs checkout
         shell: bash

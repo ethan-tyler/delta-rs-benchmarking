@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -46,15 +47,62 @@ def load_matrix_state(path: Path | str) -> dict:
     state_path = Path(path)
     if not state_path.exists():
         return {"schema_version": 1, "cases": {}}
-    return json.loads(state_path.read_text(encoding="utf-8"))
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid matrix state at {state_path}: {exc}") from exc
+    if not isinstance(state, dict):
+        raise ValueError(f"invalid matrix state at {state_path}: expected object")
+    stored_config = state.get("config")
+    if stored_config is not None and not isinstance(stored_config, dict):
+        raise ValueError(
+            f"invalid matrix state at {state_path}: expected 'config' to be an object"
+        )
+    cases = state.get("cases", {})
+    if not isinstance(cases, dict):
+        raise ValueError(
+            f"invalid matrix state at {state_path}: expected 'cases' to be an object"
+        )
+    for key, case in cases.items():
+        if not isinstance(case, dict):
+            raise ValueError(
+                f"invalid matrix state at {state_path}: expected case {key!r} to be an object"
+            )
+    return state
 
 
 def save_matrix_state(path: Path | str, data: dict) -> None:
     state_path = Path(path)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
+    fd, temp_name = tempfile.mkstemp(
+        dir=state_path.parent,
+        prefix=f".{state_path.name}.",
+        suffix=".tmp",
+        text=True,
     )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        temp_path.replace(state_path)
+        _fsync_parent_directory(state_path)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def _fsync_parent_directory(path: Path) -> None:
+    if os.name != "posix":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    dir_fd = os.open(path.parent, flags)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def run_matrix(
@@ -81,6 +129,7 @@ def run_matrix(
     _validate_tokens(config.scales, "scale")
 
     state = load_matrix_state(config.state_path)
+    _ensure_matrix_state_config(state, config)
     cases = state.setdefault("cases", {})
     run_exec = executor or (
         lambda a, s, sc, at, to: _default_executor(a, s, sc, at, to, config)
@@ -152,6 +201,34 @@ def run_matrix(
             save_matrix_state(config.state_path, state)
 
     return state
+
+
+def _ensure_matrix_state_config(state: dict, config: MatrixRunConfig) -> None:
+    expected = _matrix_state_config_fingerprint(config)
+    stored = state.get("config")
+    if stored is None:
+        if state.get("cases"):
+            raise ValueError(
+                f"state file was created with different config: {config.state_path}"
+            )
+        state["config"] = expected
+        return
+    if stored != expected:
+        raise ValueError(
+            f"state file was created with different config: {config.state_path}"
+        )
+
+
+def _matrix_state_config_fingerprint(config: MatrixRunConfig) -> dict[str, object]:
+    return {
+        "suites": list(config.suites),
+        "scales": list(config.scales),
+        "warmup": config.warmup,
+        "iterations": config.iterations,
+        "fixtures_dir": str(config.fixtures_dir),
+        "results_dir": str(config.results_dir),
+        "label_prefix": config.label_prefix,
+    }
 
 
 def _execute_case(
@@ -241,7 +318,9 @@ def _default_executor(
 
 def _validate_tokens(values: Iterable[str], field: str) -> None:
     for value in values:
-        if not SAFE_TOKEN.match(value):
+        if value in {"", ".", ".."}:
+            raise ValueError(f"{field} '{value}' is not allowed")
+        if not SAFE_TOKEN.fullmatch(value):
             raise ValueError(
                 f"{field} '{value}' contains invalid characters; allowed [A-Za-z0-9._-]"
             )
@@ -257,9 +336,10 @@ def matrix_result_label(label_prefix: str, revision: str, scale: str) -> str:
 
 def sanitize_label(value: str) -> str:
     out = "".join(ch if SAFE_TOKEN.match(ch) else "_" for ch in value)
-    trimmed = out.strip("_")
+    collapsed = re.sub(r"_+", "_", out)
+    trimmed = collapsed.strip("_")
     if not trimmed or trimmed in {".", ".."}:
-        return "longitudinal"
+        return "label"
     return trimmed
 
 

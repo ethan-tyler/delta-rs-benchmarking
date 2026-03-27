@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import subprocess
 import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 
@@ -11,9 +15,38 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPARE_BRANCH = REPO_ROOT / "scripts" / "compare_branch.sh"
 PREPARE_DELTA_RS = REPO_ROOT / "scripts" / "prepare_delta_rs.sh"
 LOCAL_CLEANUP = REPO_ROOT / "scripts" / "cleanup_local.sh"
+GITIGNORE = REPO_ROOT / ".gitignore"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark.yml"
 NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
+LONGITUDINAL_NIGHTLY_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "longitudinal-nightly.yml"
+)
+LONGITUDINAL_RELEASE_HISTORY_WORKFLOW = (
+    REPO_ROOT / ".github" / "workflows" / "longitudinal-release-history.yml"
+)
+LABEL_CONTRACT = REPO_ROOT / "python" / "tests" / "fixtures" / "label_contract.json"
+
+
+def wait_for_condition(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return predicate()
+
+
+def symlink_command(fake_bin: Path, name: str) -> None:
+    resolved = shutil.which(name)
+    assert resolved is not None, f"missing system command for test: {name}"
+    (fake_bin / name).symlink_to(resolved)
+
+
+def assert_order(content: str, earlier: str, later: str) -> None:
+    assert earlier in content, f"missing earlier marker: {earlier}"
+    assert later in content, f"missing later marker: {later}"
+    assert content.index(earlier) < content.index(later)
 
 
 def test_compare_branch_sanitizes_branch_labels_for_cli() -> None:
@@ -25,6 +58,24 @@ def test_compare_branch_sanitizes_branch_labels_for_cli() -> None:
     assert re.search(
         r"cand_label=\"cand-\$\(sanitize_label \"\$\{candidate_ref\}\"\)\"", script
     )
+
+
+def test_compare_branch_label_contract_matches_shared_fixture() -> None:
+    contract = json.loads(LABEL_CONTRACT.read_text(encoding="utf-8"))
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    start = script.index("sanitize_label() {")
+    end = script.index("\n}\n\nis_positive_integer", start) + 2
+    function_body = script[start:end]
+    runner = f"set -euo pipefail\n{function_body}\nsanitize_label \"$1\"\n"
+
+    for raw, expected in contract["sanitized"].items():
+        result = subprocess.run(
+            ["bash", "-c", runner, "sanitize_label_test", raw],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert result.stdout == expected
 
 
 def test_benchmark_workflow_defines_job_timeout() -> None:
@@ -51,6 +102,50 @@ def test_benchmark_workflow_uses_sha_pins_for_compare_refs() -> None:
     assert '"$BASE_SHA"' in workflow
     assert '"$HEAD_SHA"' in workflow
     assert '"$SUITE"' in workflow
+
+
+def test_benchmark_workflows_run_security_preflight_before_compare_execution() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert_order(
+        workflow,
+        "- name: Enforce runner security preflight",
+        "- name: Run branch compare",
+    )
+
+    prerelease = PRERELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert_order(
+        prerelease,
+        "- name: Enforce runner security preflight",
+        "- name: Run branch comparison",
+    )
+
+
+def test_longitudinal_workflows_run_security_preflight_before_checkout_prep() -> None:
+    nightly = LONGITUDINAL_NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    assert_order(
+        nightly,
+        "- name: Enforce runner security preflight",
+        "- name: Prepare delta-rs checkout",
+    )
+    assert_order(
+        nightly,
+        "- name: Enforce runner security preflight",
+        "- name: Build missing artifacts",
+    )
+
+    release_history = LONGITUDINAL_RELEASE_HISTORY_WORKFLOW.read_text(
+        encoding="utf-8"
+    )
+    assert_order(
+        release_history,
+        "- name: Enforce runner security preflight",
+        "- name: Prepare delta-rs checkout",
+    )
+    assert_order(
+        release_history,
+        "- name: Enforce runner security preflight",
+        "- name: Build missing artifacts",
+    )
 
 
 def test_compare_branch_supports_storage_backend_passthrough() -> None:
@@ -115,6 +210,52 @@ def test_compare_branch_supports_reliable_multi_run_controls() -> None:
         r'BENCH_MEASURE_ORDER="\$\{BENCH_MEASURE_ORDER:-alternate\}"', script
     )
     assert "python3 -m delta_bench_compare.aggregate" in script
+
+
+def test_compare_branch_runs_security_preflight_before_initial_checkout_prep() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    start = script.index(
+        'phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"'
+    )
+    end = script.index(
+        'ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"', start
+    )
+    initial_block = script[start:end]
+    assert_order(
+        initial_block,
+        "run_security_check",
+        'run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh',
+    )
+
+
+def test_compare_branch_runs_security_preflight_before_per_ref_checkout() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    start = script.index("run_benchmark_suite_for_ref() {")
+    end = script.index("\n}\n\nrun_order_for_iteration", start) + 2
+    function_body = script[start:end]
+    assert_order(
+        function_body,
+        "run_security_check",
+        'prepare_delta_rs_ref "${ref}" "${mode}"',
+    )
+
+
+def test_compare_branch_pins_refs_once_before_labels_and_measured_runs() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "pin_ref_to_commit()" in script
+    assert re.search(
+        r'base_ref="\$\(pin_ref_to_commit \"\$\{base_ref\}\" \"\$\{base_ref_mode\}\"\)"',
+        script,
+    )
+    assert re.search(
+        r'candidate_ref="\$\(pin_ref_to_commit \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"\)"',
+        script,
+    )
+    assert_order(
+        script,
+        'base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"',
+        'base_label="base-$(sanitize_label "${base_ref}")"',
+    )
 
 
 def test_compare_branch_supports_explicit_sha_flags() -> None:
@@ -188,8 +329,8 @@ def test_prepare_delta_rs_supports_immutable_ref_checkout() -> None:
     script = PREPARE_DELTA_RS.read_text(encoding="utf-8")
     assert "DELTA_RS_REF" in script
     assert "DELTA_RS_REF_TYPE" in script
-    assert "checkout --detach" in script
-    assert "pull --ff-only origin" in script
+    assert re.search(r"checkout(?: -q)? --detach", script)
+    assert re.search(r"pull(?: -q)? --ff-only origin", script)
 
 
 def test_prepare_delta_rs_cleans_untracked_harness_overlay_before_checkout() -> None:
@@ -207,6 +348,348 @@ def test_prepare_delta_rs_cleans_untracked_harness_overlay_before_checkout() -> 
         r"cleanup_harness_overlay_untracked\s+git -C \"\$\{DELTA_RS_DIR\}\" fetch origin",
         script,
     )
+
+
+def test_compare_branch_defaults_checkout_lock_outside_managed_checkout() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "default_checkout_lock_file()" in script
+    assert re.search(
+        r'DELTA_BENCH_CHECKOUT_LOCK_FILE="\$\{DELTA_BENCH_CHECKOUT_LOCK_FILE:-\$\(default_checkout_lock_file \"\$\{DELTA_RS_DIR\}\"\)\}"',
+        script,
+    )
+    assert 'dirname "${checkout_dir}"' in script
+    assert 'basename "${checkout_dir}"' in script
+    assert ".delta_bench_checkout.lock" in script
+
+
+def test_prepare_delta_rs_defaults_checkout_lock_outside_managed_checkout() -> None:
+    script = PREPARE_DELTA_RS.read_text(encoding="utf-8")
+    assert "default_checkout_lock_file()" in script
+    assert re.search(
+        r'DELTA_BENCH_CHECKOUT_LOCK_FILE="\$\{DELTA_BENCH_CHECKOUT_LOCK_FILE:-\$\(default_checkout_lock_file \"\$\{DELTA_RS_DIR\}\"\)\}"',
+        script,
+    )
+    assert 'dirname "${checkout_dir}"' in script
+    assert 'basename "${checkout_dir}"' in script
+    assert ".delta_bench_checkout.lock" in script
+
+
+def test_prepare_delta_rs_initial_clone_locking() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        prepare_copy.chmod(0o755)
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        clone_log = temp_root / "clone.log"
+        release_clone = temp_root / "release-clone"
+        lock_wait_log = temp_root / "lock-wait.log"
+        for command in ("bash", "basename", "dirname", "find", "mkdir", "python3", "rm", "rmdir"):
+            symlink_command(fake_bin, command)
+        fake_sleep = fake_bin / "sleep"
+        fake_sleep.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${{1:-}}" == "1" ]]; then
+  printf 'lock-wait\\n' >> {str(lock_wait_log)!r}
+fi
+exec {shutil.which("sleep")!r} "$@"
+""",
+            encoding="utf-8",
+        )
+        fake_sleep.chmod(0o755)
+        fake_git.write_text(
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+
+clone_log={str(clone_log)!r}
+release_clone={str(release_clone)!r}
+
+if [[ "$1" == "clone" ]]; then
+  printf 'clone\\n' >> "$clone_log"
+  while [[ ! -f "$release_clone" ]]; do
+    sleep 0.05
+  done
+  dest="${{@: -1}}"
+  if [[ -e "$dest" ]] && [[ -n "$(find "$dest" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+    printf "fatal: destination path '%s' already exists and is not an empty directory.\\n" "$dest" >&2
+    exit 128
+  fi
+  mkdir -p "$dest/.git"
+  exit 0
+fi
+
+if [[ "$1" == "-C" ]]; then
+  shift 2
+  case "${{1:-}}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    rev-parse)
+      if [[ "${{*: -1}}" == "HEAD" ]]; then
+        printf '0123456789abcdef0123456789abcdef01234567\\n'
+        exit 0
+      fi
+      exit 1
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        checkout_dir = temp_root / "delta-rs-under-test"
+        env = os.environ.copy()
+        env["PATH"] = str(fake_bin)
+        env["DELTA_RS_DIR"] = str(checkout_dir)
+
+        first = subprocess.Popen(
+            ["bash", str(prepare_copy)],
+            cwd=temp_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert wait_for_condition(
+            lambda: clone_log.exists()
+            and len(clone_log.read_text(encoding="utf-8").splitlines()) >= 1
+        )
+
+        second = subprocess.Popen(
+            ["bash", str(prepare_copy)],
+            cwd=temp_root,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert wait_for_condition(
+            lambda: lock_wait_log.exists()
+            and len(lock_wait_log.read_text(encoding="utf-8").splitlines()) >= 1,
+            timeout=3.0,
+        )
+        assert len(clone_log.read_text(encoding="utf-8").splitlines()) == 1
+
+        release_clone.write_text("ok\n", encoding="utf-8")
+        first_stdout, first_stderr = first.communicate(timeout=10)
+        second_stdout, second_stderr = second.communicate(timeout=10)
+
+        clone_count = len(clone_log.read_text(encoding="utf-8").splitlines())
+        assert first.returncode == 0, first_stderr or first_stdout
+        assert second.returncode == 0, second_stderr or second_stdout
+        assert clone_count == 1
+        assert (checkout_dir / ".git").exists()
+
+
+def test_prepare_delta_rs_rejects_checkout_lock_override_inside_managed_checkout_before_first_clone() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        prepare_copy.chmod(0o755)
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+printf "git should not be invoked\\n" >&2
+exit 99
+""",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_BENCH_CHECKOUT_LOCK_FILE"] = str(
+            temp_root / ".delta-rs-under-test" / ".delta_bench_checkout.lock"
+        )
+
+        result = subprocess.run(
+            ["bash", str(prepare_copy)],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "DELTA_BENCH_CHECKOUT_LOCK_FILE must be outside DELTA_RS_DIR before initial clone"
+            in result.stderr
+        )
+        assert "git should not be invoked" not in result.stderr
+
+
+def test_gitignore_ignores_checkout_lock_artifacts() -> None:
+    gitignore = GITIGNORE.read_text(encoding="utf-8")
+    assert "*.delta_bench_checkout.lock" in gitignore
+    assert "*.delta_bench_checkout.lock.dir/" in gitignore
+    assert "Best-in-Class Benchmark Suite" not in gitignore
+    assert "Research Prompt: Design and Build" not in gitignore
+    assert "Below is a **complete, production-qualit" not in gitignore
+
+
+def test_compare_branch_default_checkout_lock_does_not_block_initial_clone() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        security_copy = scripts_dir / "security_check.sh"
+        compare_copy.write_text(COMPARE_BRANCH.read_text(encoding="utf-8"), encoding="utf-8")
+        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        security_copy.write_text(
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+            encoding="utf-8",
+        )
+        compare_copy.chmod(0o755)
+        prepare_copy.chmod(0o755)
+        security_copy.chmod(0o755)
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "$1" == "clone" ]]; then
+  dest="${@: -1}"
+  if [[ -e "$dest" ]] && [[ -n "$(find "$dest" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+    printf "fatal: destination path '%s' already exists and is not an empty directory.\\n" "$dest" >&2
+    exit 128
+  fi
+  mkdir -p "$dest/.git"
+  exit 0
+fi
+
+if [[ "$1" == "-C" ]]; then
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    rev-parse)
+      if [[ "${*: -1}" == "HEAD" ]]; then
+        printf '0123456789abcdef0123456789abcdef01234567\\n'
+        exit 0
+      fi
+      exit 1
+      ;;
+    show-ref)
+      exit 1
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+
+        result = subprocess.run(
+            ["bash", str(compare_copy), "main", "candidate", "all"],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "Preparing delta-rs checkout and fixtures" in result.stdout
+        assert "cloning https://github.com/delta-io/delta-rs" in result.stdout
+        assert "delta-rs checkout ready:" in result.stdout
+        assert "fatal: destination path" not in result.stderr
+        assert "benchmark ref 'main' not found" in result.stderr
+        assert (temp_root / ".delta-rs-under-test" / ".git").is_dir()
+        assert not (temp_root / ".delta-rs-under-test" / ".delta_bench_checkout.lock").exists()
+
+
+def test_compare_branch_rejects_checkout_lock_override_inside_managed_checkout_before_first_clone() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        compare_copy.write_text(COMPARE_BRANCH.read_text(encoding="utf-8"), encoding="utf-8")
+        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        compare_copy.chmod(0o755)
+        prepare_copy.chmod(0o755)
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+printf "git should not be invoked\\n" >&2
+exit 99
+""",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_BENCH_CHECKOUT_LOCK_FILE"] = str(
+            temp_root / ".delta-rs-under-test" / ".delta_bench_checkout.lock"
+        )
+
+        result = subprocess.run(
+            ["bash", str(compare_copy), "main", "candidate", "all"],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert (
+            "DELTA_BENCH_CHECKOUT_LOCK_FILE must be outside DELTA_RS_DIR before initial clone"
+            in result.stderr
+        )
+        assert "git should not be invoked" not in result.stderr
 
 
 def test_compare_branch_acquires_checkout_lock_for_full_run() -> None:
@@ -496,3 +979,74 @@ def test_cleanup_local_apply_allows_outside_repo_with_override() -> None:
 
         assert apply_run.returncode == 0
         assert not label_dir.exists()
+
+
+def test_cleanup_local_checkout_target_removes_root_checkout_lock_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        checkout_dir = root / ".delta-rs-under-test"
+        checkout_dir.mkdir(parents=True)
+        lock_file = root / ".delta_bench_checkout.lock"
+        lock_dir = root / ".delta_bench_checkout.lock.dir"
+        lock_file.write_text("", encoding="utf-8")
+        lock_dir.mkdir()
+        (lock_dir / "pid").write_text("123\n", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DELTA_RS_DIR"] = str(checkout_dir)
+        env["DELTA_BENCH_CHECKOUT_LOCK_FILE"] = str(lock_file)
+
+        apply_run = subprocess.run(
+            [
+                "bash",
+                str(LOCAL_CLEANUP),
+                "--apply",
+                "--delta-rs-under-test",
+                "--allow-outside-root",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert apply_run.returncode == 0
+        assert not checkout_dir.exists()
+        assert not lock_file.exists()
+        assert not lock_dir.exists()
+
+
+def test_cleanup_local_checkout_target_defaults_lock_artifacts_from_checkout_path() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        checkout_dir = root / "alt-checkout"
+        checkout_dir.mkdir(parents=True)
+        lock_file = root / ".alt-checkout.delta_bench_checkout.lock"
+        lock_dir = root / ".alt-checkout.delta_bench_checkout.lock.dir"
+        lock_file.write_text("", encoding="utf-8")
+        lock_dir.mkdir()
+        (lock_dir / "pid").write_text("123\n", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DELTA_RS_DIR"] = str(checkout_dir)
+
+        apply_run = subprocess.run(
+            [
+                "bash",
+                str(LOCAL_CLEANUP),
+                "--apply",
+                "--delta-rs-under-test",
+                "--allow-outside-root",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert apply_run.returncode == 0
+        assert not checkout_dir.exists()
+        assert not lock_file.exists()
+        assert not lock_dir.exists()

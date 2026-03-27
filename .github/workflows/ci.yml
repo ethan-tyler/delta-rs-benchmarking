@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python test tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pytest
+
+      - name: Run Rust tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked
+
+      - name: Run Python tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd python
+          python3 -m pytest -q tests
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install cargo-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-audit --locked
+
+      - name: Audit Rust dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Temporary triage for known upstream advisories; keep failing on new ones.
+          cargo audit \
+            --ignore RUSTSEC-2026-0037 \
+            --ignore RUSTSEC-2026-0041 \
+            --ignore RUSTSEC-2026-0049
+
+      - name: Install pip-audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pip-audit
+
+      - name: Audit Python dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip_audit -r python/requirements-audit.txt

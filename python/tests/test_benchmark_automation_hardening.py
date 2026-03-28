@@ -66,13 +66,20 @@ def test_bench_sh_usage_lists_write_perf_suite() -> None:
     assert "--suite <scan|write|write_perf|" in script
 
 
+def test_bench_sh_defaults_run_lane_to_smoke() -> None:
+    script = BENCH_SH.read_text(encoding="utf-8")
+    assert 'lane="smoke"' in script
+    assert "--lane <smoke|correctness|macro>" in script
+    assert re.search(r'run_args=.*--lane "\$\{lane\}"', script, flags=re.DOTALL)
+
+
 def test_compare_branch_label_contract_matches_shared_fixture() -> None:
     contract = json.loads(LABEL_CONTRACT.read_text(encoding="utf-8"))
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     start = script.index("sanitize_label() {")
     end = script.index("\n}\n\nis_positive_integer", start) + 2
     function_body = script[start:end]
-    runner = f"set -euo pipefail\n{function_body}\nsanitize_label \"$1\"\n"
+    runner = f'set -euo pipefail\n{function_body}\nsanitize_label "$1"\n'
 
     for raw, expected in contract["sanitized"].items():
         result = subprocess.run(
@@ -92,8 +99,25 @@ def test_benchmark_workflow_defines_job_timeout() -> None:
 def test_benchmark_workflow_enforces_suite_allowlist() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "allowedSuites" in workflow
-    assert "optimize_vacuum" in workflow
+    match = re.search(
+        r"const allowedSuites = new Set\(\[(?P<body>.*?)\]\);",
+        workflow,
+        flags=re.DOTALL,
+    )
+    assert match is not None
+    allowlist = match.group("body")
+    assert '"scan"' in allowlist
+    assert '"all"' not in allowlist
+    assert '"write"' not in allowlist
     assert "invalid command" in workflow
+
+
+def test_benchmark_workflow_supports_decision_command_grammar() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "run benchmark decision" in workflow
+    assert (
+        "firstLine.match(/^run benchmark(?:\\s+(decision))?\\s+(\\S+)$/i)" in workflow
+    )
 
 
 def test_benchmark_workflow_uses_sha_pins_for_compare_refs() -> None:
@@ -139,9 +163,7 @@ def test_longitudinal_workflows_run_security_preflight_before_checkout_prep() ->
         "- name: Build missing artifacts",
     )
 
-    release_history = LONGITUDINAL_RELEASE_HISTORY_WORKFLOW.read_text(
-        encoding="utf-8"
-    )
+    release_history = LONGITUDINAL_RELEASE_HISTORY_WORKFLOW.read_text(encoding="utf-8")
     assert_order(
         release_history,
         "- name: Enforce runner security preflight",
@@ -162,7 +184,9 @@ def test_compare_branch_supports_storage_backend_passthrough() -> None:
         r"storage_args=\(--storage-backend \"\$\{STORAGE_BACKEND\}\"\)", script
     )
     assert re.search(r"storage_args\+=\(--storage-option \"\$\{option\}\"\)", script)
-    assert re.search(r"data_cmd=\(\./scripts/bench\.sh data --scale sf1 --seed 42\)", script)
+    assert re.search(
+        r"data_cmd=\(\./scripts/bench\.sh data --scale sf1 --seed 42\)", script
+    )
     assert re.search(r"data_cmd\+=\(\"\\?\$\{storage_args\[@\]\}\"\)", script)
     assert re.search(r"run_cmd\+=\(\"\\?\$\{storage_args\[@\]\}\"\)", script)
 
@@ -184,7 +208,7 @@ def test_compare_branch_supports_dataset_and_timing_phase_passthrough() -> None:
 def test_compare_branch_does_not_retry_benchmark_producing_steps() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "run_step_no_retry()" in script
-    assert 'data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)' in script
+    assert "data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)" in script
     assert re.search(r'run_step_no_retry env .*?"\$\{data_cmd\[@\]\}"', script)
     assert "run_benchmark_suite_for_ref" in script
     assert "./scripts/bench.sh run --scale sf1" in script
@@ -209,9 +233,54 @@ def test_compare_branch_supports_aggregation_passthrough() -> None:
     assert "--aggregation <min|median|p95>" in script
     assert re.search(r"AGGREGATION=\"\$\{BENCH_AGGREGATION:-median\}\"", script)
     assert re.search(
-        r"compare_args=\(--noise-threshold \"\$\{NOISE_THRESHOLD\}\" --aggregation \"\$\{AGGREGATION\}\" --format text\)",
+        r"compare_args=\(--mode \"\$\{COMPARE_MODE\}\" --noise-threshold \"\$\{NOISE_THRESHOLD\}\" --aggregation \"\$\{AGGREGATION\}\" --format text\)",
         script,
     )
+
+
+def test_compare_branch_defaults_to_exploratory_mode_and_macro_lane() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "--compare-mode <exploratory|decision>" in script
+    assert re.search(r'COMPARE_MODE="\$\{BENCH_COMPARE_MODE:-exploratory\}"', script)
+    assert re.search(r"run_cmd=\(\./scripts/bench\.sh run .* --lane macro", script)
+    assert re.search(
+        r'compare_args=\(--mode "\$\{COMPARE_MODE\}" --noise-threshold "\$\{NOISE_THRESHOLD\}" --aggregation "\$\{AGGREGATION\}" --format text\)',
+        script,
+    )
+
+
+def test_compare_branch_supports_fail_on_passthrough() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "--fail-on <statuses>" in script
+    assert re.search(r'COMPARE_FAIL_ON="\$\{BENCH_COMPARE_FAIL_ON:-\}"', script)
+    assert re.search(r'compare_args\+=\(--fail-on "\$\{COMPARE_FAIL_ON\}"\)', script)
+
+
+def test_benchmark_workflow_separates_exploratory_from_decision_status_labels() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "status_label=EXPLORATORY" in workflow
+    assert "Benchmark EXPLORATORY" in workflow
+    assert 'compareMode === "exploratory"' in workflow
+    assert "--compare-mode decision" in workflow
+    assert "--fail-on regression,inconclusive" in workflow
+    assert "status_label=PASS" in workflow
+    assert "status_label=FAIL" in workflow
+
+
+def test_benchmark_nightly_is_explicit_macro_lane_for_curated_scan_only() -> None:
+    workflow = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    assert "--suite scan" in workflow
+    assert "--lane macro" in workflow
+    assert "--suite all" not in workflow
+    assert "--suite write" not in workflow
+
+
+def test_longitudinal_nightly_is_explicit_macro_lane_for_curated_scan_only() -> None:
+    workflow = LONGITUDINAL_NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    assert "--suite scan" in workflow
+    assert "--lane macro" in workflow
+    assert "--suite write" not in workflow
+    assert "--suite merge" not in workflow
 
 
 def test_compare_branch_supports_reliable_multi_run_controls() -> None:
@@ -399,7 +468,9 @@ def test_prepare_delta_rs_initial_clone_locking() -> None:
         scripts_dir = temp_root / "scripts"
         scripts_dir.mkdir(parents=True)
         prepare_copy = scripts_dir / "prepare_delta_rs.sh"
-        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        prepare_copy.write_text(
+            PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         prepare_copy.chmod(0o755)
 
         fake_bin = temp_root / "bin"
@@ -408,7 +479,16 @@ def test_prepare_delta_rs_initial_clone_locking() -> None:
         clone_log = temp_root / "clone.log"
         release_clone = temp_root / "release-clone"
         lock_wait_log = temp_root / "lock-wait.log"
-        for command in ("bash", "basename", "dirname", "find", "mkdir", "python3", "rm", "rmdir"):
+        for command in (
+            "bash",
+            "basename",
+            "dirname",
+            "find",
+            "mkdir",
+            "python3",
+            "rm",
+            "rmdir",
+        ):
             symlink_command(fake_bin, command)
         fake_sleep = fake_bin / "sleep"
         fake_sleep.write_text(
@@ -513,13 +593,17 @@ exit 99
         assert (checkout_dir / ".git").exists()
 
 
-def test_prepare_delta_rs_rejects_checkout_lock_override_inside_managed_checkout_before_first_clone() -> None:
+def test_prepare_delta_rs_rejects_checkout_lock_override_inside_managed_checkout_before_first_clone() -> (
+    None
+):
     with tempfile.TemporaryDirectory() as td:
         temp_root = Path(td)
         scripts_dir = temp_root / "scripts"
         scripts_dir.mkdir(parents=True)
         prepare_copy = scripts_dir / "prepare_delta_rs.sh"
-        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        prepare_copy.write_text(
+            PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         prepare_copy.chmod(0o755)
 
         fake_bin = temp_root / "bin"
@@ -577,8 +661,12 @@ def test_compare_branch_default_checkout_lock_does_not_block_initial_clone() -> 
         compare_copy = scripts_dir / "compare_branch.sh"
         prepare_copy = scripts_dir / "prepare_delta_rs.sh"
         security_copy = scripts_dir / "security_check.sh"
-        compare_copy.write_text(COMPARE_BRANCH.read_text(encoding="utf-8"), encoding="utf-8")
-        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        compare_copy.write_text(
+            COMPARE_BRANCH.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        prepare_copy.write_text(
+            PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         security_copy.write_text(
             "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
             encoding="utf-8",
@@ -656,18 +744,26 @@ exit 99
         assert "fatal: destination path" not in result.stderr
         assert "benchmark ref 'main' not found" in result.stderr
         assert (temp_root / ".delta-rs-under-test" / ".git").is_dir()
-        assert not (temp_root / ".delta-rs-under-test" / ".delta_bench_checkout.lock").exists()
+        assert not (
+            temp_root / ".delta-rs-under-test" / ".delta_bench_checkout.lock"
+        ).exists()
 
 
-def test_compare_branch_rejects_checkout_lock_override_inside_managed_checkout_before_first_clone() -> None:
+def test_compare_branch_rejects_checkout_lock_override_inside_managed_checkout_before_first_clone() -> (
+    None
+):
     with tempfile.TemporaryDirectory() as td:
         temp_root = Path(td)
         scripts_dir = temp_root / "scripts"
         scripts_dir.mkdir(parents=True)
         compare_copy = scripts_dir / "compare_branch.sh"
         prepare_copy = scripts_dir / "prepare_delta_rs.sh"
-        compare_copy.write_text(COMPARE_BRANCH.read_text(encoding="utf-8"), encoding="utf-8")
-        prepare_copy.write_text(PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8")
+        compare_copy.write_text(
+            COMPARE_BRANCH.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        prepare_copy.write_text(
+            PREPARE_DELTA_RS.read_text(encoding="utf-8"), encoding="utf-8"
+        )
         compare_copy.chmod(0o755)
         prepare_copy.chmod(0o755)
 
@@ -1037,7 +1133,9 @@ def test_cleanup_local_checkout_target_removes_root_checkout_lock_artifacts() ->
         assert not lock_dir.exists()
 
 
-def test_cleanup_local_checkout_target_defaults_lock_artifacts_from_checkout_path() -> None:
+def test_cleanup_local_checkout_target_defaults_lock_artifacts_from_checkout_path() -> (
+    None
+):
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         checkout_dir = root / "alt-checkout"

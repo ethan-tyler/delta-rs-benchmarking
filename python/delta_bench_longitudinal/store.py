@@ -21,6 +21,15 @@ except ImportError:  # pragma: no cover - non-POSIX platforms
 STORE_SCHEMA_VERSION = 2
 STORE_DB_FILENAME = "store.sqlite3"
 
+RUNS_REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("runner", "TEXT"),
+    ("timing_phase", "TEXT"),
+    ("dataset_id", "TEXT"),
+    ("dataset_fingerprint", "TEXT"),
+    ("storage_backend", "TEXT"),
+    ("backend_profile", "TEXT"),
+)
+
 
 def ingest_benchmark_result(
     *,
@@ -82,10 +91,7 @@ def ingest_benchmark_result(
                             median_ms
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
-                        [
-                            _case_row_params(run_id=run_id, row=row)
-                            for row in case_rows
-                        ],
+                        [_case_row_params(run_id=run_id, row=row) for row in case_rows],
                     )
 
     return {"run_id": run_id, "rows_appended": len(case_rows), "deduped": False}
@@ -110,7 +116,13 @@ def load_longitudinal_rows(store_dir: Path | str) -> list[dict[str, Any]]:
                 r.git_sha,
                 r.host,
                 r.suite,
+                r.runner,
                 r.scale,
+                r.timing_phase,
+                r.dataset_id,
+                r.dataset_fingerprint,
+                r.storage_backend,
+                r.backend_profile,
                 r.lane,
                 r.measurement_kind,
                 r.validation_level,
@@ -175,7 +187,13 @@ def _normalize_run_record(
         "git_sha": context.get("git_sha"),
         "host": context.get("host"),
         "suite": context.get("suite"),
+        "runner": context.get("runner"),
         "scale": context.get("scale"),
+        "timing_phase": context.get("timing_phase"),
+        "dataset_id": context.get("dataset_id"),
+        "dataset_fingerprint": context.get("dataset_fingerprint"),
+        "storage_backend": context.get("storage_backend"),
+        "backend_profile": context.get("backend_profile"),
         "lane": context.get("lane"),
         "measurement_kind": context.get("measurement_kind"),
         "validation_level": context.get("validation_level"),
@@ -214,7 +232,7 @@ def _normalize_case_row(
     )
     metrics = _elapsed_metrics(elapsed)
     failure = case.get("failure") or {}
-    if summary:
+    if summary and perf_valid:
         metrics = {
             "best_ms": summary.get("min_ms"),
             "min_ms": summary.get("min_ms"),
@@ -326,7 +344,13 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             git_sha TEXT,
             host TEXT,
             suite TEXT,
+            runner TEXT,
             scale TEXT,
+            timing_phase TEXT,
+            dataset_id TEXT,
+            dataset_fingerprint TEXT,
+            storage_backend TEXT,
+            backend_profile TEXT,
             lane TEXT,
             measurement_kind TEXT,
             validation_level TEXT,
@@ -372,6 +396,22 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         ON runs (suite, scale, revision_commit_timestamp, benchmark_created_at, ingested_at, run_id);
         """
     )
+    _ensure_table_columns(conn, "runs", RUNS_REQUIRED_COLUMNS)
+    conn.execute(f"PRAGMA user_version = {STORE_SCHEMA_VERSION}")
+
+
+def _ensure_table_columns(
+    conn: sqlite3.Connection,
+    table: str,
+    required_columns: tuple[tuple[str, str], ...],
+) -> None:
+    existing_columns = {
+        str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+    for column, column_type in required_columns:
+        if column in existing_columns:
+            continue
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
 
 def _run_exists(conn: sqlite3.Connection, run_id: str) -> bool:
@@ -396,7 +436,13 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             git_sha,
             host,
             suite,
+            runner,
             scale,
+            timing_phase,
+            dataset_id,
+            dataset_fingerprint,
+            storage_backend,
+            backend_profile,
             lane,
             measurement_kind,
             validation_level,
@@ -418,7 +464,7 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             run_mode,
             maintenance_window_id,
             source_result_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row["run_id"],
@@ -431,7 +477,13 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             row["git_sha"],
             row["host"],
             row["suite"],
+            row["runner"],
             row["scale"],
+            row["timing_phase"],
+            row["dataset_id"],
+            row["dataset_fingerprint"],
+            row["storage_backend"],
+            row["backend_profile"],
             row["lane"],
             row["measurement_kind"],
             row["validation_level"],
@@ -487,7 +539,13 @@ def _row_from_db(row: sqlite3.Row) -> dict[str, Any]:
         "git_sha": row["git_sha"],
         "host": row["host"],
         "suite": row["suite"],
+        "runner": row["runner"],
         "scale": row["scale"],
+        "timing_phase": row["timing_phase"],
+        "dataset_id": row["dataset_id"],
+        "dataset_fingerprint": row["dataset_fingerprint"],
+        "storage_backend": row["storage_backend"],
+        "backend_profile": row["backend_profile"],
         "lane": row["lane"],
         "measurement_kind": row["measurement_kind"],
         "validation_level": row["validation_level"],

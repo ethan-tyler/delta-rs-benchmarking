@@ -114,9 +114,7 @@ def invalid_perf_case_names(payloads: tuple[dict, ...] | list[dict]) -> list[str
     )
 
 
-def _comparison_context_value(
-    payload: dict, key: str, *, required: bool
-) -> str | None:
+def _comparison_context_value(payload: dict, key: str, *, required: bool) -> str | None:
     context = payload.get("context") or {}
     value = context.get(key)
     if value is None:
@@ -149,12 +147,11 @@ def ensure_matching_contexts(baseline: dict, candidate: dict) -> None:
     baseline_identity = comparison_identity(baseline)
     candidate_identity = comparison_identity(candidate)
     keys = sorted(
-        set(_comparison_context_keys(baseline)) | set(_comparison_context_keys(candidate))
+        set(_comparison_context_keys(baseline))
+        | set(_comparison_context_keys(candidate))
     )
     mismatched = [
-        key
-        for key in keys
-        if baseline_identity.get(key) != candidate_identity.get(key)
+        key for key in keys if baseline_identity.get(key) != candidate_identity.get(key)
     ]
     if mismatched:
         raise ValueError(

@@ -45,6 +45,7 @@ When touching longitudinal storage, reporting, or retention, also run:
 
 ## Benchmarking Notes
 
-- Prefer `./scripts/compare_branch.sh --current-vs-main all` for branch comparisons.
+- Prefer `./scripts/compare_branch.sh --current-vs-main all` for exploratory branch comparisons.
+- Use `./scripts/compare_branch.sh --current-vs-main --compare-mode decision all` only on pinned self-hosted hardware with schema v4 outputs.
 - Prefer the longitudinal pipeline for time-series or release-history analysis.
 - Do not commit generated fixtures, results, or managed checkout state.

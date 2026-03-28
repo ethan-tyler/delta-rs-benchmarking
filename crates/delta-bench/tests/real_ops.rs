@@ -1,7 +1,7 @@
-use delta_bench::cli::TimingPhase;
+use delta_bench::cli::{BenchmarkLane, TimingPhase};
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{merge, optimize_vacuum, scan};
+use delta_bench::suites::{merge, optimize_vacuum, run_target, scan};
 
 #[tokio::test]
 async fn generated_fixtures_support_real_scan_suite() {
@@ -283,6 +283,58 @@ async fn scan_plan_phase_preserves_case_identity_and_hashes() {
 }
 
 #[tokio::test]
+async fn correctness_lane_emits_semantic_digests_for_stateful_suites() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    for suite in [
+        "write",
+        "delete_update",
+        "merge",
+        "metadata",
+        "optimize_vacuum",
+    ] {
+        let cases = run_target(
+            temp.path(),
+            suite,
+            "sf1",
+            BenchmarkLane::Correctness,
+            TimingPhase::Execute,
+            0,
+            1,
+            &storage,
+        )
+        .await
+        .expect("suite should run");
+        assert!(
+            cases.iter().all(|case| case.success),
+            "correctness lane should succeed for {suite}: {:?}",
+            cases
+                .iter()
+                .map(|case| (&case.case, &case.failure))
+                .collect::<Vec<_>>()
+        );
+        for metrics in cases
+            .iter()
+            .flat_map(|case| case.samples.iter())
+            .filter_map(|sample| sample.metrics.as_ref())
+        {
+            assert!(
+                metrics.semantic_state_digest.is_some(),
+                "semantic digest missing for {suite}: {metrics:?}"
+            );
+            assert!(
+                metrics.validation_summary.is_some(),
+                "validation summary missing for {suite}: {metrics:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn generated_fixtures_support_optimize_vacuum_suite() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
@@ -290,7 +342,7 @@ async fn generated_fixtures_support_optimize_vacuum_suite() {
         .await
         .expect("generate fixtures");
 
-    let cases = optimize_vacuum::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = optimize_vacuum::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("optimize_vacuum suite run");
     assert_eq!(cases.len(), 5);
@@ -379,7 +431,7 @@ async fn merge_partition_localized_case_reports_pruned_files() {
         .await
         .expect("generate fixtures");
 
-    let cases = merge::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = merge::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("run merge suite");
     let localized = cases

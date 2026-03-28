@@ -103,9 +103,7 @@ def test_self_hosted_benchmark_workflows_enforce_runner_preflight() -> None:
         "--require-no-public-ipv4",
         "--require-egress-policy",
     )
-    explicit_preflight = (
-        "./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy"
-    )
+    explicit_preflight = "./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy"
 
     workflows = _self_hosted_benchmark_workflows()
     assert workflows, "expected at least one self-hosted benchmark workflow"
@@ -114,9 +112,9 @@ def test_self_hosted_benchmark_workflows_enforce_runner_preflight() -> None:
         workflow = workflow_path.read_text(encoding="utf-8")
         for flag in required_flags:
             assert flag in workflow, f"{workflow_path.name} missing {flag}"
-        assert (
-            "DELTA_BENCH_EGRESS_POLICY_SHA256" in workflow
-        ), f"{workflow_path.name} missing DELTA_BENCH_EGRESS_POLICY_SHA256 wiring"
+        assert "DELTA_BENCH_EGRESS_POLICY_SHA256" in workflow, (
+            f"{workflow_path.name} missing DELTA_BENCH_EGRESS_POLICY_SHA256 wiring"
+        )
         if "./scripts/compare_branch.sh" in workflow:
             continue
         assert explicit_preflight in workflow, (
@@ -124,7 +122,10 @@ def test_self_hosted_benchmark_workflows_enforce_runner_preflight() -> None:
         )
         preflight_index = workflow.index(explicit_preflight)
         run_index = len(workflow)
-        for benchmark_cmd in ("./scripts/bench.sh run", "./scripts/longitudinal_bench.sh run-matrix"):
+        for benchmark_cmd in (
+            "./scripts/bench.sh run",
+            "./scripts/longitudinal_bench.sh run-matrix",
+        ):
             if benchmark_cmd in workflow:
                 run_index = min(run_index, workflow.index(benchmark_cmd))
         assert preflight_index < run_index, (

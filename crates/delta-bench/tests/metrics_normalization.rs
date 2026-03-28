@@ -1,4 +1,4 @@
-use delta_bench::cli::TimingPhase;
+use delta_bench::cli::{BenchmarkLane, TimingPhase};
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::{merge, metadata, scan, write};
@@ -11,7 +11,7 @@ async fn write_samples_include_normalized_metrics() {
         .await
         .expect("generate fixtures");
 
-    let cases = write::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = write::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("run write suite");
     let first_sample = &cases[0].samples[0];
@@ -32,7 +32,7 @@ async fn metadata_samples_report_table_version_metric() {
         .await
         .expect("generate fixtures");
 
-    let cases = metadata::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = metadata::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("run metadata suite");
     assert!(!cases.is_empty());
@@ -55,7 +55,7 @@ async fn merge_samples_include_merge_scan_and_rewrite_metrics() {
         .await
         .expect("generate fixtures");
 
-    let cases = merge::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = merge::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("run merge suite");
     assert!(

@@ -1,4 +1,4 @@
-use delta_bench::cli::TimingPhase;
+use delta_bench::cli::{BenchmarkLane, TimingPhase};
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::results::CaseResult;
 use delta_bench::storage::StorageConfig;
@@ -17,6 +17,7 @@ async fn run_delete_update_suite_once() -> Vec<CaseResult> {
         &fixtures_dir,
         "delete_update",
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Execute,
         0,
         1,
@@ -85,6 +86,7 @@ async fn delete_update_does_not_depend_on_merge_partitioned_fixture() {
         &fixtures_dir,
         "delete_update",
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Execute,
         0,
         1,

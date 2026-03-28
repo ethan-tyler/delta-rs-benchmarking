@@ -30,6 +30,9 @@ def test_workflow_runs_longitudinal_pipeline_commands() -> None:
     assert "report" in content
     assert "prune" in content
     assert "actions/upload-artifact" in content
+    assert "--lane macro" in content
+    assert "--suite scan" in content
+    assert "--suite write" not in content
 
 
 def test_workflow_uses_parallel_load_and_significance_controls() -> None:
@@ -60,6 +63,7 @@ def test_run_matrix_cli_rejects_state_with_different_config(
             "config": {
                 "suites": ["read_scan"],
                 "scales": ["sf1"],
+                "lane": "macro",
                 "warmup": 1,
                 "iterations": 5,
                 "fixtures_dir": str(fixtures_dir),
@@ -95,6 +99,8 @@ def test_run_matrix_cli_rejects_state_with_different_config(
                 "read_scan",
                 "--scale",
                 "sf1",
+                "--lane",
+                "correctness",
                 "--label-prefix",
                 "new-prefix",
             ]

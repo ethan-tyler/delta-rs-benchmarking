@@ -80,11 +80,11 @@ Execute benchmark suites across all revisions:
   --artifacts-dir longitudinal/artifacts \
   --state-path longitudinal/state/matrix-state.json \
   --results-dir results \
+  --lane macro \
   --max-parallel 2 \
   --max-load-per-cpu 0.75 \
   --load-check-interval-seconds 10 \
   --suite scan \
-  --suite metadata \
   --scale sf1 \
   --timeout-seconds 3600 \
   --max-retries 2
@@ -92,7 +92,7 @@ Execute benchmark suites across all revisions:
 
 The `--state-path` file tracks which (revision, suite, scale) cells have completed, failed, or are pending. If the run is interrupted, rerunning this command resumes from where it left off.
 
-The matrix state file also stores a fingerprint of the matrix configuration. Reuse the same `--state-path` only when `--suite`, `--scale`, warmup, iterations, fixtures directory, results directory, and label prefix are unchanged.
+The matrix state file also stores a fingerprint of the matrix configuration. Reuse the same `--state-path` only when `--suite`, `--scale`, `--lane`, warmup, iterations, fixtures directory, results directory, and label prefix are unchanged.
 
 ### Ingest results
 
@@ -152,12 +152,8 @@ If you want to run the full pipeline (build, run, ingest, report) in a single co
   --store-dir longitudinal/store \
   --markdown-path longitudinal/reports/summary.md \
   --html-path longitudinal/reports/trends.html \
+  --lane macro \
   --suite scan \
-  --suite write \
-  --suite delete_update \
-  --suite merge \
-  --suite metadata \
-  --suite optimize_vacuum \
   --scale sf1
 ```
 
@@ -208,7 +204,7 @@ Workflow file: `.github/workflows/longitudinal-nightly.yml`
 
 Runs automatically at 03:00 UTC daily, or manually via `workflow_dispatch` with optional `lookback_days` and `baseline_window` inputs.
 
-The nightly workflow executes all six pipeline stages: select revisions (using `one-per-day` over the lookback window), build missing artifacts, run the matrix with retry and resume, ingest results, generate reports, apply retention, and upload `longitudinal/` as CI artifacts.
+The nightly workflow executes all six pipeline stages: select revisions (using `one-per-day` over the lookback window), build missing artifacts, run the matrix with retry and resume, ingest results, generate reports, apply retention, and upload `longitudinal/` as CI artifacts. Trusted automated perf collection is currently macro-only and curated to `scan`.
 
 ### Release-tag history workflow
 
@@ -216,7 +212,7 @@ Workflow file: `.github/workflows/longitudinal-release-history.yml`
 
 Runs weekly on Monday at 04:30 UTC, or manually via `workflow_dispatch`.
 
-This workflow processes Rust and Python release lanes independently. Each lane loads its committed release manifest, builds any missing artifacts, runs the matrix, ingests results, generates lane-specific reports, and applies retention. Results are uploaded under `longitudinal/releases/<lane>/`.
+This workflow processes Rust and Python release lanes independently. Each lane loads its committed release manifest, builds any missing artifacts, runs the matrix, ingests results, generates lane-specific reports, and applies retention. Results are uploaded under `longitudinal/releases/<lane>/`. Like nightly, the automated perf scope is currently macro-only and curated to `scan`.
 
 To include newly published tags, refresh the committed manifests:
 
@@ -299,7 +295,7 @@ Look at the `(revision, suite, scale)` keys with failure status and their `failu
 
 **Recover:** Fix the root cause (increase timeout for legitimately slow cases, or fix the underlying issue) and rerun `run-matrix` with the same manifest and state path. Successful cells are skipped; failed cells resume with bounded retry.
 
-If you intentionally change matrix configuration such as suites, scales, warmup, iterations, fixtures directory, results directory, or label prefix, start with a new `--state-path` instead of reusing the old file. The runner now rejects configuration-mismatched state files to prevent partial resumes from mixing incompatible runs.
+If you intentionally change matrix configuration such as suites, scales, lane, warmup, iterations, fixtures directory, results directory, or label prefix, start with a new `--state-path` instead of reusing the old file. The runner now rejects configuration-mismatched state files to prevent partial resumes from mixing incompatible runs.
 
 ```bash
 ./scripts/longitudinal_bench.sh run-matrix \
@@ -307,7 +303,8 @@ If you intentionally change matrix configuration such as suites, scales, warmup,
   --artifacts-dir longitudinal/artifacts \
   --state-path longitudinal/state/matrix-state.json \
   --results-dir results \
-  --suite scan --suite write --suite delete_update --suite merge --suite metadata --suite optimize_vacuum \
+  --lane macro \
+  --suite scan \
   --scale sf1 \
   --timeout-seconds 3600 \
   --max-retries 2

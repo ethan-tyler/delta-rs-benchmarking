@@ -175,7 +175,8 @@ def test_prune_store_apply_deletes_runs_without_rows_rewrite(tmp_path: Path) -> 
     assert {row["run_id"] for row in rows} == {"run-2", "run-3"}
     with closing(_connect_store(store_dir)) as conn:
         remaining_case_runs = {
-            run_id for (run_id,) in conn.execute("SELECT DISTINCT run_id FROM case_rows")
+            run_id
+            for (run_id,) in conn.execute("SELECT DISTINCT run_id FROM case_rows")
         }
     assert remaining_case_runs == {"run-2", "run-3"}
     assert not (store_dir / "rows.jsonl").exists()

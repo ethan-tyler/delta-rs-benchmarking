@@ -13,6 +13,8 @@ REQUIRE_NO_PUBLIC_IPV4=0
 REQUIRE_EGRESS_POLICY=0
 NOISE_THRESHOLD="${BENCH_NOISE_THRESHOLD:-0.05}"
 AGGREGATION="${BENCH_AGGREGATION:-median}"
+COMPARE_MODE="${BENCH_COMPARE_MODE:-exploratory}"
+COMPARE_FAIL_ON="${BENCH_COMPARE_FAIL_ON:-}"
 BENCH_WARMUP="${BENCH_WARMUP:-2}"
 BENCH_ITERS="${BENCH_ITERS:-9}"
 BENCH_PREWARM_ITERS="${BENCH_PREWARM_ITERS:-1}"
@@ -70,6 +72,9 @@ Options:
   --require-egress-policy         Require nftables egress hash check during preflight (set DELTA_BENCH_EGRESS_POLICY_SHA256)
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
   --aggregation <min|median|p95>  Representative sample aggregation for compare.py (default: median)
+  --compare-mode <exploratory|decision>
+                                  Compare classification mode passed to compare.py (default: ${COMPARE_MODE})
+  --fail-on <statuses>            Comma-separated compare statuses that force exit code 2 (for decision automation)
   --warmup <N>                    Warmup iterations per benchmark case (default: ${BENCH_WARMUP})
   --iters <N>                     Measured iterations per benchmark case (default: ${BENCH_ITERS})
   --prewarm-iters <N>             Unreported prewarm iterations per ref before measured runs (default: ${BENCH_PREWARM_ITERS})
@@ -121,6 +126,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --aggregation)
       AGGREGATION="$2"
+      shift 2
+      ;;
+    --compare-mode)
+      COMPARE_MODE="$2"
+      shift 2
+      ;;
+    --fail-on)
+      COMPARE_FAIL_ON="$2"
       shift 2
       ;;
     --warmup)
@@ -266,6 +279,15 @@ case "${AGGREGATION}" in
     ;;
   *)
     echo "invalid --aggregation '${AGGREGATION}'; expected one of: min, median, p95" >&2
+    exit 1
+    ;;
+esac
+
+case "${COMPARE_MODE}" in
+  exploratory|decision)
+    ;;
+  *)
+    echo "invalid --compare-mode '${COMPARE_MODE}'; expected exploratory or decision" >&2
     exit 1
     ;;
 esac
@@ -638,7 +660,7 @@ run_benchmark_suite_for_ref() {
     run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
   fi
 
-  local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --mode "${BENCHMARK_MODE}" --warmup "${warmup}" --iters "${iters}")
+  local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --lane macro --mode "${BENCHMARK_MODE}" --warmup "${warmup}" --iters "${iters}")
   if [[ -n "${DATASET_ID}" ]]; then
     run_cmd+=(--dataset-id "${DATASET_ID}")
   fi
@@ -770,6 +792,9 @@ cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"
 
 phase "${current_phase}" "${total_phases}" "Comparison report"
 
-compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
+compare_args=(--mode "${COMPARE_MODE}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
+if [[ -n "${COMPARE_FAIL_ON}" ]]; then
+  compare_args+=(--fail-on "${COMPARE_FAIL_ON}")
+fi
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"

@@ -27,6 +27,7 @@ def _state_config_fingerprint(
     *,
     suites: list[str],
     scales: list[str],
+    lane: str = "macro",
     warmup: int = 1,
     iterations: int = 5,
     fixtures_dir: Path | str = "fixtures",
@@ -36,6 +37,7 @@ def _state_config_fingerprint(
     return {
         "suites": suites,
         "scales": scales,
+        "lane": lane,
         "warmup": warmup,
         "iterations": iterations,
         "fixtures_dir": str(fixtures_dir),
@@ -254,7 +256,9 @@ def test_load_matrix_state_rejects_invalid_shapes(
         load_matrix_state(state_path)
 
 
-def test_save_matrix_state_uses_atomic_replace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_save_matrix_state_uses_atomic_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     state_path = tmp_path / "matrix_state.json"
     recorded_replace: dict[str, Path] = {}
     original_replace = Path.replace
@@ -435,6 +439,40 @@ def test_load_guard_waits_before_dispatch(tmp_path: Path) -> None:
         sleep_fn=fake_sleep,
     )
     assert sleep_calls == [0.01, 0.01]
+
+
+def test_resume_state_rejects_lane_change(tmp_path: Path) -> None:
+    state_path = tmp_path / "matrix_state.json"
+    save_matrix_state(
+        state_path,
+        {
+            "schema_version": 1,
+            "config": _state_config_fingerprint(
+                suites=["read_scan"],
+                scales=["sf1"],
+                lane="macro",
+            ),
+            "cases": {},
+        },
+    )
+
+    config = MatrixRunConfig(
+        suites=["read_scan"],
+        scales=["sf1"],
+        lane="correctness",
+        timeout_seconds=1,
+        max_retries=0,
+        state_path=state_path,
+    )
+
+    with pytest.raises(
+        ValueError, match="state file was created with different config"
+    ):
+        run_matrix(
+            artifacts=[],
+            config=config,
+            executor=lambda *_args: (0, ""),
+        )
 
 
 def test_invalid_parallelism_is_rejected(tmp_path: Path) -> None:

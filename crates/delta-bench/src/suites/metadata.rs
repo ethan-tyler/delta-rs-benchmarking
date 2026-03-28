@@ -4,12 +4,14 @@ use serde_json::json;
 use url::Url;
 
 use super::{copy_dir_all, into_case_result};
+use crate::cli::BenchmarkLane;
 use crate::data::fixtures::{narrow_sales_table_path, narrow_sales_table_url};
 use crate::error::{BenchError, BenchResult};
 use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics};
 use crate::runner::{run_case_async, run_case_async_with_setup};
 use crate::storage::StorageConfig;
+use crate::validation::{lane_requires_semantic_validation, validate_table_state};
 
 struct MetadataIterationSetup {
     _temp: tempfile::TempDir,
@@ -20,6 +22,8 @@ fn metadata_metrics(
     table_version: Option<u64>,
     result_hash: String,
     schema_hash: String,
+    semantic_state_digest: Option<String>,
+    validation_summary: Option<String>,
 ) -> SampleMetrics {
     SampleMetrics::base(None, None, Some(1), table_version).with_runtime_io(RuntimeIOMetrics {
         peak_rss_mb: None,
@@ -31,8 +35,8 @@ fn metadata_metrics(
         spill_bytes: None,
         result_hash: Some(result_hash),
         schema_hash: Some(schema_hash),
-        semantic_state_digest: None,
-        validation_summary: None,
+        semantic_state_digest,
+        validation_summary,
     })
 }
 
@@ -46,6 +50,7 @@ pub fn case_names() -> Vec<String> {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    lane: BenchmarkLane,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -74,12 +79,25 @@ pub async fn run(
                         "table_version": table_version,
                     }))
                     .map_err(|e| e.to_string())?;
-                    let schema_hash = hash_json(&json!(["operation:string", "table_version:u64",]))
-                        .map_err(|e| e.to_string())?;
+                    let mut schema_hash =
+                        hash_json(&json!(["operation:string", "table_version:u64",]))
+                            .map_err(|e| e.to_string())?;
+                    let mut semantic_state_digest = None;
+                    let mut validation_summary = None;
+                    if lane_requires_semantic_validation(lane) {
+                        let validation = validate_table_state(&table)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        schema_hash = validation.schema_hash;
+                        semantic_state_digest = Some(validation.digest);
+                        validation_summary = Some(validation.summary);
+                    }
                     Ok::<SampleMetrics, String>(metadata_metrics(
                         table_version,
                         result_hash,
                         schema_hash,
+                        semantic_state_digest,
+                        validation_summary,
                     ))
                 }
             },
@@ -108,12 +126,25 @@ pub async fn run(
                         "table_version": table_version,
                     }))
                     .map_err(|e| e.to_string())?;
-                    let schema_hash = hash_json(&json!(["operation:string", "table_version:u64",]))
-                        .map_err(|e| e.to_string())?;
+                    let mut schema_hash =
+                        hash_json(&json!(["operation:string", "table_version:u64",]))
+                            .map_err(|e| e.to_string())?;
+                    let mut semantic_state_digest = None;
+                    let mut validation_summary = None;
+                    if lane_requires_semantic_validation(lane) {
+                        let validation = validate_table_state(&table)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        schema_hash = validation.schema_hash;
+                        semantic_state_digest = Some(validation.digest);
+                        validation_summary = Some(validation.summary);
+                    }
                     Ok::<SampleMetrics, String>(metadata_metrics(
                         table_version,
                         result_hash,
                         schema_hash,
+                        semantic_state_digest,
+                        validation_summary,
                     ))
                 }
             },
@@ -141,9 +172,25 @@ pub async fn run(
                 "table_version": table_version,
             }))
             .map_err(|e| e.to_string())?;
-            let schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))
+            let mut schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))
                 .map_err(|e| e.to_string())?;
-            Ok::<SampleMetrics, String>(metadata_metrics(table_version, result_hash, schema_hash))
+            let mut semantic_state_digest = None;
+            let mut validation_summary = None;
+            if lane_requires_semantic_validation(lane) {
+                let validation = validate_table_state(&table)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                schema_hash = validation.schema_hash;
+                semantic_state_digest = Some(validation.digest);
+                validation_summary = Some(validation.summary);
+            }
+            Ok::<SampleMetrics, String>(metadata_metrics(
+                table_version,
+                result_hash,
+                schema_hash,
+                semantic_state_digest,
+                validation_summary,
+            ))
         }
     })
     .await;
@@ -164,9 +211,25 @@ pub async fn run(
                 "table_version": table_version,
             }))
             .map_err(|e| e.to_string())?;
-            let schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))
+            let mut schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))
                 .map_err(|e| e.to_string())?;
-            Ok::<SampleMetrics, String>(metadata_metrics(table_version, result_hash, schema_hash))
+            let mut semantic_state_digest = None;
+            let mut validation_summary = None;
+            if lane_requires_semantic_validation(lane) {
+                let validation = validate_table_state(&table)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                schema_hash = validation.schema_hash;
+                semantic_state_digest = Some(validation.digest);
+                validation_summary = Some(validation.summary);
+            }
+            Ok::<SampleMetrics, String>(metadata_metrics(
+                table_version,
+                result_hash,
+                schema_hash,
+                semantic_state_digest,
+                validation_summary,
+            ))
         }
     })
     .await;

@@ -38,6 +38,7 @@ def _hash_payload(value: Any) -> str:
 def _expected_failure(
     rows: list[dict[str, Any]], message: str, elapsed_ms: float | None = None
 ) -> dict[str, Any]:
+    digest = _hash_payload({"message": message, "rows": len(rows)})
     return {
         "rows_processed": len(rows),
         "bytes_processed": _approx_bytes(rows),
@@ -50,7 +51,10 @@ def _expected_failure(
         "files_touched": None,
         "files_skipped": None,
         "spill_bytes": None,
-        "result_hash": _hash_payload({"message": message, "rows": len(rows)}),
+        "result_hash": digest,
+        "schema_hash": _hash_payload(["message:string", "rows:int"]),
+        "semantic_state_digest": digest,
+        "validation_summary": f"classification=expected_failure;rows={len(rows)}",
         "elapsed_ms": elapsed_ms,
         "classification": "expected_failure",
     }
@@ -84,6 +88,9 @@ def _pandas_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "files_skipped": None,
         "spill_bytes": 0,
         "result_hash": _hash_payload(grouped.to_dict(orient="records")),
+        "schema_hash": _hash_payload(["region:string", "value_i64:int"]),
+        "semantic_state_digest": _hash_payload(grouped.to_dict(orient="records")),
+        "validation_summary": f"rows_processed={int(df.shape[0])};result_rows={len(grouped)}",
         "elapsed_ms": elapsed_ms,
         "classification": "supported",
     }
@@ -118,6 +125,9 @@ def _polars_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "files_skipped": None,
         "spill_bytes": 0,
         "result_hash": _hash_payload(grouped.to_dicts()),
+        "schema_hash": _hash_payload(["region:string", "value_i64_sum:int"]),
+        "semantic_state_digest": _hash_payload(grouped.to_dicts()),
+        "validation_summary": f"rows_processed={int(frame.height)};result_rows={grouped.height}",
         "elapsed_ms": elapsed_ms,
         "classification": "supported",
     }
@@ -159,6 +169,11 @@ def _pyarrow_case(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "files_skipped": None,
         "spill_bytes": 0,
         "result_hash": _hash_payload({"sum": result_value, "rows": filtered.num_rows}),
+        "schema_hash": _hash_payload(["sum:int", "rows:int"]),
+        "semantic_state_digest": _hash_payload(
+            {"sum": result_value, "rows": filtered.num_rows}
+        ),
+        "validation_summary": f"rows_processed={int(table.num_rows)};result_rows={filtered.num_rows}",
         "elapsed_ms": elapsed_ms,
         "classification": "supported",
     }

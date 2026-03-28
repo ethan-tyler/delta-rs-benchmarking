@@ -8,6 +8,12 @@ use delta_bench::suites::scan::{
 use tempfile::TempDir;
 use tokio::runtime::{Builder, Runtime};
 
+const PR_SENSITIVE_CASES: [&str; 3] = [
+    "scan_filter_flag",
+    "scan_projection_region",
+    "scan_pruning_hit",
+];
+
 struct BenchState {
     runtime: Runtime,
     fixtures: TempDir,
@@ -15,7 +21,7 @@ struct BenchState {
     spec: ScanCaseSpec,
 }
 
-fn build_state() -> BenchState {
+fn build_state(case_name: &str) -> BenchState {
     let runtime = Builder::new_current_thread()
         .enable_all()
         .build()
@@ -31,8 +37,7 @@ fn build_state() -> BenchState {
             &storage,
         ))
         .expect("generate fixtures");
-    let spec =
-        benchmark_case_spec(fixtures.path(), "sf1", "scan_filter_flag", &storage).expect("spec");
+    let spec = benchmark_case_spec(fixtures.path(), "sf1", case_name, &storage).expect("spec");
 
     BenchState {
         runtime,
@@ -42,10 +47,10 @@ fn build_state() -> BenchState {
     }
 }
 
-fn bench_scan_filter_flag_phases(c: &mut Criterion) {
-    let state = build_state();
+fn bench_scan_case_phases(c: &mut Criterion, case_name: &str) {
+    let state = build_state(case_name);
     let sql = benchmark_case_sql(&state.spec);
-    let mut group = c.benchmark_group("scan_filter_flag");
+    let mut group = c.benchmark_group(case_name);
 
     group.bench_function(BenchmarkId::new("phase", "load"), |b| {
         b.iter_batched(
@@ -134,5 +139,11 @@ fn bench_scan_filter_flag_phases(c: &mut Criterion) {
     black_box(state.fixtures.path());
 }
 
-criterion_group!(benches, bench_scan_filter_flag_phases);
+fn bench_scan_pr_sensitive_phases(c: &mut Criterion) {
+    for case_name in PR_SENSITIVE_CASES {
+        bench_scan_case_phases(c, case_name);
+    }
+}
+
+criterion_group!(benches, bench_scan_pr_sensitive_phases);
 criterion_main!(benches);

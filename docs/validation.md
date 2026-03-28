@@ -1,0 +1,64 @@
+# Validation
+
+This page records how to validate that the benchmark harness is still producing trustworthy results after workflow, manifest, or timing changes.
+
+## Purpose
+
+The trust contract is split deliberately:
+
+- GitHub-hosted CI validates only smoke and correctness lanes.
+- Self-hosted workflows own macro perf, decision compare, Criterion microbench work, and longitudinal ingestion.
+- `./scripts/validate_perf_harness.sh` reruns the contract suites and writes a rerunnable Markdown summary under `results/validation/<timestamp>/summary.md` by default.
+
+Use this page as the stable operator guide, and use the generated artifact under `results/validation/` as the latest machine-local evidence.
+
+The authoritative scan decision manifest is intentionally narrower than the raw suite: `scan_pruning_miss` is currently disabled from `core_rust.yaml`, so it must not be used for authoritative perf conclusions until requalified.
+
+## Verification Matrix
+
+| Surface | Host class | Command or workflow | Trusted outcome |
+|---|---|---|---|
+| Rust/Python unit and integration tests | GitHub-hosted | `.github/workflows/ci.yml` test job | No regressions in harness logic |
+| Smoke validation lane | GitHub-hosted | `.github/workflows/ci.yml` hosted benchmark validation job | All suites stay operational on cheap hosted runners |
+| Correctness validation lane | GitHub-hosted | `.github/workflows/ci.yml` hosted benchmark validation job | Semantic/hash-backed assertions hold for trusted correctness suites |
+| Branch compare and decision runs | Self-hosted | `benchmark.yml`, `benchmark-prerelease.yml`, `./scripts/compare_branch.sh` | Macro perf claims only on hardened runners |
+| Criterion scan microbench | Self-hosted or local trusted host | `cargo bench -p delta-bench --bench scan_phase_bench` | PR-sensitive scan phases stay observable |
+| Longitudinal ingest/report/prune | Self-hosted | `longitudinal-nightly.yml`, `longitudinal-release-history.yml` | Only schema v4 identity-rich results enter the store |
+| Trust-contract rerun | Local operator or self-hosted runner | `./scripts/validate_perf_harness.sh` | Fresh evidence in `results/validation/<timestamp>/summary.md` or a caller-selected artifact dir |
+
+## Latest Evidence
+
+Latest local rerun on 2026-03-28 (UTC):
+
+- delta-rs SHA: `3fe2fa92a1dc54c8c6b378529b449f5f4c601e39`
+- Dataset: `tiny_smoke`
+- Commands:
+  - `cargo test --locked -p delta-bench`
+  - `python3 -m pytest -q python/tests`
+  - `./scripts/validate_perf_harness.sh --dataset-id tiny_smoke`
+- Validation artifact: `results/validation/20260328T210935Z/summary.md`
+- Same-SHA decision compare: `inconclusive=4`, with no false regression/improvement classification
+- Phase canaries:
+  - load selected `+169.139 ms`, execute control `+2.217 ms`
+  - plan selected `+176.213 ms`, execute control `+1.917 ms`
+  - validate selected `+257.004 ms`, execute control `+4.183 ms`
+  - execute selected `+280.795 ms`, plan control `+21.254 ms`
+- Synthetic regression canary: `scan_filter_flag` classified as `regression` (`17.321 ms -> 187.722 ms`)
+
+The committed source of truth is still the protocol plus the executable entrypoint. Fresh evidence is intentionally generated locally because it depends on the machine, Python environment, and runner class used for the rerun.
+
+To refresh the evidence on the current machine, execute:
+
+```bash
+./scripts/validate_perf_harness.sh --artifact-dir results/validation/latest
+```
+
+By default the script writes a timestamped artifact tree under `results/validation/` and stores the Markdown summary at `summary.md` inside that directory. The example above uses a stable artifact dir, so the summary lands at `results/validation/latest/summary.md` with exact commands, statuses, and captured output.
+
+## Re-Run Protocol
+
+1. Prepare the local Python environment so `pandas`, `polars`, and `pyarrow` are available.
+2. Run `cargo test --locked` and `python3 -m pytest -q python/tests`.
+3. Run `./scripts/validate_perf_harness.sh` to refresh the focused trust-contract evidence.
+4. Inspect the generated `summary.md` in the chosen artifact directory before making any benchmark trust claim.
+5. Treat any smoke/correctness failure, scan phase canary drift, or schema-v4 ingest rejection as a release blocker until explained or fixed.

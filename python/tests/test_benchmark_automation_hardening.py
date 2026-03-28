@@ -20,6 +20,9 @@ GITIGNORE = REPO_ROOT / ".gitignore"
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark.yml"
 NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
+VALIDATION_SCRIPT = REPO_ROOT / "scripts" / "validate_perf_harness.sh"
+VALIDATION_DOC = REPO_ROOT / "docs" / "validation.md"
+SCAN_PHASE_BENCH = REPO_ROOT / "crates" / "delta-bench" / "benches" / "scan_phase_bench.rs"
 LONGITUDINAL_NIGHTLY_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "longitudinal-nightly.yml"
 )
@@ -260,6 +263,64 @@ def test_compare_branch_supports_fail_on_passthrough() -> None:
     assert re.search(r'compare_args\+=\(--fail-on "\$\{COMPARE_FAIL_ON\}"\)', script)
 
 
+def test_perf_validation_workflow_entrypoint_exists_and_is_executable() -> None:
+    assert VALIDATION_SCRIPT.exists(), "missing scripts/validate_perf_harness.sh"
+    assert (
+        VALIDATION_SCRIPT.stat().st_mode & 0o111
+    ), "scripts/validate_perf_harness.sh must be executable"
+
+
+def test_validation_script_exposes_artifact_dir_contract() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    assert "--artifact-dir <path>" in script
+    assert "SUMMARY_FILE" in script
+    assert "summary.md" in script
+
+
+def test_validation_script_covers_all_scan_phase_canaries() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    for phase, env_var, control_phase in (
+        ("load", "DELTA_BENCH_SCAN_DELAY_LOAD_MS", "execute"),
+        ("plan", "DELTA_BENCH_SCAN_DELAY_PLAN_MS", "execute"),
+        ("validate", "DELTA_BENCH_SCAN_DELAY_VALIDATE_MS", "execute"),
+        ("execute", "DELTA_BENCH_SCAN_DELAY_EXECUTE_MS", "plan"),
+    ):
+        assert f"canary-{phase}-baseline" in script
+        assert f"canary-{phase}-delayed" in script
+        assert env_var in script
+        assert f'"{phase}"' in script
+        assert f'"{control_phase}"' in script
+
+
+def test_validation_script_canonicalizes_artifact_dir_once() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    assert "canonicalize_dir()" in script
+    assert 'pwd -P' in script
+    assert (
+        'VALIDATION_ARTIFACT_DIR="$(canonicalize_dir "${VALIDATION_ARTIFACT_DIR}")"'
+        in script
+    )
+
+
+def test_validation_docs_and_readme_point_to_perf_validation_workflow() -> None:
+    readme = REPO_ROOT.joinpath("README.md").read_text(encoding="utf-8")
+    compare_doc = REPO_ROOT.joinpath("docs", "comparing-branches.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "docs/validation.md" in readme
+    assert "./scripts/validate_perf_harness.sh" in readme
+    assert "docs/validation.md" in compare_doc
+    assert "./scripts/validate_perf_harness.sh" in compare_doc
+
+
+def test_scan_phase_criterion_bench_covers_multiple_pr_sensitive_cases() -> None:
+    bench = SCAN_PHASE_BENCH.read_text(encoding="utf-8")
+    for case_name in ("scan_filter_flag", "scan_projection_region", "scan_pruning_hit"):
+        assert case_name in bench, f"criterion bench missing {case_name}"
+
+
 def test_benchmark_workflow_reports_execution_status_separately_from_compare_mode() -> (
     None
 ):
@@ -308,8 +369,27 @@ def test_benchmark_nightly_is_explicit_macro_lane_for_curated_scan_only() -> Non
     assert "--suite write" not in workflow
 
 
+def test_benchmark_prerelease_is_curated_to_scan_only() -> None:
+    workflow = PRERELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert re.search(r"default:\s*scan", workflow)
+    assert "default: all" not in workflow
+    assert "options:" in workflow
+    assert re.search(r"options:\n(?:\s+- .+\n)*\s+- scan\b", workflow)
+    assert "- python" not in workflow
+
+
 def test_longitudinal_nightly_is_explicit_macro_lane_for_curated_scan_only() -> None:
     workflow = LONGITUDINAL_NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    assert "--suite scan" in workflow
+    assert "--lane macro" in workflow
+    assert "--suite write" not in workflow
+    assert "--suite merge" not in workflow
+
+
+def test_longitudinal_release_history_is_explicit_macro_lane_for_curated_scan_only() -> (
+    None
+):
+    workflow = LONGITUDINAL_RELEASE_HISTORY_WORKFLOW.read_text(encoding="utf-8")
     assert "--suite scan" in workflow
     assert "--lane macro" in workflow
     assert "--suite write" not in workflow
@@ -345,7 +425,31 @@ def test_compare_branch_runs_security_preflight_before_initial_checkout_prep() -
     assert_order(
         initial_block,
         "run_security_check",
-        'run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh',
+        'if ! exec_on_runner test -d "${DELTA_RS_DIR}/.git"; then',
+    )
+    assert (
+        'run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh'
+        in initial_block
+    )
+
+
+def test_compare_branch_does_not_fast_forward_default_branch_before_ref_pinning() -> (
+    None
+):
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    start = script.index(
+        'phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"'
+    )
+    end = script.index('base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"', start)
+    initial_block = script[start:end]
+    assert re.search(
+        r'if ! exec_on_runner test -d "\$\{DELTA_RS_DIR\}/\.git"; then\s+run_step env DELTA_RS_DIR="\$\{DELTA_RS_DIR\}" \./scripts/prepare_delta_rs\.sh\s+fi',
+        initial_block,
+    )
+    assert (
+        'run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh\n'
+        'ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"'
+        not in initial_block
     )
 
 

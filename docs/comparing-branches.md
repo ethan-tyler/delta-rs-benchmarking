@@ -31,8 +31,12 @@ This builds and benchmarks both your current checkout and the latest remote `mai
 
 Automation policy is narrower than local experimentation:
 - PR comments support `run benchmark scan` for exploratory output and `run benchmark decision scan` for decision-grade automation.
+- GitHub-hosted CI stays on smoke and correctness validation lanes only.
 - Self-hosted PR and nightly perf workflows are currently curated to `scan` only.
+- The authoritative scan decision set is currently `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` remains available for exploratory diagnostics but is disabled in `core_rust.yaml` until its exact-result contract is requalified.
 - Stateful Rust suites remain correctness-trusted workloads. If you force them through macro lane, the result is operational but not perf-valid.
+
+Before treating a machine or workflow as trustworthy for perf claims, rerun the contract checks with `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
 
 ## Comparison Methods
 
@@ -156,6 +160,7 @@ For PR merge decisions and release validation, follow these practices to minimiz
 3. **Keep alternating order.** The default `--measure-order alternate` reduces drift from cache warming, thermal throttling, and background processes by interleaving base and candidate runs.
 4. **Use median aggregation.** The default `median` is robust to outliers. Switch to `p95` only when analyzing tail latency.
 5. **Watch for noise.** If `cv_pct` (coefficient of variation) exceeds 10% for a case, the measurement is noisy. Rerun with higher `--compare-runs` or `--iters` to increase sample size.
+6. **Revalidate the harness before using the output as evidence.** Run `./scripts/validate_perf_harness.sh` and inspect the refreshed `summary.md` in its artifact directory against the operator guidance in `docs/validation.md`. If you want a stable local path, use `--artifact-dir results/validation/latest`.
 
 Decision-grade command with the current explicit trust contract:
 
@@ -171,6 +176,13 @@ Decision-grade command with the current explicit trust contract:
 ```
 
 Use `scan` for decision-grade automation today. `tpcds` remains manual until fixture provisioning is explicit, and stateful Rust suites remain decision-invalid in macro lane because their trusted path is the correctness lane.
+Within `scan`, the manifest-backed authoritative set excludes `scan_pruning_miss` until that case is requalified; do not treat exploratory output for that case as decision evidence.
+
+Freshness rules for trustworthy compare output:
+
+- If `fixture_recipe_hash`, `dataset_fingerprint`, or `compatibility_key` differs, treat the artifact pair as incomparable and rerun with fresh fixtures.
+- If a case's `exact_result_hash` or `schema_hash` assertions are stale, refresh them from a trusted validation run before treating new perf artifacts as authoritative.
+- `--mode assert` is for semantic validation only. It is intentionally rejected by `compare_branch.sh` because assert-only artifacts cannot support perf conclusions.
 
 ## Reading the Report
 

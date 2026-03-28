@@ -373,7 +373,7 @@ async fn run_optimize_case(
 ) -> BenchResult<SampleMetrics> {
     let (table, metrics) = table
         .optimize()
-        .with_target_size(normalize_target_size(target_size)?)
+        .with_target_size(normalize_target_size(target_size)?.into())
         .await?;
     let table_version = table.version().map(|v| v as u64);
     let result_hash = hash_json(&json!({

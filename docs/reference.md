@@ -67,6 +67,8 @@ Read operations testing full scans, projections, filters, and partition pruning.
 
 `delta-bench run` also supports `--timing-phase load|plan|execute|validate`. This keeps the same case IDs while switching which isolated phase populates `elapsed_ms` for phase-aware suites.
 
+Authoritative macro-lane decision runs currently use only `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` stays listed for exploratory diagnostics but is disabled in `bench/manifests/core_rust.yaml` until its exact-result assertion is requalified.
+
 ### write (3 cases)
 
 Write operations testing append and overwrite patterns. Local storage only.
@@ -279,7 +281,7 @@ These apply to all `delta-bench` subcommands and are passed through `bench.sh`:
 | `--suite` | `all` | Suite to run (or `all`) |
 | `--case-filter` | — | Substring filter for case names |
 | `--runner` | `all` | Runner mode: `rust`, `python`, or `all` |
-| `--lane` | `smoke` | Benchmark lane: `smoke`, `correctness`, or `macro`. `smoke` is the default local workflow; `correctness` is the trusted semantic lane for stateful Rust suites; `macro` is the perf lane for macro-safe cases. |
+| `--lane` | `smoke` | Benchmark lane: `smoke`, `correctness`, or `macro`. `smoke` is the default local workflow; `correctness` is the trusted semantic lane for correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`); `macro` is the perf lane for macro-safe cases. |
 | `--mode` | `perf` | Benchmark mode: `perf` records measurable timings; `assert` emits validation-only artifacts |
 | `--timing-phase` | `execute` | For phase-aware suites, isolate and record `load`, `plan`, `execute`, or `validate` time in `elapsed_ms` |
 | `--warmup` | `1` | Warmup iterations per case (not measured) |
@@ -328,6 +330,14 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--dataset-id` | — | Dataset id forwarded to fixture generation and benchmark runs |
 | `--timing-phase` | `execute` | Timing phase forwarded to `bench.sh run` |
 
+### `validate_perf_harness.sh` — Trust contract verification
+
+```bash
+./scripts/validate_perf_harness.sh [--sha <commit>] [--dataset-id <id>] [--artifact-dir <path>]
+```
+
+Runs the focused trust-contract suites used to justify trustworthy PR perf claims. By default the script writes a timestamped artifact tree under `results/validation/` and stores the Markdown summary at `summary.md` inside that directory. Use `--artifact-dir` to choose a stable directory such as `results/validation/latest`.
+
 ### `longitudinal_bench.sh` — Longitudinal pipeline
 
 Subcommands: `select-revisions`, `build-artifacts`, `run-matrix`, `ingest-results`, `report`, `prune`, `orchestrate`. `run-matrix` writes a resumable `matrix-state.json` checkpoint, includes `--lane` in its resume fingerprint, and `ingest-results` / `report` / `prune` operate on a SQLite `store.sqlite3` store. See [Longitudinal Benchmarking](longitudinal.md) for full flag documentation per subcommand.
@@ -352,6 +362,7 @@ These commands are the current repo-wide baseline for code, dependency, and self
 |---|---|---|
 | Rust tests | `cargo test --locked` | Matches the primary CI test job. |
 | Python tests | `(cd python && python3 -m pytest -q tests)` | Matches the primary CI test job. |
+| Harness trust validation | `./scripts/validate_perf_harness.sh` | Required before using a new machine/workflow combination for authoritative PR perf claims. |
 | Rust dependency audit | `cargo audit --ignore RUSTSEC-2026-0037 --ignore RUSTSEC-2026-0041 --ignore RUSTSEC-2026-0049` | Temporary triage for known upstream advisories; new advisories still fail the job. |
 | Python dependency audit | `python3 -m pip_audit -r python/requirements-audit.txt` | Audits the actual interop/runtime dependency set. |
 | Self-hosted preflight | `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` | Required by self-hosted benchmark and longitudinal workflows before execution. |
@@ -405,6 +416,18 @@ These commands are the current repo-wide baseline for code, dependency, and self
 | `BENCH_RUNNER_MODE` | — | Runner mode for script-level workflows (`rust`, `python`, `all`) |
 | `BENCH_BENCHMARK_MODE` | `perf` | Benchmark mode for script-level workflows (`perf`, `assert`) |
 | `BENCH_COMPARE_FAIL_ON` | — | Default `--fail-on` statuses for `compare_branch.sh` / `compare.py` automation |
+
+### Scan phase canary injection
+
+These are validation-only controls used by `./scripts/validate_perf_harness.sh` and the scan phase canary tests.
+
+| Variable | Default | Description |
+|---|---|---|
+| `DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY` | — | Must be set to `1` before the validation-only scan delay env vars below are honored |
+| `DELTA_BENCH_SCAN_DELAY_LOAD_MS` | — | Injects a fixed delay into scan load timing |
+| `DELTA_BENCH_SCAN_DELAY_PLAN_MS` | — | Injects a fixed delay into scan plan timing |
+| `DELTA_BENCH_SCAN_DELAY_EXECUTE_MS` | — | Injects a fixed delay into scan execute timing |
+| `DELTA_BENCH_SCAN_DELAY_VALIDATE_MS` | — | Injects a fixed delay into scan validate timing |
 
 ### Fidelity and hardening
 
@@ -575,6 +598,12 @@ Schema v3 artifacts are still readable for exploratory analysis, but decision mo
 ## Manifest Format
 
 Benchmark manifests declare which cases to execute and what assertions to validate. Core manifests live in `bench/manifests/`. Assertions are interpreted against the run's `dataset_id` and `dataset_fingerprint`; if the workload context drifts, the artifact is validation-only and cannot be compared as perf.
+
+Assertion freshness rules:
+
+- Refresh `exact_result_hash` and `schema_hash` after intentional semantic changes to the case or fixture recipe.
+- Treat any artifact produced against a different `fixture_recipe_hash`, `dataset_fingerprint`, or `compatibility_key` as stale for perf comparison.
+- `assert` mode is the refresh-and-validate path; `perf` mode is the compare path. Do not mix them.
 
 | Manifest | Runner | Description |
 |---|---|---|

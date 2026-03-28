@@ -66,6 +66,12 @@ REQUIRED_SECTIONS: dict[str, list[str]] = {
         "## Preflight Enforcement on Compare",
         "## Provisioning Controls",
     ],
+    "docs/validation.md": [
+        "## Purpose",
+        "## Verification Matrix",
+        "## Latest Evidence",
+        "## Re-Run Protocol",
+    ],
 }
 
 
@@ -231,3 +237,57 @@ def test_cloud_runner_docs_cover_enforced_workflows_and_required_env() -> None:
         "./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy"
         in markdown
     )
+
+
+def test_docs_describe_hosted_vs_self_hosted_lane_policy() -> None:
+    readme = README.read_text(encoding="utf-8")
+    getting_started = (DOCS_DIR / "getting-started.md").read_text(encoding="utf-8")
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+
+    for markdown in (readme, getting_started, architecture):
+        assert "GitHub-hosted" in markdown
+        assert "self-hosted" in markdown
+        assert "smoke" in markdown
+        assert "correctness" in markdown
+        assert "macro" in markdown
+
+
+def test_docs_describe_interop_py_as_correctness_backed() -> None:
+    readme = README.read_text(encoding="utf-8")
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+
+    for markdown in (readme, reference):
+        assert "interop_py" in markdown
+        assert "correctness" in markdown
+
+
+def test_validation_docs_match_artifact_dir_contract() -> None:
+    readme = README.read_text(encoding="utf-8")
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+
+    combined = "\n".join((readme, validation, compare_doc, reference))
+    assert "results/validation/latest.md" not in combined
+    assert "--output <path>" not in combined
+    assert "--artifact-dir" in validation
+    assert "--artifact-dir" in reference
+    assert "summary.md" in validation
+    assert "summary.md" in reference
+
+
+def test_validation_docs_record_all_scan_phase_canaries() -> None:
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+    for phase in ("load", "plan", "validate", "execute"):
+        assert f"{phase} selected" in validation
+
+
+def test_docs_call_out_disabled_scan_case_as_non_authoritative() -> None:
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+
+    combined = "\n".join((compare_doc, reference, validation))
+    assert "scan_pruning_miss" in combined
+    assert "disabled" in combined
+    assert "authoritative" in combined

@@ -14,7 +14,7 @@ from delta_bench_longitudinal.store import (
 )
 
 
-def _result_payload() -> dict:
+def _result_payload_v3() -> dict:
     return {
         "schema_version": 3,
         "context": {
@@ -60,7 +60,7 @@ def _result_payload() -> dict:
 
 
 def _result_payload_v4() -> dict:
-    payload = _result_payload()
+    payload = _result_payload_v3()
     payload["schema_version"] = 4
     payload["context"]["schema_version"] = 4
     payload["context"]["lane"] = "macro"
@@ -109,12 +109,6 @@ def _create_legacy_store_sqlite(store_dir: Path) -> None:
                 host TEXT,
                 suite TEXT,
                 scale TEXT,
-                lane TEXT,
-                measurement_kind TEXT,
-                validation_level TEXT,
-                harness_revision TEXT,
-                fixture_recipe_hash TEXT,
-                fidelity_fingerprint TEXT,
                 iterations INTEGER,
                 warmup INTEGER,
                 image_version TEXT,
@@ -135,8 +129,6 @@ def _create_legacy_store_sqlite(store_dir: Path) -> None:
             CREATE TABLE case_rows (
                 run_id TEXT NOT NULL,
                 case_name TEXT NOT NULL,
-                compatibility_key TEXT,
-                case_definition_hash TEXT,
                 success INTEGER NOT NULL,
                 failure_reason TEXT,
                 sample_count INTEGER NOT NULL,
@@ -169,12 +161,6 @@ def _seed_legacy_store_sqlite(store_dir: Path) -> None:
                 host,
                 suite,
                 scale,
-                lane,
-                measurement_kind,
-                validation_level,
-                harness_revision,
-                fixture_recipe_hash,
-                fidelity_fingerprint,
                 iterations,
                 warmup,
                 image_version,
@@ -190,7 +176,7 @@ def _seed_legacy_store_sqlite(store_dir: Path) -> None:
                 run_mode,
                 maintenance_window_id,
                 source_result_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "legacy-run",
@@ -204,12 +190,6 @@ def _seed_legacy_store_sqlite(store_dir: Path) -> None:
                 "bench-host",
                 "scan",
                 "sf1",
-                "macro",
-                "phase_breakdown",
-                "operational",
-                "h0",
-                "sha256:recipe-legacy",
-                "sha256:fidelity-legacy",
                 1,
                 0,
                 None,
@@ -232,8 +212,6 @@ def _seed_legacy_store_sqlite(store_dir: Path) -> None:
             INSERT INTO case_rows (
                 run_id,
                 case_name,
-                compatibility_key,
-                case_definition_hash,
                 success,
                 failure_reason,
                 sample_count,
@@ -243,13 +221,11 @@ def _seed_legacy_store_sqlite(store_dir: Path) -> None:
                 max_ms,
                 mean_ms,
                 median_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "legacy-run",
                 "scan_all",
-                "sha256:compat-legacy",
-                "sha256:case-def-legacy",
                 1,
                 None,
                 1,
@@ -265,7 +241,7 @@ def _seed_legacy_store_sqlite(store_dir: Path) -> None:
 
 def test_ingest_is_append_safe_and_idempotent(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
-    result_path.write_text(json.dumps(_result_payload()), encoding="utf-8")
+    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
     store_dir = tmp_path / "store"
 
     first = ingest_benchmark_result(
@@ -288,7 +264,7 @@ def test_ingest_is_append_safe_and_idempotent(tmp_path: Path) -> None:
 
 def test_rows_include_reproducibility_metadata(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
-    result_path.write_text(json.dumps(_result_payload()), encoding="utf-8")
+    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
     store_dir = tmp_path / "store"
 
     ingest_benchmark_result(
@@ -318,7 +294,7 @@ def test_ingest_dedupes_identical_payload_from_different_paths(tmp_path: Path) -
     first_path = tmp_path / "first.json"
     second_path = tmp_path / "nested" / "second.json"
     second_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = _result_payload()
+    payload = _result_payload_v4()
     first_path.write_text(json.dumps(payload), encoding="utf-8")
     second_path.write_text(json.dumps(payload), encoding="utf-8")
     store_dir = tmp_path / "store"
@@ -344,7 +320,7 @@ def test_ingest_dedupes_identical_payload_from_different_paths(tmp_path: Path) -
 
 def test_ingest_rejects_legacy_jsonl_store_until_migrated(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
-    result_path.write_text(json.dumps(_result_payload()), encoding="utf-8")
+    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
     store_dir = tmp_path / "store"
     store_dir.mkdir(parents=True, exist_ok=True)
     (store_dir / "rows.jsonl").write_text("{}", encoding="utf-8")
@@ -364,7 +340,7 @@ def test_ingest_rejects_legacy_jsonl_store_until_migrated(tmp_path: Path) -> Non
 
 def test_ingest_uses_queryable_sqlite_backend(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
-    result_path.write_text(json.dumps(_result_payload()), encoding="utf-8")
+    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
     store_dir = tmp_path / "store"
 
     first = ingest_benchmark_result(
@@ -384,7 +360,7 @@ def test_ingest_uses_queryable_sqlite_backend(tmp_path: Path) -> None:
 
 
 def test_ingest_rejects_non_v2_payload(tmp_path: Path) -> None:
-    payload = _result_payload()
+    payload = _result_payload_v3()
     payload["schema_version"] = 1
     payload["context"]["schema_version"] = 1
     result_path = tmp_path / "legacy-result.json"
@@ -400,7 +376,7 @@ def test_ingest_rejects_non_v2_payload(tmp_path: Path) -> None:
 
 
 def test_ingest_rejects_missing_case_classification(tmp_path: Path) -> None:
-    payload = _result_payload()
+    payload = _result_payload_v4()
     payload["cases"][0].pop("classification")
     result_path = tmp_path / "missing-classification.json"
     result_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -445,6 +421,55 @@ def test_v4_rows_preserve_compatibility_identity_fields(tmp_path: Path) -> None:
     assert scan_all["compatibility_key"] == "sha256:compat"
 
 
+def test_authoritative_longitudinal_ingest_rejects_schema_v3_payloads(
+    tmp_path: Path,
+) -> None:
+    result_path = tmp_path / "result-v3.json"
+    result_path.write_text(json.dumps(_result_payload_v3()), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="schema v4"):
+        ingest_benchmark_result(
+            store_dir=tmp_path / "store",
+            result_path=result_path,
+            revision="rev1",
+            commit_timestamp="2026-01-01T00:00:00+00:00",
+        )
+
+
+def test_authoritative_longitudinal_ingest_requires_v4_context_identity(
+    tmp_path: Path,
+) -> None:
+    payload = _result_payload_v4()
+    payload["context"].pop("fixture_recipe_hash")
+    result_path = tmp_path / "missing-context.json"
+    result_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="fixture_recipe_hash"):
+        ingest_benchmark_result(
+            store_dir=tmp_path / "store",
+            result_path=result_path,
+            revision="rev1",
+            commit_timestamp="2026-01-01T00:00:00+00:00",
+        )
+
+
+def test_authoritative_longitudinal_ingest_requires_case_identity_fields(
+    tmp_path: Path,
+) -> None:
+    payload = _result_payload_v4()
+    payload["cases"][0].pop("compatibility_key")
+    result_path = tmp_path / "missing-case-identity.json"
+    result_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="compatibility_key"):
+        ingest_benchmark_result(
+            store_dir=tmp_path / "store",
+            result_path=result_path,
+            revision="rev1",
+            commit_timestamp="2026-01-01T00:00:00+00:00",
+        )
+
+
 def test_load_rows_migrates_existing_legacy_sqlite_store(tmp_path: Path) -> None:
     store_dir = tmp_path / "store"
     _seed_legacy_store_sqlite(store_dir)
@@ -455,7 +480,12 @@ def test_load_rows_migrates_existing_legacy_sqlite_store(tmp_path: Path) -> None
     assert rows[0]["case"] == "scan_all"
     assert rows[0]["runner"] is None
     assert rows[0]["timing_phase"] is None
+    assert rows[0]["lane"] is None
+    assert rows[0]["measurement_kind"] is None
+    assert rows[0]["validation_level"] is None
     assert rows[0]["storage_backend"] is None
+    assert rows[0]["compatibility_key"] is None
+    assert rows[0]["case_definition_hash"] is None
 
 
 def test_ingest_v4_result_migrates_existing_legacy_sqlite_store(tmp_path: Path) -> None:

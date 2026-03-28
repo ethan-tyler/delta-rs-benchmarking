@@ -47,6 +47,8 @@ When touching longitudinal storage, reporting, or retention, also run:
 
 - Prefer `./scripts/compare_branch.sh --current-vs-main scan` for exploratory branch comparisons.
 - Use `./scripts/compare_branch.sh --current-vs-main --compare-mode decision scan` only on pinned self-hosted hardware with schema v4 outputs.
+- Before treating a machine or workflow as trustworthy for PR perf claims, run `./scripts/validate_perf_harness.sh` and review `docs/validation.md`.
 - `compare_branch.sh` supports only trusted macro-lane compare suites: `scan`, `write_perf`, `tpcds`, and `interop_py`.
+- Refresh manifest `exact_result_hash` / `schema_hash` assertions after intentional semantic or fixture changes before trusting new perf artifacts.
 - Prefer the longitudinal pipeline for time-series or release-history analysis.
 - Do not commit generated fixtures, results, or managed checkout state.

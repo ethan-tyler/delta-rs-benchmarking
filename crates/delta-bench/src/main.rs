@@ -408,7 +408,7 @@ fn validation_level_for_run_plan(
 fn case_supports_semantic_validation(case: &delta_bench::suites::PlannedCase) -> bool {
     matches!(
         case.target.as_str(),
-        "write" | "delete_update" | "merge" | "metadata" | "optimize_vacuum"
+        "write" | "delete_update" | "merge" | "metadata" | "optimize_vacuum" | "interop_py"
     )
 }
 

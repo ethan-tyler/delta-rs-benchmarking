@@ -84,7 +84,9 @@ cargo test --locked
 (cd python && python3 -m pytest -q tests)
 ```
 
-Treat these as the minimum regression screen before asking CI or a reviewer to validate a change.
+Treat these as the minimum regression screen before asking CI or a reviewer to validate a change. GitHub-hosted CI also runs repo-native smoke and correctness validation lanes; self-hosted workflows are reserved for macro perf, decision compare, and longitudinal automation.
+
+Lane policy also depends on where you run. GitHub-hosted CI is intentionally limited to smoke checks, while self-hosted benchmark runners are where correctness and macro measurements become authoritative.
 
 ## Your First Benchmark Run
 
@@ -113,7 +115,7 @@ This creates Delta tables under `fixtures/sf1/` including narrow sales tables, p
 
 This runs the smoke lane across every benchmark suite (scan, write, merge, delete_update, metadata, optimize_vacuum, tpcds, interop_py) using both Rust and Python runners. Smoke runs are validation-oriented: the wrapper defaults to `--lane smoke`, and the harness collapses them to a single non-performance iteration.
 
-If you want trusted semantic post-state validation for the stateful Rust suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`), switch to the correctness lane:
+If you want trusted semantic validation for the correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`), switch to the correctness lane:
 
 ```bash
 ./scripts/bench.sh run --suite write --runner rust --lane correctness --dataset-id tiny_smoke --label assert-smoke
@@ -191,7 +193,8 @@ Notes:
 - Local fixture cache (`fixtures/<scale>/rows.jsonl`, `fixtures/<scale>/manifest.json`) is unchanged regardless of backend.
 - The `write` suite currently supports only local storage.
 - The `delete_update` suite seeds isolated remote tables per iteration to keep DML runs independent.
-- Automated self-hosted perf workflows are narrower than local usage: they run `--lane macro` on curated `scan` cases only.
+- GitHub-hosted CI is narrower than local usage in a different way: it stays on smoke and correctness validation lanes only.
+- Automated self-hosted perf workflows are narrower than local usage too: they run `--lane macro` on curated `scan` cases only, and they remain the only automated path for macro perf or longitudinal claims.
 
 ## Cleanup
 

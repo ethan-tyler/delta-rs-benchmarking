@@ -40,7 +40,7 @@ This creates a fast smoke-test fixture set that is stable across runs and machin
 
 This writes a result file to `results/local/scan.json` and prints a terminal summary table.
 
-`bench.sh run` defaults to `--lane smoke`. Keep that default for quick local validation, switch to `--lane correctness` for trusted semantic validation on stateful Rust suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`), and use `--lane macro` only for macro-safe perf exploration.
+`bench.sh run` defaults to `--lane smoke`. Keep that default for quick local validation, switch to `--lane correctness` for trusted semantic validation on correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`), and use `--lane macro` only for macro-safe perf exploration.
 
 ### 4. Expand to the common workflows
 
@@ -63,7 +63,13 @@ Compare your current delta-rs checkout against upstream `main`:
 ./scripts/compare_branch.sh --current-vs-main scan
 ```
 
-PR automation is narrower than local exploration: `run benchmark scan` posts exploratory output, and `run benchmark decision scan` runs the explicit decision-grade path. Automated perf workflows are currently curated to `scan`; stateful Rust suites and `tpcds` remain manual-only.
+PR automation is narrower than local exploration: `run benchmark scan` posts exploratory output, and `run benchmark decision scan` runs the explicit decision-grade path. Automated macro perf workflows are currently curated to `scan`; GitHub-hosted CI stays on smoke/correctness validation lanes, and `tpcds` remains outside automated hosted perf claims.
+
+For a rerunnable trust-contract check, see [Validation](docs/validation.md) and run `./scripts/validate_perf_harness.sh`.
+
+Before making a trustworthy perf claim from any local or self-hosted compare run, rerun `./scripts/validate_perf_harness.sh` and review [Validation](docs/validation.md). By default that refreshes the focused trust-contract suites and records machine-local evidence under `results/validation/<timestamp>/summary.md`; pass `--artifact-dir results/validation/latest` if you want a stable local path.
+
+Lane policy is intentionally split by environment. GitHub-hosted CI is limited to smoke and correctness validation lanes, while self-hosted benchmark runners are the only place where macro perf, decision compare, or longitudinal ingestion should be treated as authoritative evidence.
 
 If you want Python interop coverage (`--runner all`), install the optional Python dependencies first:
 
@@ -117,6 +123,8 @@ cargo test --locked
 (cd python && python3 -m pytest -q tests)
 ```
 
+GitHub-hosted CI also runs the real harness, but only on smoke and correctness validation lanes. Self-hosted workflows remain the only automated path for macro perf, decision compare, Criterion microbench work, and longitudinal ingestion.
+
 For the dependency audit baseline that runs beside those tests:
 
 ```bash
@@ -133,6 +141,14 @@ Self-hosted benchmark workflows also enforce runner preflight before execution:
 ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
 ```
 
+For the benchmark trust contract itself:
+
+```bash
+./scripts/validate_perf_harness.sh
+```
+
+The latest expected evidence format and rerun protocol live in [Harness Validation](docs/validation.md).
+
 ## Current Benchmark Scope
 
 - Suites: `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `tpcds`, `interop_py`
@@ -140,7 +156,7 @@ Self-hosted benchmark workflows also enforce runner preflight before execution:
 - Fixtures: deterministic seed-based generation with fixture recipe identity and schema v4 results
 - Comparison: branch-to-branch reporting with multi-run aggregation and grouped output
 - Longitudinal: resumable `matrix-state.json` checkpoints plus SQLite-backed history and trend reporting
-- Automation policy: trusted perf automation is macro-only and currently curated to `scan`; correctness-trusted stateful suites stay manual/local
+- Automation policy: GitHub-hosted CI runs smoke plus correctness validation lanes only; self-hosted automation owns macro perf, decision compare, and longitudinal ingestion, with trusted perf workflows currently curated to `scan`
 - Workflow hardening: self-hosted runs require benchmark mode, no public IPv4, and egress-policy preflight
 - Release tracking: `rust-v*` and `python-v*` tag history
 

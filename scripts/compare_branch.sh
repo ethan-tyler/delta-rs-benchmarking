@@ -742,7 +742,9 @@ phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixt
 current_phase=$((current_phase + 1))
 
 run_security_check
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+if ! exec_on_runner test -d "${DELTA_RS_DIR}/.git"; then
+  run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+fi
 
 ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"
 ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"

@@ -28,6 +28,17 @@ RUNS_REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("dataset_fingerprint", "TEXT"),
     ("storage_backend", "TEXT"),
     ("backend_profile", "TEXT"),
+    ("lane", "TEXT"),
+    ("measurement_kind", "TEXT"),
+    ("validation_level", "TEXT"),
+    ("harness_revision", "TEXT"),
+    ("fixture_recipe_hash", "TEXT"),
+    ("fidelity_fingerprint", "TEXT"),
+)
+
+CASE_ROWS_REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("compatibility_key", "TEXT"),
+    ("case_definition_hash", "TEXT"),
 )
 
 
@@ -42,6 +53,7 @@ def ingest_benchmark_result(
     _raise_if_unmigrated_legacy_store(store_root)
     source = Path(result_path)
     payload = load_benchmark_payload(source)
+    _validate_authoritative_longitudinal_payload(payload, source)
     context = payload.get("context", {})
     cases = payload.get("cases", [])
     run_id = _run_id(
@@ -216,6 +228,45 @@ def _normalize_run_record(
         "maintenance_window_id": context.get("maintenance_window_id"),
         "source_result_path": str(source),
     }
+
+
+def _validate_authoritative_longitudinal_payload(
+    payload: dict[str, Any], source: Path
+) -> None:
+    if payload.get("schema_version") != 4:
+        raise ValueError(
+            f"{source}: authoritative longitudinal ingest requires schema v4 benchmark payloads"
+        )
+    context = payload.get("context") or {}
+    if context.get("schema_version") != 4:
+        raise ValueError(
+            f"{source}: authoritative longitudinal ingest requires context.schema_version=4"
+        )
+    for field in (
+        "lane",
+        "measurement_kind",
+        "validation_level",
+        "harness_revision",
+        "fixture_recipe_hash",
+    ):
+        value = context.get(field)
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                f"{source}: context is missing required authoritative identity field '{field}'"
+            )
+
+    for case in payload.get("cases", []):
+        case_name = case.get("case", "<unknown>")
+        for field in ("compatibility_key", "case_definition_hash"):
+            value = case.get(field)
+            if not isinstance(value, str) or not value:
+                raise ValueError(
+                    f"{source}: case '{case_name}' is missing required longitudinal identity field '{field}'"
+                )
+        if not isinstance(case.get("run_summary"), dict):
+            raise ValueError(
+                f"{source}: case '{case_name}' must include run_summary for authoritative longitudinal ingest"
+            )
 
 
 def _normalize_case_row(
@@ -397,6 +448,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         """
     )
     _ensure_table_columns(conn, "runs", RUNS_REQUIRED_COLUMNS)
+    _ensure_table_columns(conn, "case_rows", CASE_ROWS_REQUIRED_COLUMNS)
     conn.execute(f"PRAGMA user_version = {STORE_SCHEMA_VERSION}")
 
 

@@ -13,11 +13,17 @@ on:
       suite:
         description: Benchmark suite
         required: true
-        default: all
+        type: choice
+        default: scan
+        options:
+          - scan
       runner_mode:
-        description: Runner mode (rust|python|all)
+        description: Runner mode (rust)
         required: true
-        default: all
+        type: choice
+        default: rust
+        options:
+          - rust
       backend_profile:
         description: Optional backend profile under backends/*.env
         required: false

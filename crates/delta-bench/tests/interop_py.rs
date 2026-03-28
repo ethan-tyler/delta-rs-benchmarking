@@ -40,7 +40,7 @@ async fn interop_py_suite_runs_with_deterministic_case_ids() {
 }
 
 #[test]
-fn correctness_lane_interop_run_remains_operational_validation() {
+fn correctness_lane_interop_run_is_manifest_backed_semantic_validation() {
     let temp = tempfile::tempdir().expect("tempdir");
     let fixtures_dir = temp.path().join("fixtures");
     let results_dir = temp.path().join("results");
@@ -82,8 +82,22 @@ fn correctness_lane_interop_run_remains_operational_validation() {
         .join("interop_py.json");
     let payload = fs::read_to_string(result_path).expect("read result payload");
     let parsed: BenchRunResult = serde_json::from_str(&payload).expect("parse result payload");
-    assert_eq!(
-        parsed.context.validation_level.as_deref(),
-        Some("operational")
+    assert_eq!(parsed.context.validation_level.as_deref(), Some("semantic"));
+    assert!(
+        parsed
+            .cases
+            .iter()
+            .all(|case| case.success && case.validation_passed),
+        "correctness run should satisfy manifest-backed interop assertions: {:?}",
+        parsed
+            .cases
+            .iter()
+            .map(|case| (
+                &case.case,
+                case.success,
+                case.validation_passed,
+                &case.failure
+            ))
+            .collect::<Vec<_>>()
     );
 }

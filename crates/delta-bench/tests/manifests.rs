@@ -12,6 +12,10 @@ fn rust_manifest_path() -> PathBuf {
     repo_root().join("bench/manifests/core_rust.yaml")
 }
 
+fn python_manifest_path() -> PathBuf {
+    repo_root().join("bench/manifests/core_python.yaml")
+}
+
 #[test]
 fn loads_p0_rust_manifest_in_file_order() {
     let manifest_path = rust_manifest_path();
@@ -253,6 +257,40 @@ fn p0_rust_manifest_enforces_hash_assertions_for_every_enabled_case() {
 }
 
 #[test]
+fn p0_rust_manifest_excludes_unqualified_scan_case_from_authoritative_lane() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+
+    let scan_pruning_miss = manifest
+        .cases
+        .iter()
+        .find(|case| case.id == "scan_pruning_miss")
+        .expect("scan_pruning_miss should stay listed for explicit review");
+    assert!(
+        !scan_pruning_miss.enabled,
+        "scan_pruning_miss must stay disabled until its exact-result contract is requalified"
+    );
+
+    let enabled_decision_scan_cases = manifest
+        .cases
+        .iter()
+        .filter(|case| {
+            case.target == "scan" && case.enabled && case.supports_decision == Some(true)
+        })
+        .map(|case| case.id.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        enabled_decision_scan_cases,
+        vec![
+            "scan_full_narrow",
+            "scan_projection_region",
+            "scan_filter_flag",
+            "scan_pruning_hit",
+        ]
+    );
+}
+
+#[test]
 fn p0_rust_manifest_case_ids_match_suite_case_lists() {
     let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");
@@ -385,5 +423,50 @@ fn p0_rust_manifest_scopes_version_monotonicity_to_shared_table_concurrency_case
     assert!(
         unexpected.is_empty(),
         "cloned-table concurrency cases should not include version_monotonicity assertions, unexpected={unexpected:?}"
+    );
+}
+
+#[test]
+fn p0_python_manifest_includes_all_interop_cases() {
+    let manifest_path = python_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let expected_cases = list_cases_for_target("interop_py")
+        .expect("interop_py should be a registered suite target");
+
+    for case in expected_cases {
+        let present = manifest
+            .cases
+            .iter()
+            .any(|entry| entry.target == "interop_py" && entry.id == case);
+        assert!(present, "missing interop manifest entry for case '{case}'");
+    }
+}
+
+#[test]
+fn p0_python_manifest_enforces_hash_assertions_for_every_enabled_case() {
+    let manifest_path = python_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+
+    let missing = manifest
+        .cases
+        .iter()
+        .filter(|case| case.enabled && case.runner == "python")
+        .filter(|case| {
+            let has_result_hash = case
+                .assertions
+                .iter()
+                .any(|assertion| matches!(assertion, ManifestAssertion::ExactResultHash { .. }));
+            let has_schema_hash = case
+                .assertions
+                .iter()
+                .any(|assertion| matches!(assertion, ManifestAssertion::SchemaHash { .. }));
+            !(has_result_hash && has_schema_hash)
+        })
+        .map(|case| case.id.clone())
+        .collect::<Vec<_>>();
+
+    assert!(
+        missing.is_empty(),
+        "every enabled python case in core_python.yaml should include both exact_result_hash and schema_hash assertions, missing={missing:?}"
     );
 }

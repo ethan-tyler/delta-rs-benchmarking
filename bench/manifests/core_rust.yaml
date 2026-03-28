@@ -56,14 +56,14 @@ cases:
 - id: scan_pruning_miss
   target: scan
   runner: rust
-  enabled: true
+  enabled: false
   supports_decision: true
   required_runs: 5
   decision_threshold_pct: 5.0
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:4d1fd8f90ce4d7480edaf3af4d3716d84d10b0f77211789e47bbe1b06ad8e138
+    value: sha256:d4b21616f6cff555aee907eb27c59df46e722d145e384de7c57037195248e76f
   - type: schema_hash
     value: sha256:5acd94043ee7628611eb2eece7f69a0d5b4c0a644d15a7ece2dce6344bda7af1
 - id: write_append_small

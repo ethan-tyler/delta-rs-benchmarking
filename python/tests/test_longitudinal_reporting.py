@@ -436,6 +436,8 @@ def test_generate_trend_reports_excludes_validation_only_runs(
                             "perf_valid": False,
                             "classification": "supported",
                             "samples": [{"elapsed_ms": median_ms}],
+                            "compatibility_key": "sha256:scan-full-narrow",
+                            "case_definition_hash": "sha256:scan-full-narrow-def",
                             "run_summary": {
                                 "sample_count": 1,
                                 "invalid_sample_count": 0,

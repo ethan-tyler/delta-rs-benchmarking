@@ -70,17 +70,29 @@ def _make_fake_executor(
         out_dir = results_dir / label
         out_dir.mkdir(parents=True, exist_ok=True)
         result = {
-            "schema_version": 3,
+            "schema_version": 4,
             "context": {
-                "schema_version": 3,
+                "schema_version": 4,
                 "label": label,
                 "git_sha": artifact.revision,
                 "created_at": "2026-02-02T00:00:00+00:00",
                 "host": "host",
                 "suite": suite,
+                "runner": "rust",
                 "scale": scale,
+                "timing_phase": "execute",
+                "dataset_id": "tiny_smoke",
+                "dataset_fingerprint": "sha256:fixture",
+                "storage_backend": "local",
                 "iterations": 1,
                 "warmup": 0,
+                "lane": lane,
+                "measurement_kind": "phase_breakdown",
+                "validation_level": "operational",
+                "run_id": f"{artifact.revision}-{scale}-{lane}",
+                "harness_revision": "h1",
+                "fixture_recipe_hash": "sha256:recipe",
+                "fidelity_fingerprint": "sha256:fidelity",
             },
             "cases": [
                 {
@@ -90,6 +102,16 @@ def _make_fake_executor(
                     "validation_passed": True,
                     "perf_valid": True,
                     "samples": [{"elapsed_ms": 100.0}],
+                    "run_summary": {
+                        "sample_count": 1,
+                        "invalid_sample_count": 0,
+                        "min_ms": 100.0,
+                        "max_ms": 100.0,
+                        "mean_ms": 100.0,
+                        "median_ms": 100.0,
+                    },
+                    "compatibility_key": f"sha256:{suite}-{scale}-{lane}-compat",
+                    "case_definition_hash": f"sha256:{suite}-scan-all",
                     "failure": None,
                 }
             ],

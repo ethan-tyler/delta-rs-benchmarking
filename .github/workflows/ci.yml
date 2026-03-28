@@ -30,6 +30,7 @@ jobs:
           set -euo pipefail
           python3 -m pip install --upgrade pip
           python3 -m pip install pytest
+          python3 -m pip install -r python/requirements-audit.txt
 
       - name: Run Rust tests
         shell: bash
@@ -43,6 +44,59 @@ jobs:
           set -euo pipefail
           cd python
           python3 -m pytest -q tests
+
+  hosted-benchmark-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python benchmark dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r python/requirements-audit.txt
+
+      - name: Generate deterministic smoke fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/bench.sh data --dataset-id tiny_smoke --seed 42
+
+      - name: Run hosted smoke validation lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./scripts/bench.sh run \
+            --suite all \
+            --runner all \
+            --lane smoke \
+            --dataset-id tiny_smoke \
+            --label ci-smoke
+
+      - name: Run hosted correctness validation lane
+        shell: bash
+        run: |
+          set -euo pipefail
+          for suite in write delete_update merge metadata optimize_vacuum interop_py; do
+            ./scripts/bench.sh run \
+              --suite "${suite}" \
+              --runner all \
+              --lane correctness \
+              --dataset-id tiny_smoke \
+              --label "ci-correctness-${suite}"
+          done
 
   dependency-audit:
     runs-on: ubuntu-latest

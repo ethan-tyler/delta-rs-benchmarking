@@ -54,10 +54,11 @@ The harness is organized into three layers: execution, comparison/analysis, and 
 | `scripts/sync_harness_to_delta_rs.sh` | Syncs benchmark crate and configs into the delta-rs workspace. |
 | `scripts/bench.sh` | Wrapper for `delta-bench` subcommands (data, run, list, doctor). |
 | `scripts/compare_branch.sh` | Multi-run base-vs-candidate orchestration with aggregation and reporting. |
+| `scripts/validate_perf_harness.sh` | Runs the focused trust-contract suites and records a rerunnable Markdown artifact under `results/validation/`. |
 | `scripts/security_mode.sh` | Toggles benchmark run mode vs maintenance mode on cloud runners. |
 | `scripts/security_check.sh` | Preflight guardrails for mode, network, and egress policy. |
 | `scripts/provision_runner.sh` | Terraform orchestration wrapper for runner provisioning. |
-| `.github/workflows/ci.yml` | Enforces the shared Rust/Python test baseline plus dependency audit jobs on pushes and pull requests. |
+| `.github/workflows/ci.yml` | Enforces the shared Rust/Python test baseline and runs hosted smoke/correctness benchmark validation on pushes and pull requests. |
 | `.github/workflows/benchmark*.yml`, `.github/workflows/longitudinal-*.yml` | Self-hosted benchmark workflows that enforce runner preflight before branch comparison or `run-matrix`. |
 
 ## Data Flow
@@ -68,13 +69,15 @@ Benchmark execution follows this pipeline:
 
 2. **TPC-DS fixtures (optional).** For `dataset_id=tpcds_duckdb`, the `store_sales` table is sourced from DuckDB's `tpcds` extension, exported through CSV, and written as a Delta table.
 
-3. **Suite execution.** `delta-bench run` resolves runner mode from manifest-planned cases and executes Rust suites directly and Python interop cases via subprocess. `bench.sh` defaults to the smoke lane; explicit `--lane correctness` is the trusted semantic-validation path for the stateful Rust suites; `--lane macro` is the performance lane for macro-safe cases.
+3. **Suite execution.** `delta-bench run` resolves runner mode from manifest-planned cases and executes Rust suites directly and Python interop cases via subprocess. `bench.sh` defaults to the smoke lane; explicit `--lane correctness` is the trusted semantic-validation path for correctness-backed suites; `--lane macro` is the performance lane for macro-safe cases.
+
+GitHub-hosted CI stays on smoke and correctness validation lanes only. Self-hosted benchmark infrastructure is where macro perf, decision compare, Criterion microbench work, and longitudinal ingestion are allowed to produce authoritative perf evidence.
 
 4. **Result output.** Each suite writes a schema v4 JSON file to `results/<label>/<suite>.json`. Context now carries lane, fixture recipe, harness revision, and fidelity identity. Cases also carry run summaries and compatibility keys. Correctness-tagged cases requested in macro lane remain operationally runnable but are emitted with `perf_valid=false` so they cannot be compared or reported as trusted perf evidence.
 
 5. **Comparison (optional).** `compare.py` reads baseline and candidate JSON files, rejects invalid or mismatched contexts, and supports two modes: exploratory comparison on representative samples and decision comparison on run-level summaries with schema v4 compatibility checks and explicit fail-on exit policy.
 
-6. **Security validation.** `security_check.sh` validates fidelity invariants (run mode, network, egress). Self-hosted GitHub Actions workflows enforce this preflight before branch comparison and longitudinal execution. Current perf automation is macro-only and curated to `scan`; PR comments split into exploratory (`run benchmark scan`) and decision (`run benchmark decision scan`) paths.
+6. **Security validation.** `security_check.sh` validates fidelity invariants (run mode, network, egress). Self-hosted GitHub Actions workflows enforce this preflight before branch comparison and longitudinal execution. Current automated perf collection is self-hosted, macro-only, and curated to `scan`; GitHub-hosted CI is limited to smoke/correctness validation. PR comments split into exploratory (`run benchmark scan`) and decision (`run benchmark decision scan`) paths.
 
 7. **Report output.** The compare workflow produces grouped text output. `compare.py` also supports markdown output for CI integration.
 
@@ -83,6 +86,7 @@ Benchmark execution follows this pipeline:
 9. **Longitudinal ingest, reporting, and retention (optional).** `ingest-results` normalizes schema v4 suite outputs into a SQLite store. Reporting keys off explicit stored compatibility identity fields plus `compatibility_key` instead of just `suite/scale/case`, and the pipeline rejects legacy `rows.jsonl` / `index.json`-only stores to avoid silent split state.
 
 10. **Criterion decision lane (optional).** `cargo bench -p delta-bench --bench scan_phase_bench` runs phase-isolated microbenchmarks for PR-sensitive scan paths using Criterion `iter_batched` loops so setup stays outside the timed phase.
+11. **Trust validation (operator step).** `validate_perf_harness.sh` reruns the focused trust-contract suites before the operator treats a machine/workflow as trustworthy for PR perf claims.
 
 Marketplace datasets are a document-only path: place externally provisioned Delta tables under the expected `fixtures/<scale>/...` roots.
 
@@ -119,7 +123,7 @@ Different suites populate different subsets of the metrics:
 
 The harness covers these operation categories with specific contrast cases:
 
-- **scan** includes pruning contrast: `scan_pruning_hit` vs `scan_pruning_miss` to measure the impact of partition pruning.
+- **scan** includes pruning contrast in the suite implementation: `scan_pruning_hit` vs `scan_pruning_miss` measures the impact of partition pruning, but the authoritative macro decision manifest currently enables only `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` is disabled until its exact-result contract is requalified.
 - **merge** includes a localized partition-aware case: `merge_localized_1pct` tests merge performance when a partition predicate narrows the scan scope.
 - **optimize_vacuum** includes noop-vs-heavy contrast: `optimize_noop_already_compact` vs `optimize_heavy_compaction` to measure compaction overhead when there is nothing to do vs aggressive compaction.
 
@@ -137,6 +141,7 @@ These mechanisms ensure that benchmark results are comparable across runs:
 - **Multi-run aggregation.** Multiple measured runs per ref are aggregated (default: median) before change classification.
 - **Configurable run order.** `base-first`, `candidate-first`, or `alternate` ordering to reduce systematic bias from execution order.
 - **Stable thresholds.** Default no-change threshold of `0.05` (5%) prevents false positives from normal measurement noise.
+- **Executable trust canaries.** The validation workflow can inject fixed scan phase delays and confirms that only the selected `timing_phase` moves while control phases stay near baseline.
 - **Explicit run mode and network guardrails.** Cloud runners can enforce benchmark mode, no-public-IPv4, and egress-policy checks before self-hosted workloads start.
 - **Durable longitudinal checkpoints.** Matrix state writes use atomic replacement plus fsync so resume metadata survives process interruption.
 - **Configuration fingerprinting.** Longitudinal resume state is bound to the original suite/scale/warmup/iteration/output configuration and fails closed on mismatches.

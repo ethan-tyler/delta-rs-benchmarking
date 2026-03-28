@@ -1,5 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use deltalake_core::arrow::record_batch::RecordBatch;
 use deltalake_core::datafusion::execution::context::TaskContext;
@@ -10,7 +11,7 @@ use url::Url;
 
 use crate::cli::TimingPhase;
 use crate::data::fixtures::{narrow_sales_table_url, read_partitioned_table_url};
-use crate::error::BenchResult;
+use crate::error::{BenchError, BenchResult};
 use crate::fingerprint::{hash_arrow_schema, hash_record_batches_unordered};
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
 use crate::runner::{
@@ -18,6 +19,12 @@ use crate::runner::{
 };
 use crate::storage::StorageConfig;
 use crate::suites::scan_metrics::extract_scan_metrics;
+
+const LOAD_DELAY_ENV: &str = "DELTA_BENCH_SCAN_DELAY_LOAD_MS";
+const PLAN_DELAY_ENV: &str = "DELTA_BENCH_SCAN_DELAY_PLAN_MS";
+const EXECUTE_DELAY_ENV: &str = "DELTA_BENCH_SCAN_DELAY_EXECUTE_MS";
+const VALIDATE_DELAY_ENV: &str = "DELTA_BENCH_SCAN_DELAY_VALIDATE_MS";
+const ALLOW_DELAY_ENV: &str = "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY";
 
 pub fn case_names() -> Vec<String> {
     vec![
@@ -273,6 +280,7 @@ async fn load_sql_query_context(
     storage: &StorageConfig,
     table_url: Url,
 ) -> BenchResult<LoadedSqlQuery> {
+    apply_phase_delay(LOAD_DELAY_ENV).await?;
     let table = storage.open_table(table_url).await?;
     let total_active_files = table
         .snapshot()
@@ -288,6 +296,7 @@ async fn load_sql_query_context(
 }
 
 async fn plan_loaded_sql_query(loaded: LoadedSqlQuery, sql: &str) -> BenchResult<PreparedSqlQuery> {
+    apply_phase_delay(PLAN_DELAY_ENV).await?;
     let df = loaded.ctx.sql(sql).await?;
     let task_ctx = Arc::new(df.task_ctx());
     let plan = df.create_physical_plan().await?;
@@ -301,6 +310,7 @@ async fn plan_loaded_sql_query(loaded: LoadedSqlQuery, sql: &str) -> BenchResult
 
 async fn execute_prepared_query(prepared: PreparedSqlQuery) -> BenchResult<ExecutedSqlQuery> {
     let query_start = std::time::Instant::now();
+    apply_phase_delay(EXECUTE_DELAY_ENV).await?;
     let batches = collect(prepared.plan.clone(), prepared.task_ctx).await?;
     let query_elapsed_ms = query_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -314,6 +324,7 @@ async fn execute_prepared_query(prepared: PreparedSqlQuery) -> BenchResult<Execu
 
 async fn validate_executed_query(executed: ExecutedSqlQuery) -> BenchResult<(SampleMetrics, f64)> {
     let validate_start = std::time::Instant::now();
+    apply_phase_delay(VALIDATE_DELAY_ENV).await?;
     let rows_processed = executed
         .batches
         .iter()
@@ -360,6 +371,32 @@ async fn validate_executed_query(executed: ExecutedSqlQuery) -> BenchResult<(Sam
             }),
         validate_elapsed_ms,
     ))
+}
+
+async fn apply_phase_delay(env_name: &str) -> BenchResult<()> {
+    let Some(delay) = parse_phase_delay(env_name)? else {
+        return Ok(());
+    };
+    // Validation-only canaries can inject a fixed delay into one scan phase to prove timing isolation.
+    tokio::time::sleep(delay).await;
+    Ok(())
+}
+
+fn parse_phase_delay(env_name: &str) -> BenchResult<Option<Duration>> {
+    let Some(raw) = std::env::var(env_name).ok() else {
+        return Ok(None);
+    };
+    if std::env::var(ALLOW_DELAY_ENV).as_deref() != Ok("1") {
+        return Err(BenchError::InvalidArgument(format!(
+            "validation-only scan phase delay injection requires {ALLOW_DELAY_ENV}=1"
+        )));
+    }
+    let millis = raw.parse::<u64>().map_err(|_| {
+        BenchError::InvalidArgument(format!(
+            "{env_name} must be an unsigned integer number of milliseconds"
+        ))
+    })?;
+    Ok(Some(Duration::from_millis(millis)))
 }
 
 fn into_case_result(result: CaseExecutionResult) -> CaseResult {

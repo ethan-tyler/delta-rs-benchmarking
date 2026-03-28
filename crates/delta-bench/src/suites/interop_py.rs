@@ -441,6 +441,11 @@ printf '%s' '{"rows_processed":1,"bytes_processed":1,"operations":1,"classificat
         .await
         .expect("run case");
 
+        assert!(
+            case.success,
+            "run case returned failure: {:?}",
+            case.failure.as_ref().map(|failure| &failure.message)
+        );
         assert_eq!(case.samples.len(), 1);
         assert!(
             (case.samples[0].elapsed_ms - 1.5).abs() < 0.001,

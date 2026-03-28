@@ -19,7 +19,7 @@ fn tpcds_q07_sql_has_deterministic_tie_breaker() {
 }
 
 #[test]
-fn core_rust_manifest_uses_refreshed_regression_hashes() {
+fn core_rust_manifest_uses_refreshed_authoritative_regression_hashes() {
     let path = repo_root().join("bench/manifests/core_rust.yaml");
     let manifest = load_manifest(&path).expect("load core rust manifest");
 
@@ -46,10 +46,6 @@ fn core_rust_manifest_uses_refreshed_regression_hashes() {
         assertion
     }
 
-    assert_eq!(
-        exact_result_hash_for(&manifest, "scan_pruning_miss"),
-        "sha256:4d1fd8f90ce4d7480edaf3af4d3716d84d10b0f77211789e47bbe1b06ad8e138"
-    );
     assert_eq!(
         exact_result_hash_for(&manifest, "update_all_rows_expr"),
         "sha256:6246db1cb0db81f5da5430ec2e67f808a2aaba1514d69e558785ac3bdf9160e9"

@@ -44,6 +44,16 @@ def _self_hosted_benchmark_workflows() -> list[Path]:
     return workflows
 
 
+def _github_hosted_workflows() -> list[Path]:
+    workflows = []
+    for workflow_path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        workflow = workflow_path.read_text(encoding="utf-8")
+        if "runs-on: ubuntu-latest" not in workflow:
+            continue
+        workflows.append(workflow_path)
+    return workflows
+
+
 def test_security_check_requires_explicit_expected_egress_hash() -> None:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -133,6 +143,51 @@ def test_self_hosted_benchmark_workflows_enforce_runner_preflight() -> None:
         ), f"{workflow_path.name} runs benchmark execution before security_check preflight"
 
 
+def test_ci_workflow_runs_only_hosted_smoke_and_correctness_validation_lanes() -> None:
+    ci = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "./scripts/bench.sh run" in ci
+    assert "--lane smoke" in ci
+    assert "--lane correctness" in ci
+    assert "--lane macro" not in ci
+    assert "./scripts/compare_branch.sh" not in ci
+    assert "./scripts/longitudinal_bench.sh" not in ci
+
+
+def test_github_hosted_workflows_do_not_run_macro_perf_or_criterion_benches() -> None:
+    hosted = _github_hosted_workflows()
+    assert hosted, "expected at least one GitHub-hosted workflow"
+
+    for workflow_path in hosted:
+        workflow = workflow_path.read_text(encoding="utf-8")
+        assert "cargo bench" not in workflow, (
+            f"{workflow_path.name} must not run Criterion microbenches on GitHub-hosted runners"
+        )
+        assert "--lane macro" not in workflow, (
+            f"{workflow_path.name} must not run macro-lane benchmark workflows on GitHub-hosted runners"
+        )
+        assert "./scripts/compare_branch.sh" not in workflow, (
+            f"{workflow_path.name} must not run branch compare on GitHub-hosted runners"
+        )
+
+
+def test_longitudinal_ingest_is_reserved_for_dedicated_self_hosted_workflows() -> None:
+    ingest_workflows = []
+    for workflow_path in sorted(WORKFLOWS_DIR.glob("*.yml")):
+        workflow = workflow_path.read_text(encoding="utf-8")
+        if "ingest-results" not in workflow:
+            continue
+        ingest_workflows.append(workflow_path)
+        assert "runs-on: [self-hosted, delta-bench]" in workflow, (
+            f"{workflow_path.name} must stay self-hosted for longitudinal ingest"
+        )
+
+    assert [workflow.name for workflow in ingest_workflows] == [
+        "longitudinal-nightly.yml",
+        "longitudinal-release-history.yml",
+    ]
+
+
 def test_ci_workflow_configures_dependency_audits_and_dependabot() -> None:
     ci = CI_WORKFLOW.read_text(encoding="utf-8")
     dependabot = DEPENDABOT.read_text(encoding="utf-8")
@@ -152,3 +207,16 @@ def test_ci_workflow_configures_dependency_audits_and_dependabot() -> None:
 
     for package in ("pandas", "polars", "pyarrow", "duckdb"):
         assert package in requirements
+
+
+def test_audit_requirements_pin_interop_runtime_versions() -> None:
+    requirements = AUDIT_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+    package_lines = [
+        line.strip()
+        for line in requirements
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+    assert package_lines, "expected pinned runtime requirements"
+    for line in package_lines:
+        assert "==" in line, f"interop runtime requirement must be pinned: {line}"

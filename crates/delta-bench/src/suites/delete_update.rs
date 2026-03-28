@@ -7,6 +7,7 @@ use url::Url;
 use deltalake_core::DeltaTable;
 
 use super::{copy_dir_all, fixture_error_cases, into_case_result};
+use crate::cli::BenchmarkLane;
 use crate::data::fixtures::{
     delete_update_small_files_table_path, load_rows, read_partitioned_table_path,
     write_delta_table_partitioned_small_files,
@@ -16,6 +17,7 @@ use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
 use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
+use crate::validation::{lane_requires_semantic_validation, validate_table_state};
 
 #[derive(Clone, Copy)]
 enum DmlOperation {
@@ -101,6 +103,7 @@ pub fn case_names() -> Vec<String> {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    lane: BenchmarkLane,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -138,7 +141,7 @@ pub async fn run(
                 },
                 |setup| async move {
                     let _keep_temp = setup._temp;
-                    run_delete_update_case(setup.table, case)
+                    run_delete_update_case(setup.table, case, lane)
                         .await
                         .map_err(|e| e.to_string())
                 },
@@ -190,7 +193,7 @@ pub async fn run(
                 }
             },
             |table| async move {
-                run_delete_update_case(table, case)
+                run_delete_update_case(table, case, lane)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -205,6 +208,7 @@ pub async fn run(
 async fn run_delete_update_case(
     table: DeltaTable,
     case: DeleteUpdateCase,
+    lane: BenchmarkLane,
 ) -> BenchResult<SampleMetrics> {
     match case.operation {
         DmlOperation::Delete => {
@@ -220,13 +224,21 @@ async fn run_delete_update_case(
                 "files_removed": metrics.num_removed_files as u64,
                 "table_version": table_version,
             }))?;
-            let schema_hash = hash_json(&json!([
+            let mut schema_hash = hash_json(&json!([
                 "operation:string",
                 "rows_affected:u64",
                 "files_added:u64",
                 "files_removed:u64",
                 "table_version:u64",
             ]))?;
+            let mut semantic_state_digest = None;
+            let mut validation_summary = None;
+            if lane_requires_semantic_validation(lane) {
+                let validation = validate_table_state(&table).await?;
+                schema_hash = validation.schema_hash;
+                semantic_state_digest = Some(validation.digest);
+                validation_summary = Some(validation.summary);
+            }
             let sample = SampleMetrics::base(
                 Some(metrics.num_deleted_rows as u64),
                 None,
@@ -250,6 +262,8 @@ async fn run_delete_update_case(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest,
+                validation_summary,
             });
             Ok(sample)
         }
@@ -270,13 +284,21 @@ async fn run_delete_update_case(
                 "files_removed": metrics.num_removed_files as u64,
                 "table_version": table_version,
             }))?;
-            let schema_hash = hash_json(&json!([
+            let mut schema_hash = hash_json(&json!([
                 "operation:string",
                 "rows_affected:u64",
                 "files_added:u64",
                 "files_removed:u64",
                 "table_version:u64",
             ]))?;
+            let mut semantic_state_digest = None;
+            let mut validation_summary = None;
+            if lane_requires_semantic_validation(lane) {
+                let validation = validate_table_state(&table).await?;
+                schema_hash = validation.schema_hash;
+                semantic_state_digest = Some(validation.digest);
+                validation_summary = Some(validation.summary);
+            }
             let sample = SampleMetrics::base(
                 Some(metrics.num_updated_rows as u64),
                 None,
@@ -300,6 +322,8 @@ async fn run_delete_update_case(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest,
+                validation_summary,
             });
             Ok(sample)
         }
@@ -320,13 +344,21 @@ async fn run_delete_update_case(
                 "files_removed": metrics.num_removed_files as u64,
                 "table_version": table_version,
             }))?;
-            let schema_hash = hash_json(&json!([
+            let mut schema_hash = hash_json(&json!([
                 "operation:string",
                 "rows_affected:u64",
                 "files_added:u64",
                 "files_removed:u64",
                 "table_version:u64",
             ]))?;
+            let mut semantic_state_digest = None;
+            let mut validation_summary = None;
+            if lane_requires_semantic_validation(lane) {
+                let validation = validate_table_state(&table).await?;
+                schema_hash = validation.schema_hash;
+                semantic_state_digest = Some(validation.digest);
+                validation_summary = Some(validation.summary);
+            }
             let sample = SampleMetrics::base(
                 Some(metrics.num_updated_rows as u64),
                 None,
@@ -350,6 +382,8 @@ async fn run_delete_update_case(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest,
+                validation_summary,
             });
             Ok(sample)
         }
@@ -366,13 +400,21 @@ async fn run_delete_update_case(
                 "files_removed": metrics.num_removed_files as u64,
                 "table_version": table_version,
             }))?;
-            let schema_hash = hash_json(&json!([
+            let mut schema_hash = hash_json(&json!([
                 "operation:string",
                 "rows_affected:u64",
                 "files_added:u64",
                 "files_removed:u64",
                 "table_version:u64",
             ]))?;
+            let mut semantic_state_digest = None;
+            let mut validation_summary = None;
+            if lane_requires_semantic_validation(lane) {
+                let validation = validate_table_state(&table).await?;
+                schema_hash = validation.schema_hash;
+                semantic_state_digest = Some(validation.digest);
+                validation_summary = Some(validation.summary);
+            }
             let sample = SampleMetrics::base(
                 Some(metrics.num_updated_rows as u64),
                 None,
@@ -396,6 +438,8 @@ async fn run_delete_update_case(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest,
+                validation_summary,
             });
             Ok(sample)
         }

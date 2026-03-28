@@ -41,6 +41,7 @@ def orchestrate_from_manifest(
     html_path: Path | str,
     suites: list[str],
     scales: list[str],
+    lane: str = "macro",
     timeout_seconds: int,
     max_retries: int,
     max_parallel: int,
@@ -93,6 +94,7 @@ def orchestrate_from_manifest(
         config=MatrixRunConfig(
             suites=suites,
             scales=scales,
+            lane=lane,
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             state_path=state_path,
@@ -143,16 +145,26 @@ def _ingest_from_state(
     revision_to_ts: dict[str, str],
 ) -> int:
     total = 0
+    config = matrix_state.get("config", {})
+    configured_lane = str(config.get("lane") or "")
     for case in matrix_state.get("cases", {}).values():
         if case.get("status") != "success":
             continue
         revision = str(case.get("revision"))
         suite = str(case.get("suite"))
         scale = str(case.get("scale"))
-        candidate_labels = [
-            matrix_result_label(label_prefix, revision, scale),
-            sanitize_label(f"{label_prefix}-{revision}"),
-        ]
+        lane = str(case.get("lane") or configured_lane)
+        candidate_labels: list[str] = []
+        if lane:
+            candidate_labels.append(
+                matrix_result_label(label_prefix, revision, scale, lane)
+            )
+        candidate_labels.extend(
+            [
+                matrix_result_label(label_prefix, revision, scale),
+                sanitize_label(f"{label_prefix}-{revision}"),
+            ]
+        )
         result_path: Path | None = None
         for label in candidate_labels:
             candidate = results_dir / label / f"{suite}.json"
@@ -244,6 +256,11 @@ def main(argv: list[str] | None = None) -> int:
     matrix_cmd.add_argument("--fixtures-dir", default=Path("fixtures"), type=Path)
     matrix_cmd.add_argument("--suite", action="append", required=True)
     matrix_cmd.add_argument("--scale", action="append", required=True)
+    matrix_cmd.add_argument(
+        "--lane",
+        choices=["smoke", "correctness", "macro"],
+        default="macro",
+    )
     matrix_cmd.add_argument("--timeout-seconds", type=int, default=3600)
     matrix_cmd.add_argument("--max-retries", type=int, default=2)
     matrix_cmd.add_argument("--max-parallel", type=int, default=1)
@@ -296,6 +313,11 @@ def main(argv: list[str] | None = None) -> int:
     orchestration_cmd.add_argument("--html-path", required=True, type=Path)
     orchestration_cmd.add_argument("--suite", action="append", required=True)
     orchestration_cmd.add_argument("--scale", action="append", required=True)
+    orchestration_cmd.add_argument(
+        "--lane",
+        choices=["smoke", "correctness", "macro"],
+        default="macro",
+    )
     orchestration_cmd.add_argument("--timeout-seconds", type=int, default=3600)
     orchestration_cmd.add_argument("--max-retries", type=int, default=2)
     orchestration_cmd.add_argument("--max-parallel", type=int, default=1)
@@ -321,9 +343,11 @@ def main(argv: list[str] | None = None) -> int:
             start_date=args.start_date,
             end_date=args.end_date,
             ref=args.ref,
-            release_tag_pattern=args.release_tag_pattern
-            if args.release_tag_pattern is not None
-            else r"^v\d+\.\d+\.\d+([.-].+)?$",
+            release_tag_pattern=(
+                args.release_tag_pattern
+                if args.release_tag_pattern is not None
+                else r"^v\d+\.\d+\.\d+([.-].+)?$"
+            ),
         )
         write_manifest(manifest, args.output)
         print(str(args.output))
@@ -351,6 +375,7 @@ def main(argv: list[str] | None = None) -> int:
             config=MatrixRunConfig(
                 suites=args.suite,
                 scales=args.scale,
+                lane=args.lane,
                 timeout_seconds=args.timeout_seconds,
                 max_retries=args.max_retries,
                 max_parallel=args.max_parallel,
@@ -429,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
             html_path=args.html_path,
             suites=args.suite,
             scales=args.scale,
+            lane=args.lane,
             timeout_seconds=args.timeout_seconds,
             max_retries=args.max_retries,
             max_parallel=args.max_parallel,

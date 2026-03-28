@@ -1,14 +1,15 @@
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::assertions::CaseAssertion;
+use crate::cli::BenchmarkLane;
 use crate::error::{BenchError, BenchResult};
 
 pub const DEFAULT_RUST_MANIFEST_PATH: &str = "bench/manifests/core_rust.yaml";
 pub const DEFAULT_PYTHON_MANIFEST_PATH: &str = "bench/manifests/core_python.yaml";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BenchmarkManifest {
     pub id: String,
     pub description: String,
@@ -16,14 +17,24 @@ pub struct BenchmarkManifest {
     pub cases: Vec<ManifestCase>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ManifestCase {
     pub id: String,
     pub target: String,
     #[serde(default = "default_runner")]
     pub runner: String,
+    #[serde(default = "default_lane")]
+    pub lane: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub supports_decision: Option<bool>,
+    #[serde(default)]
+    pub required_runs: Option<u32>,
+    #[serde(default)]
+    pub decision_threshold_pct: Option<f64>,
+    #[serde(default)]
+    pub decision_metric: Option<String>,
     #[serde(default)]
     pub assertions: Vec<ManifestAssertion>,
 }
@@ -36,7 +47,19 @@ fn default_runner() -> String {
     "rust".to_string()
 }
 
-#[derive(Clone, Debug, Deserialize)]
+fn default_lane() -> String {
+    "macro".to_string()
+}
+
+fn valid_manifest_lanes() -> [&'static str; 3] {
+    [
+        BenchmarkLane::Smoke.as_str(),
+        BenchmarkLane::Correctness.as_str(),
+        BenchmarkLane::Macro.as_str(),
+    ]
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ManifestAssertion {
     ExactResultHash { value: String },
@@ -101,12 +124,49 @@ impl DatasetId {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DatasetAssertionPolicy {
+    pub relax_tpcds_exact_result_hash: bool,
+}
+
+impl DatasetId {
+    pub const fn assertion_policy(self) -> DatasetAssertionPolicy {
+        match self {
+            Self::TpcdsDuckdb => DatasetAssertionPolicy {
+                relax_tpcds_exact_result_hash: true,
+            },
+            Self::TinySmoke | Self::MediumSelective | Self::SmallFiles | Self::ManyVersions => {
+                DatasetAssertionPolicy {
+                    relax_tpcds_exact_result_hash: false,
+                }
+            }
+        }
+    }
+}
+
 pub fn load_manifest(path: impl AsRef<Path>) -> BenchResult<BenchmarkManifest> {
     let path = path.as_ref();
     let bytes = std::fs::read(path)?;
-    serde_yaml::from_slice::<BenchmarkManifest>(&bytes).map_err(|error| {
+    let manifest = serde_yaml::from_slice::<BenchmarkManifest>(&bytes).map_err(|error| {
         BenchError::InvalidArgument(format!("invalid manifest '{}': {error}", path.display()))
-    })
+    })?;
+    validate_manifest(path, manifest)
+}
+
+fn validate_manifest(path: &Path, manifest: BenchmarkManifest) -> BenchResult<BenchmarkManifest> {
+    let valid_lanes = valid_manifest_lanes();
+    for case in &manifest.cases {
+        if !valid_lanes.contains(&case.lane.as_str()) {
+            return Err(BenchError::InvalidArgument(format!(
+                "invalid manifest '{}': case '{}' uses unsupported lane '{}' (expected one of: {})",
+                path.display(),
+                case.id,
+                case.lane,
+                valid_lanes.join(", ")
+            )));
+        }
+    }
+    Ok(manifest)
 }
 
 pub(crate) fn benchmark_repo_root() -> PathBuf {

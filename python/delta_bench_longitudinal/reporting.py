@@ -48,9 +48,11 @@ def generate_trend_reports(
     for key, series in sorted(grouped.items()):
         ordered = sorted(
             series,
-            key=lambda row: row.get("benchmark_created_at")
-            or row.get("ingested_at")
-            or "",
+            key=lambda row: (
+                row.get("revision_commit_timestamp") or "",
+                row.get("benchmark_created_at") or row.get("ingested_at") or "",
+                row.get("run_id") or "",
+            ),
         )
         medians = [float(row["median_ms"]) for row in ordered]
         latest = medians[-1]
@@ -114,6 +116,15 @@ def generate_trend_reports(
             "suite": key[0],
             "scale": key[1],
             "case": key[2],
+            "series_id": key[3],
+            "lane": ordered[-1].get("lane"),
+            "measurement_kind": ordered[-1].get("measurement_kind"),
+            "validation_level": ordered[-1].get("validation_level"),
+            "runner": ordered[-1].get("runner"),
+            "timing_phase": ordered[-1].get("timing_phase"),
+            "storage_backend": ordered[-1].get("storage_backend"),
+            "fixture_recipe_hash": ordered[-1].get("fixture_recipe_hash"),
+            "compatibility_key": ordered[-1].get("compatibility_key"),
             "points": medians,
             "latest": latest,
             "baseline_median": baseline_median,
@@ -221,20 +232,41 @@ def _mann_whitney_one_sided_p_value(
 
 def _load_grouped_rows(
     store_dir: Path,
-) -> tuple[dict[tuple[str, str, str], list[dict[str, Any]]], int]:
+) -> tuple[dict[tuple[str, str, str, str], list[dict[str, Any]]], int]:
     rows = load_longitudinal_rows(store_dir)
     if not rows:
         return {}, 0
-    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
     for row in rows:
         if not row.get("success"):
             continue
+        if int(row.get("sample_count") or 0) <= 0:
+            continue
         if row.get("median_ms") is None:
             continue
+        series_id = str(
+            (
+                row.get("runner"),
+                row.get("timing_phase"),
+                row.get("dataset_id"),
+                row.get("dataset_fingerprint"),
+                row.get("storage_backend"),
+                row.get("backend_profile"),
+                row.get("lane"),
+                row.get("measurement_kind"),
+                row.get("validation_level"),
+                row.get("harness_revision"),
+                row.get("fixture_recipe_hash"),
+                row.get("fidelity_fingerprint"),
+                row.get("case_definition_hash"),
+                row.get("compatibility_key"),
+            )
+        )
         key = (
             str(row.get("suite", "unknown")),
             str(row.get("scale", "unknown")),
             str(row.get("case", "unknown")),
+            series_id,
         )
         grouped.setdefault(key, []).append(row)
     return grouped, 0

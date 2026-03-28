@@ -21,12 +21,12 @@ You never need to modify delta-rs source from this repo. The harness syncs itsel
 
 The main scripts are:
 
-| Script                        | Purpose                                                    |
-| ----------------------------- | ---------------------------------------------------------- |
-| `prepare_delta_rs.sh`         | Clones or updates the delta-rs checkout                    |
-| `sync_harness_to_delta_rs.sh` | Copies benchmark crate and configs into the checkout       |
-| `bench.sh`                    | Generates fixtures and runs benchmark suites               |
-| `compare_branch.sh`           | Runs benchmarks against two revisions and compares results |
+| Script | Purpose |
+|---|---|
+| `prepare_delta_rs.sh` | Clones or updates the delta-rs checkout |
+| `sync_harness_to_delta_rs.sh` | Copies benchmark crate and configs into the checkout |
+| `bench.sh` | Generates fixtures and runs benchmark suites |
+| `compare_branch.sh` | Runs benchmarks against two revisions and compares results |
 
 ## Prerequisites
 
@@ -104,20 +104,29 @@ This creates Delta tables under `fixtures/sf1/` including narrow sales tables, p
 ./scripts/bench.sh run \
   --suite all \
   --runner all \
+  --lane smoke \
   --dataset-id tiny_smoke \
   --warmup 1 \
   --iters 5 \
   --label local
 ```
 
-This runs every benchmark suite (scan, write, merge, delete_update, metadata, optimize_vacuum, concurrency, tpcds, interop_py) using both Rust and Python runners. Each case gets 1 warmup iteration (not measured) followed by 5 measured iterations.
+This runs the smoke lane across every benchmark suite (scan, write, merge, delete_update, metadata, optimize_vacuum, tpcds, interop_py) using both Rust and Python runners. Smoke runs are validation-oriented: the wrapper defaults to `--lane smoke`, and the harness collapses them to a single non-performance iteration.
+
+If you want trusted semantic post-state validation for the stateful Rust suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`), switch to the correctness lane:
+
+```bash
+./scripts/bench.sh run --suite write --runner rust --lane correctness --dataset-id tiny_smoke --label assert-smoke
+```
+
+If you switch those same suites to `--lane macro`, the workload still runs, but the result is marked validation-only (`perf_valid=false`) so compare/reporting will not treat it as trusted perf evidence.
 
 ### Step 3: Read the output
 
 You should see two things:
 
 1. **Terminal summary table** showing each case with its median time, status, and key metrics.
-2. **JSON result files** at `results/local/<suite>.json` containing full schema v2 results with per-sample timings and metrics.
+2. **JSON result files** at `results/local/<suite>.json` containing full schema v4 results with lane, compatibility identity, and per-run summaries.
 
 The JSON files are the primary output. They include context metadata (host, git SHA, timestamp), per-case outcomes, and per-sample metrics like `rows_processed`, `bytes_processed`, and timing statistics. See [reference.md](reference.md) for the complete schema.
 
@@ -127,13 +136,13 @@ To suppress the terminal table, pass `--no-summary-table`. Rust compiler warning
 
 Each dataset ID controls which fixtures are generated and at what scale. The seed ensures deterministic data regardless of when or where you run it.
 
-| Dataset ID         | Scale            | Description                                                                                  |
-| ------------------ | ---------------- | -------------------------------------------------------------------------------------------- |
-| `tiny_smoke`       | sf1 (10K rows)   | Minimal smoke test. Fast to generate, good for validating your setup.                        |
-| `medium_selective` | sf10 (100K rows) | Realistic workloads with selective query patterns.                                           |
-| `small_files`      | sf1 (10K rows)   | Generates many small files for optimize/vacuum testing.                                      |
-| `many_versions`    | sf1 (10K rows)   | Creates 12 commits to build a version history for time-travel tests.                         |
-| `tpcds_duckdb`     | sf1 (10K rows)   | TPC-DS `store_sales` table sourced from DuckDB. Requires `python3` and `pip install duckdb`. |
+| Dataset ID | Scale | Description |
+|---|---|---|
+| `tiny_smoke` | sf1 (10K rows) | Minimal smoke test. Fast to generate, good for validating your setup. |
+| `medium_selective` | sf10 (100K rows) | Realistic workloads with selective query patterns. |
+| `small_files` | sf1 (10K rows) | Generates many small files for optimize/vacuum testing. |
+| `many_versions` | sf1 (10K rows) | Creates 12 commits to build a version history for time-travel tests. |
+| `tpcds_duckdb` | sf1 (10K rows) | TPC-DS `store_sales` table sourced from DuckDB. Requires `python3` and `pip install duckdb`. |
 
 See [reference.md](reference.md#datasets-and-scales) for scale factors, fixture profiles, and fixture table details.
 
@@ -156,8 +165,9 @@ For benchmarking against remote storage, pass `--storage-backend s3` with the re
   --storage-option AWS_REGION=us-east-1
 
 ./scripts/bench.sh run \
-  --suite all \
+  --suite scan \
   --runner all \
+  --lane macro \
   --dataset-id medium_selective \
   --warmup 1 \
   --iters 2 \
@@ -169,19 +179,19 @@ For benchmarking against remote storage, pass `--storage-backend s3` with the re
 
 Backend configuration can also be set through environment variables or backend profiles:
 
-| Variable                | Description                        |
-| ----------------------- | ---------------------------------- |
-| `BENCH_STORAGE_BACKEND` | `local` or `s3`                    |
-| `BENCH_STORAGE_OPTIONS` | Multi-line `KEY=VALUE` pairs       |
+| Variable | Description |
+|---|---|
+| `BENCH_STORAGE_BACKEND` | `local` or `s3` |
+| `BENCH_STORAGE_OPTIONS` | Multi-line `KEY=VALUE` pairs |
 | `BENCH_BACKEND_PROFILE` | Profile name from `backends/*.env` |
-| `BENCH_RUNNER_MODE`     | `rust`, `python`, or `all`         |
+| `BENCH_RUNNER_MODE` | `rust`, `python`, or `all` |
 
 Notes:
-
 - The `--storage-option table_root=...` flag is required for non-local backends.
 - Local fixture cache (`fixtures/<scale>/rows.jsonl`, `fixtures/<scale>/manifest.json`) is unchanged regardless of backend.
 - The `write` suite currently supports only local storage.
 - The `delete_update` suite seeds isolated remote tables per iteration to keep DML runs independent.
+- Automated self-hosted perf workflows are narrower than local usage: they run `--lane macro` on curated `scan` cases only.
 
 ## Cleanup
 
@@ -201,14 +211,14 @@ Apply targeted cleanup:
 ./scripts/cleanup_local.sh --apply --delta-rs-under-test
 ```
 
-| Flag                    | What it targets                                        |
-| ----------------------- | ------------------------------------------------------ |
-| `--results`             | JSON result files under `results/`                     |
-| `--fixtures`            | Generated fixture data under `fixtures/`               |
-| `--delta-rs-under-test` | The managed delta-rs checkout                          |
-| `--keep-last N`         | Retain the N most recent result sets                   |
-| `--older-than-days N`   | Only remove items older than N days                    |
-| `--allow-outside-root`  | Allow cleanup of results stored outside this repo root |
+| Flag | What it targets |
+|---|---|
+| `--results` | JSON result files under `results/` |
+| `--fixtures` | Generated fixture data under `fixtures/` |
+| `--delta-rs-under-test` | The managed delta-rs checkout |
+| `--keep-last N` | Retain the N most recent result sets |
+| `--older-than-days N` | Only remove items older than N days |
+| `--allow-outside-root` | Allow cleanup of results stored outside this repo root |
 
 ## Troubleshooting
 
@@ -222,11 +232,11 @@ This diagnoses common issues: missing checkout, un-synced harness, Cargo resolut
 
 **Need help with a specific command:**
 
-| Script                  | Help command                             |
-| ----------------------- | ---------------------------------------- |
-| `bench.sh`              | `./scripts/bench.sh --help`              |
-| `compare_branch.sh`     | `./scripts/compare_branch.sh --help`     |
-| `cleanup_local.sh`      | `./scripts/cleanup_local.sh --help`      |
+| Script | Help command |
+|---|---|
+| `bench.sh` | `./scripts/bench.sh --help` |
+| `compare_branch.sh` | `./scripts/compare_branch.sh --help` |
+| `cleanup_local.sh` | `./scripts/cleanup_local.sh --help` |
 | `longitudinal_bench.sh` | `./scripts/longitudinal_bench.sh --help` |
 
 **Noisy Rust warnings in output:**

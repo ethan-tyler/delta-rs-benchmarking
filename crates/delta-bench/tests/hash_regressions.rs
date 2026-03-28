@@ -52,11 +52,11 @@ fn core_rust_manifest_uses_refreshed_regression_hashes() {
     );
     assert_eq!(
         exact_result_hash_for(&manifest, "update_all_rows_expr"),
-        "sha256:bb64c4072ca2b19a19a09b7be6d9ddaf8a932bfca82cf23a138b689e3877ae6c"
+        "sha256:6246db1cb0db81f5da5430ec2e67f808a2aaba1514d69e558785ac3bdf9160e9"
     );
     assert_eq!(
         exact_result_hash_for(&manifest, "metadata_load"),
-        "sha256:ffbb7ca210ef7182b2223849392af2f8cfa5e8320c7a9edf614c5613d5db5f14"
+        "sha256:5ab9790136cccb6f14961db20191b148f33dfa2134072075022ac619c95a7195"
     );
     assert_eq!(
         exact_result_hash_for(&manifest, "tpcds_q07"),

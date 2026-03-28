@@ -5,7 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
-deltalake-core = { version = "0.31.0", features = ["datafusion", "cloud"] }
+deltalake-core = { version = "0.31.1", features = ["datafusion", "cloud"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -21,3 +21,8 @@ serde_yaml = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = "0.5"
+
+[[bench]]
+name = "scan_phase_bench"
+harness = false

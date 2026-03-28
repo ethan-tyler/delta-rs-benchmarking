@@ -1,13 +1,164 @@
 use delta_bench::results::BenchRunResult;
 
 #[test]
-fn schema_v2_fields_parse_and_round_trip() {
+fn schema_v4_fields_parse_and_round_trip() {
     let payload = r#"
 {
-  "schema_version": 2,
+  "schema_version": 4,
   "context": {
-    "schema_version": 2,
-    "label": "v2-run",
+    "schema_version": 4,
+    "label": "v4-run",
+    "git_sha": "abc123",
+    "created_at": "2026-02-27T22:48:22.208400Z",
+    "host": "test-host",
+    "suite": "scan",
+    "scale": "sf1",
+    "iterations": 5,
+    "warmup": 1,
+    "timing_phase": "execute",
+    "dataset_id": "tiny_smoke",
+    "dataset_fingerprint": "sha256:dataset",
+    "runner": "rust",
+    "storage_backend": "local",
+    "benchmark_mode": "perf",
+    "lane": "macro",
+    "measurement_kind": "phase_breakdown",
+    "validation_level": "operational",
+    "run_id": "run-123",
+    "harness_revision": "harness-sha",
+    "fixture_recipe_hash": "sha256:recipe",
+    "fidelity_fingerprint": "sha256:fidelity"
+  },
+  "cases": [
+    {
+      "case": "scan_full_narrow",
+      "success": true,
+      "validation_passed": true,
+      "perf_valid": true,
+      "classification": "supported",
+      "suite_manifest_hash": "sha256:manifest",
+      "case_definition_hash": "sha256:case-def",
+      "compatibility_key": "sha256:compat",
+      "supports_decision": true,
+      "required_runs": 5,
+      "decision_threshold_pct": 5.0,
+      "decision_metric": "median",
+      "run_summary": {
+        "sample_count": 5,
+        "invalid_sample_count": 0,
+        "min_ms": 9.9,
+        "max_ms": 12.1,
+        "mean_ms": 10.5,
+        "median_ms": 10.2,
+        "p95_ms": 12.1,
+        "host_label": "test-host",
+        "fidelity_fingerprint": "sha256:fidelity"
+      },
+      "samples": [
+        {
+          "elapsed_ms": 9.9,
+          "rows": 12,
+          "bytes": null,
+          "metrics": {
+            "rows_processed": 12,
+            "bytes_processed": null,
+            "operations": 1,
+            "table_version": 2,
+            "files_scanned": 4,
+            "files_pruned": 1,
+            "bytes_scanned": 4096,
+            "scan_time_ms": 4,
+            "rewrite_time_ms": 5,
+            "peak_rss_mb": 256,
+            "cpu_time_ms": 16,
+            "bytes_read": 8192,
+            "bytes_written": 4096,
+            "files_touched": 9,
+            "files_skipped": 3,
+            "spill_bytes": 0,
+            "result_hash": "sha256:def",
+            "semantic_state_digest": "sha256:semantic",
+            "validation_summary": "rows=12"
+          }
+        }
+      ],
+      "elapsed_stats": {
+        "min_ms": 9.9,
+        "max_ms": 9.9,
+        "mean_ms": 9.9,
+        "median_ms": 9.9,
+        "stddev_ms": 0.0
+      },
+      "failure_kind": null,
+      "failure": null
+    }
+  ]
+}
+"#;
+
+    let parsed: BenchRunResult = serde_json::from_str(payload).expect("schema v4 should parse");
+    assert_eq!(parsed.schema_version, 4);
+    assert_eq!(parsed.context.schema_version, 4);
+    assert_eq!(parsed.context.lane.as_deref(), Some("macro"));
+    assert_eq!(
+        parsed.context.measurement_kind.as_deref(),
+        Some("phase_breakdown")
+    );
+    assert_eq!(
+        parsed.context.validation_level.as_deref(),
+        Some("operational")
+    );
+    assert_eq!(parsed.context.run_id.as_deref(), Some("run-123"));
+    assert_eq!(
+        parsed.context.harness_revision.as_deref(),
+        Some("harness-sha")
+    );
+    assert_eq!(
+        parsed.context.fixture_recipe_hash.as_deref(),
+        Some("sha256:recipe")
+    );
+    assert_eq!(
+        parsed.context.fidelity_fingerprint.as_deref(),
+        Some("sha256:fidelity")
+    );
+
+    let case = &parsed.cases[0];
+    assert_eq!(case.suite_manifest_hash.as_deref(), Some("sha256:manifest"));
+    assert_eq!(
+        case.case_definition_hash.as_deref(),
+        Some("sha256:case-def")
+    );
+    assert_eq!(case.compatibility_key.as_deref(), Some("sha256:compat"));
+    assert_eq!(case.supports_decision, Some(true));
+    assert_eq!(case.required_runs, Some(5));
+    assert_eq!(case.decision_threshold_pct, Some(5.0));
+    assert_eq!(case.decision_metric.as_deref(), Some("median"));
+    let summary = case.run_summary.as_ref().expect("run summary");
+    assert_eq!(summary.sample_count, 5);
+    assert_eq!(summary.invalid_sample_count, 0);
+    assert_eq!(summary.median_ms, Some(10.2));
+    let metrics = case.samples[0].metrics.as_ref().expect("metrics");
+    assert_eq!(
+        metrics.semantic_state_digest.as_deref(),
+        Some("sha256:semantic")
+    );
+    assert_eq!(metrics.validation_summary.as_deref(), Some("rows=12"));
+
+    let serialized = serde_json::to_string(&parsed).expect("serialize round-trip");
+    let reparsed: BenchRunResult =
+        serde_json::from_str(&serialized).expect("reparse round-trip payload");
+    assert_eq!(reparsed.schema_version, 4);
+    assert_eq!(reparsed.context.schema_version, 4);
+}
+
+#[test]
+fn schema_v3_fields_parse_and_round_trip() {
+    let payload = r#"
+{
+  "schema_version": 3,
+  "context": {
+    "schema_version": 3,
+    "label": "v3-run",
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
     "host": "test-host",
@@ -24,6 +175,8 @@ fn schema_v2_fields_parse_and_round_trip() {
     {
       "case": "merge_upsert_10pct",
       "success": true,
+      "validation_passed": true,
+      "perf_valid": true,
       "classification": "supported",
       "samples": [
         {
@@ -51,16 +204,28 @@ fn schema_v2_fields_parse_and_round_trip() {
           }
         }
       ],
+      "elapsed_stats": {
+        "min_ms": 9.9,
+        "max_ms": 9.9,
+        "mean_ms": 9.9,
+        "median_ms": 9.9,
+        "stddev_ms": 0.0
+      },
+      "failure_kind": null,
       "failure": null
     }
   ]
 }
 "#;
 
-    let parsed: BenchRunResult = serde_json::from_str(payload).expect("schema v2 should parse");
-    assert_eq!(parsed.schema_version, 2);
-    assert_eq!(parsed.context.schema_version, 2);
+    let parsed: BenchRunResult = serde_json::from_str(payload).expect("schema v3 should parse");
+    assert_eq!(parsed.schema_version, 3);
+    assert_eq!(parsed.context.schema_version, 3);
     assert_eq!(parsed.context.dataset_id.as_deref(), Some("small_files"));
+    assert_eq!(
+        parsed.context.dataset_fingerprint.as_deref(),
+        Some("sha256:abc")
+    );
     assert_eq!(parsed.context.runner.as_deref(), Some("rust"));
     assert_eq!(
         parsed.context.backend_profile.as_deref(),
@@ -68,6 +233,9 @@ fn schema_v2_fields_parse_and_round_trip() {
     );
 
     assert_eq!(parsed.cases[0].classification, "supported");
+    assert!(parsed.cases[0].validation_passed);
+    assert!(parsed.cases[0].perf_valid);
+    assert!(parsed.cases[0].failure_kind.is_none());
 
     let metrics = parsed.cases[0].samples[0]
         .metrics
@@ -85,17 +253,17 @@ fn schema_v2_fields_parse_and_round_trip() {
     let serialized = serde_json::to_string(&parsed).expect("serialize round-trip");
     let reparsed: BenchRunResult =
         serde_json::from_str(&serialized).expect("reparse round-trip payload");
-    assert_eq!(reparsed.schema_version, 2);
-    assert_eq!(reparsed.context.schema_version, 2);
+    assert_eq!(reparsed.schema_version, 3);
+    assert_eq!(reparsed.context.schema_version, 3);
 }
 
 #[test]
-fn schema_v1_payload_is_rejected() {
+fn schema_v2_payload_is_rejected() {
     let payload = r#"
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "context": {
-    "schema_version": 1,
+    "schema_version": 2,
     "label": "legacy-run",
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
@@ -109,7 +277,7 @@ fn schema_v1_payload_is_rejected() {
 }
 "#;
 
-    let err = serde_json::from_str::<BenchRunResult>(payload).expect_err("v1 must fail");
+    let err = serde_json::from_str::<BenchRunResult>(payload).expect_err("v2 must fail");
     assert!(
         err.to_string().contains("schema_version"),
         "unexpected error: {err}"
@@ -120,10 +288,10 @@ fn schema_v1_payload_is_rejected() {
 fn missing_case_classification_is_rejected() {
     let payload = r#"
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "context": {
-    "schema_version": 2,
-    "label": "v2-run",
+    "schema_version": 3,
+    "label": "v3-run",
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
     "host": "test-host",
@@ -136,6 +304,8 @@ fn missing_case_classification_is_rejected() {
     {
       "case": "merge_upsert_10pct",
       "success": true,
+      "validation_passed": true,
+      "perf_valid": true,
       "samples": [],
       "failure": null
     }
@@ -155,10 +325,10 @@ fn missing_case_classification_is_rejected() {
 fn unknown_case_classification_is_rejected() {
     let payload = r#"
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "context": {
-    "schema_version": 2,
-    "label": "v2-run",
+    "schema_version": 3,
+    "label": "v3-run",
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
     "host": "test-host",
@@ -171,6 +341,8 @@ fn unknown_case_classification_is_rejected() {
     {
       "case": "merge_upsert_10pct",
       "success": true,
+      "validation_passed": true,
+      "perf_valid": true,
       "classification": "experimental",
       "samples": [],
       "failure": null
@@ -188,13 +360,13 @@ fn unknown_case_classification_is_rejected() {
 }
 
 #[test]
-fn schema_v2_elapsed_stats_parse_when_present() {
+fn schema_v3_elapsed_stats_parse_when_present() {
     let payload = r#"
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "context": {
-    "schema_version": 2,
-    "label": "v2-run",
+    "schema_version": 3,
+    "label": "v3-run",
     "git_sha": "abc123",
     "created_at": "2026-02-27T22:48:22.208400Z",
     "host": "test-host",
@@ -207,6 +379,8 @@ fn schema_v2_elapsed_stats_parse_when_present() {
     {
       "case": "scan_full_narrow",
       "success": true,
+      "validation_passed": true,
+      "perf_valid": true,
       "classification": "supported",
       "samples": [
         {
@@ -231,7 +405,7 @@ fn schema_v2_elapsed_stats_parse_when_present() {
 "#;
 
     let parsed: BenchRunResult =
-        serde_json::from_str(payload).expect("schema v2 with elapsed_stats should parse");
+        serde_json::from_str(payload).expect("schema v3 with elapsed_stats should parse");
     let elapsed_stats = parsed.cases[0]
         .elapsed_stats
         .as_ref()

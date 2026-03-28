@@ -7,12 +7,14 @@ use serde_json::json;
 use url::Url;
 
 use super::{fixture_error_cases, into_case_result};
+use crate::cli::BenchmarkLane;
 use crate::data::fixtures::{load_rows, rows_to_batch};
 use crate::error::{BenchError, BenchResult};
 use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics};
 use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
+use crate::validation::{lane_requires_semantic_validation, validate_table_state};
 
 pub fn case_names() -> Vec<String> {
     vec![
@@ -30,6 +32,7 @@ struct WriteIterationSetup {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    lane: BenchmarkLane,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -55,7 +58,7 @@ pub async fn run(
         |setup| {
             let rows = Arc::clone(&rows);
             async move {
-                run_append_case(setup, rows.as_slice(), 128)
+                run_append_case(setup, rows.as_slice(), 128, lane)
                     .await
                     .map_err(|e| e.to_string())
             }
@@ -72,7 +75,7 @@ pub async fn run(
         |setup| {
             let rows = Arc::clone(&rows);
             async move {
-                run_append_case(setup, rows.as_slice(), 4096)
+                run_append_case(setup, rows.as_slice(), 4096, lane)
                     .await
                     .map_err(|e| e.to_string())
             }
@@ -89,7 +92,7 @@ pub async fn run(
         |setup| {
             let rows = Arc::clone(&rows);
             async move {
-                run_overwrite_case(setup, rows.as_slice())
+                run_overwrite_case(setup, rows.as_slice(), lane)
                     .await
                     .map_err(|e| e.to_string())
             }
@@ -117,6 +120,7 @@ async fn run_append_case(
     setup: WriteIterationSetup,
     rows: &[crate::data::datasets::NarrowSaleRow],
     chunk: usize,
+    lane: BenchmarkLane,
 ) -> BenchResult<SampleMetrics> {
     let mut operations = 0_u64;
     let mut table = setup.table;
@@ -138,11 +142,19 @@ async fn run_append_case(
         "operations": operations,
         "table_version": table_version,
     }))?;
-    let schema_hash = hash_json(&json!([
+    let mut schema_hash = hash_json(&json!([
         "rows_processed:u64",
         "operations:u64",
         "table_version:u64",
     ]))?;
+    let mut semantic_state_digest = None;
+    let mut validation_summary = None;
+    if lane_requires_semantic_validation(lane) {
+        let validation = validate_table_state(&table).await?;
+        schema_hash = validation.schema_hash;
+        semantic_state_digest = Some(validation.digest);
+        validation_summary = Some(validation.summary);
+    }
 
     Ok(SampleMetrics::base(
         Some(rows.len() as u64),
@@ -160,12 +172,15 @@ async fn run_append_case(
         spill_bytes: None,
         result_hash: Some(result_hash),
         schema_hash: Some(schema_hash),
+        semantic_state_digest,
+        validation_summary,
     }))
 }
 
 async fn run_overwrite_case(
     setup: WriteIterationSetup,
     rows: &[crate::data::datasets::NarrowSaleRow],
+    lane: BenchmarkLane,
 ) -> BenchResult<SampleMetrics> {
     let mut table = setup.table;
     let _keep_temp = setup._temp;
@@ -188,11 +203,19 @@ async fn run_overwrite_case(
         "operations": 2_u64,
         "table_version": table_version,
     }))?;
-    let schema_hash = hash_json(&json!([
+    let mut schema_hash = hash_json(&json!([
         "rows_processed:u64",
         "operations:u64",
         "table_version:u64",
     ]))?;
+    let mut semantic_state_digest = None;
+    let mut validation_summary = None;
+    if lane_requires_semantic_validation(lane) {
+        let validation = validate_table_state(&table).await?;
+        schema_hash = validation.schema_hash;
+        semantic_state_digest = Some(validation.digest);
+        validation_summary = Some(validation.summary);
+    }
 
     Ok(
         SampleMetrics::base(Some((rows.len() as u64) * 2), None, Some(2), table_version)
@@ -206,6 +229,8 @@ async fn run_overwrite_case(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest,
+                validation_summary,
             }),
     )
 }

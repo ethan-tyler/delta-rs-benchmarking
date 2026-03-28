@@ -14,6 +14,7 @@ from typing import Callable, Iterable, Optional
 
 
 SAFE_TOKEN = re.compile(r"^[A-Za-z0-9._-]+$")
+VALID_LANES = {"smoke", "correctness", "macro"}
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class MatrixRunConfig:
     timeout_seconds: int
     max_retries: int
     state_path: Path | str
+    lane: str = "macro"
     fixtures_dir: Path | str = "fixtures"
     results_dir: Path | str = "results"
     warmup: int = 1
@@ -121,6 +123,8 @@ def run_matrix(
         raise ValueError("warmup must be >= 0 and iterations must be > 0")
     if config.max_parallel <= 0:
         raise ValueError("max_parallel must be > 0")
+    if config.lane not in VALID_LANES:
+        raise ValueError("lane must be one of: " + ", ".join(sorted(VALID_LANES)))
     if config.max_load_per_cpu is not None and config.max_load_per_cpu <= 0:
         raise ValueError("max_load_per_cpu must be > 0 when configured")
     if config.load_check_interval_seconds <= 0:
@@ -155,9 +159,9 @@ def run_matrix(
     if not pending:
         return state
 
-    in_flight: dict[
-        concurrent.futures.Future, tuple[str, MatrixArtifact, str, str]
-    ] = {}
+    in_flight: dict[concurrent.futures.Future, tuple[str, MatrixArtifact, str, str]] = (
+        {}
+    )
     next_idx = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=config.max_parallel) as pool:
         while next_idx < len(pending) or in_flight:
@@ -193,6 +197,7 @@ def run_matrix(
                 "revision": artifact.revision,
                 "suite": suite,
                 "scale": scale,
+                "lane": config.lane,
                 "status": status,
                 "attempts": attempts,
                 "failure_reason": failure_reason,
@@ -223,6 +228,7 @@ def _matrix_state_config_fingerprint(config: MatrixRunConfig) -> dict[str, objec
     return {
         "suites": list(config.suites),
         "scales": list(config.scales),
+        "lane": config.lane,
         "warmup": config.warmup,
         "iterations": config.iterations,
         "fixtures_dir": str(config.fixtures_dir),
@@ -282,7 +288,12 @@ def _default_executor(
     if not artifact_binary.exists():
         return 1, f"artifact binary not found: {artifact_binary}"
 
-    label = matrix_result_label(config.label_prefix, artifact.revision, scale)
+    label = matrix_result_label(
+        config.label_prefix,
+        artifact.revision,
+        scale,
+        config.lane,
+    )
     cmd = [
         str(artifact_binary),
         "--fixtures-dir",
@@ -298,6 +309,8 @@ def _default_executor(
         scale,
         "--target",
         suite,
+        "--lane",
+        config.lane,
         "--warmup",
         str(config.warmup),
         "--iterations",
@@ -330,8 +343,16 @@ def _case_key(revision: str, suite: str, scale: str) -> str:
     return f"{revision}|{suite}|{scale}"
 
 
-def matrix_result_label(label_prefix: str, revision: str, scale: str) -> str:
-    return sanitize_label(f"{label_prefix}-{revision}-{scale}")
+def matrix_result_label(
+    label_prefix: str,
+    revision: str,
+    scale: str,
+    lane: str | None = None,
+) -> str:
+    parts = [label_prefix, revision, scale]
+    if lane:
+        parts.append(lane)
+    return sanitize_label("-".join(parts))
 
 
 def sanitize_label(value: str) -> str:

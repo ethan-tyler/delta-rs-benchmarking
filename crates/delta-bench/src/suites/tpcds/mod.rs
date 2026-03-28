@@ -5,22 +5,37 @@ pub mod sql_loader;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::cli::TimingPhase;
 use crate::error::BenchResult;
 use crate::fingerprint::{hash_arrow_schema, hash_record_batches_unordered};
 use crate::results::{
     CaseFailure, CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics,
+    FAILURE_KIND_EXECUTION_ERROR, FAILURE_KIND_UNSUPPORTED,
 };
-use crate::runner::{run_case_async_with_async_setup_custom_timing, CaseExecutionResult};
+use crate::runner::{
+    run_case_async_with_timing_phase, CaseExecutionResult, PhaseTiming, TimedSample,
+};
 use crate::storage::StorageConfig;
 use crate::suites::scan_metrics::extract_scan_metrics;
+use deltalake_core::arrow::record_batch::RecordBatch;
 use deltalake_core::datafusion::execution::context::TaskContext;
 use deltalake_core::datafusion::physical_plan::collect;
 use deltalake_core::datafusion::physical_plan::ExecutionPlan;
 use deltalake_core::datafusion::prelude::SessionContext;
 
+struct LoadedTpcdsQuery {
+    ctx: SessionContext,
+}
+
 struct PreparedTpcdsQuery {
     plan: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
+}
+
+struct ExecutedTpcdsQuery {
+    plan: Arc<dyn ExecutionPlan>,
+    batches: Vec<RecordBatch>,
+    execution_elapsed_ms: f64,
 }
 
 pub fn case_names() -> Vec<String> {
@@ -33,6 +48,7 @@ pub fn case_names() -> Vec<String> {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -41,6 +57,7 @@ pub async fn run(
     run_with_specs_and_sql_dir(
         fixtures_dir,
         scale,
+        timing_phase,
         warmup,
         iterations,
         storage,
@@ -53,6 +70,7 @@ pub async fn run(
 pub(crate) async fn run_with_specs_and_sql_dir(
     fixtures_dir: &Path,
     scale: &str,
+    timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -75,9 +93,21 @@ pub(crate) async fn run_with_specs_and_sql_dir(
                 out.push(CaseResult {
                     case: case_name,
                     success: false,
+                    validation_passed: false,
+                    perf_valid: false,
                     classification: "supported".to_string(),
                     samples: Vec::new(),
                     elapsed_stats: None,
+                    run_summary: None,
+                    run_summaries: None,
+                    suite_manifest_hash: None,
+                    case_definition_hash: None,
+                    compatibility_key: None,
+                    supports_decision: None,
+                    required_runs: None,
+                    decision_threshold_pct: None,
+                    decision_metric: None,
+                    failure_kind: Some(FAILURE_KIND_EXECUTION_ERROR.to_string()),
                     failure: Some(CaseFailure {
                         message: format!(
                             "failed to load SQL for enabled query {}: {}",
@@ -92,28 +122,43 @@ pub(crate) async fn run_with_specs_and_sql_dir(
         let fixture_root = fixtures_dir.to_path_buf();
         let scale = scale.to_string();
         let storage = storage.clone();
-        let result = run_case_async_with_async_setup_custom_timing(
-            &case_name,
-            warmup,
-            iterations,
-            || {
+        let result =
+            run_case_async_with_timing_phase(&case_name, warmup, iterations, timing_phase, || {
                 let sql = sql.clone();
                 let fixture_root = fixture_root.clone();
                 let scale = scale.clone();
                 let storage = storage.clone();
                 async move {
-                    prepare_query(&fixture_root, &scale, &storage, &sql)
+                    let load_start = std::time::Instant::now();
+                    let loaded = load_query_context(&fixture_root, &scale, &storage, &sql)
                         .await
-                        .map_err(|err| err.to_string())
+                        .map_err(|err| err.to_string())?;
+                    let load_elapsed_ms = load_start.elapsed().as_secs_f64() * 1000.0;
+
+                    let planning_start = std::time::Instant::now();
+                    let prepared = plan_loaded_query(loaded, &sql)
+                        .await
+                        .map_err(|err| err.to_string())?;
+                    let planning_elapsed_ms = planning_start.elapsed().as_secs_f64() * 1000.0;
+
+                    let executed = execute_prepared_query(prepared)
+                        .await
+                        .map_err(|err| err.to_string())?;
+                    let execution_elapsed_ms = executed.execution_elapsed_ms;
+                    let (metrics, validate_elapsed_ms) = validate_executed_query(executed)
+                        .await
+                        .map_err(|err| err.to_string())?;
+                    Ok::<TimedSample<SampleMetrics>, String>(TimedSample::new(
+                        metrics,
+                        PhaseTiming::default()
+                            .with_load_ms(load_elapsed_ms)
+                            .with_plan_ms(planning_elapsed_ms)
+                            .with_execute_ms(execution_elapsed_ms)
+                            .with_validate_ms(validate_elapsed_ms),
+                    ))
                 }
-            },
-            |prepared| async move {
-                execute_prepared_query(prepared)
-                    .await
-                    .map_err(|err| err.to_string())
-            },
-        )
-        .await;
+            })
+            .await;
         out.push(into_case_result(result));
     }
 
@@ -131,33 +176,51 @@ fn load_case_sql(spec: &catalog::TpcdsQuerySpec, sql_dir: &Path) -> BenchResult<
     Ok(query.sql)
 }
 
-async fn prepare_query(
+async fn load_query_context(
     fixtures_dir: &Path,
     scale: &str,
     storage: &StorageConfig,
     sql: &str,
-) -> BenchResult<PreparedTpcdsQuery> {
+) -> BenchResult<LoadedTpcdsQuery> {
     let ctx = SessionContext::new();
     registration::register_tables_for_sql(&ctx, fixtures_dir, scale, storage, sql).await?;
 
-    let df = ctx.sql(sql).await?;
+    Ok(LoadedTpcdsQuery { ctx })
+}
+
+async fn plan_loaded_query(loaded: LoadedTpcdsQuery, sql: &str) -> BenchResult<PreparedTpcdsQuery> {
+    let df = loaded.ctx.sql(sql).await?;
     let task_ctx = Arc::new(df.task_ctx());
     let plan = df.create_physical_plan().await?;
 
     Ok(PreparedTpcdsQuery { plan, task_ctx })
 }
 
-async fn execute_prepared_query(
-    prepared: PreparedTpcdsQuery,
-) -> BenchResult<(SampleMetrics, Option<f64>)> {
+async fn execute_prepared_query(prepared: PreparedTpcdsQuery) -> BenchResult<ExecutedTpcdsQuery> {
     let timed_start = std::time::Instant::now();
     let batches = collect(prepared.plan.clone(), prepared.task_ctx).await?;
     let elapsed_ms = timed_start.elapsed().as_secs_f64() * 1000.0;
 
-    let rows_processed = batches.iter().map(|batch| batch.num_rows() as u64).sum();
-    let scan = extract_scan_metrics(&prepared.plan);
-    let result_hash = hash_record_batches_unordered(&batches)?;
-    let schema_hash = hash_arrow_schema(prepared.plan.schema().as_ref())?;
+    Ok(ExecutedTpcdsQuery {
+        plan: prepared.plan,
+        batches,
+        execution_elapsed_ms: elapsed_ms,
+    })
+}
+
+async fn validate_executed_query(
+    executed: ExecutedTpcdsQuery,
+) -> BenchResult<(SampleMetrics, f64)> {
+    let validate_start = std::time::Instant::now();
+    let rows_processed = executed
+        .batches
+        .iter()
+        .map(|batch| batch.num_rows() as u64)
+        .sum();
+    let scan = extract_scan_metrics(&executed.plan);
+    let result_hash = hash_record_batches_unordered(&executed.batches)?;
+    let schema_hash = hash_arrow_schema(executed.plan.schema().as_ref())?;
+    let validate_elapsed_ms = validate_start.elapsed().as_secs_f64() * 1000.0;
 
     Ok((
         SampleMetrics::base(Some(rows_processed), None, None, None)
@@ -178,8 +241,10 @@ async fn execute_prepared_query(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest: None,
+                validation_summary: None,
             }),
-        Some(elapsed_ms),
+        validate_elapsed_ms,
     ))
 }
 
@@ -187,9 +252,21 @@ fn skipped_case_result(case: String, skip_reason: Option<&str>) -> CaseResult {
     CaseResult {
         case,
         success: false,
+        validation_passed: false,
+        perf_valid: false,
         classification: "supported".to_string(),
         samples: Vec::new(),
         elapsed_stats: None,
+        run_summary: None,
+        run_summaries: None,
+        suite_manifest_hash: None,
+        case_definition_hash: None,
+        compatibility_key: None,
+        supports_decision: None,
+        required_runs: None,
+        decision_threshold_pct: None,
+        decision_metric: None,
+        failure_kind: Some(FAILURE_KIND_UNSUPPORTED.to_string()),
         failure: Some(CaseFailure {
             message: format!(
                 "skipped: {}",
@@ -208,8 +285,10 @@ fn into_case_result(result: CaseExecutionResult) -> CaseResult {
 #[cfg(test)]
 mod tests {
     use super::{
-        catalog::TpcdsQuerySpec, execute_prepared_query, prepare_query, run_with_specs_and_sql_dir,
+        catalog::TpcdsQuerySpec, execute_prepared_query, load_query_context, plan_loaded_query,
+        run_with_specs_and_sql_dir, validate_executed_query,
     };
+    use crate::cli::TimingPhase;
     use crate::data::fixtures::generate_fixtures;
     use crate::storage::StorageConfig;
     use crate::suites::scan_metrics::sum_pruned_metrics;
@@ -237,19 +316,26 @@ mod tests {
             .await
             .expect("generate fixtures");
 
-        let prepared = prepare_query(
+        let loaded = load_query_context(
             temp.path(),
             "sf1",
             &storage,
             "SELECT COUNT(*) FROM store_sales",
         )
         .await
-        .expect("prepare query");
-        let (metrics, elapsed_override) = execute_prepared_query(prepared)
+        .expect("load query context");
+        let prepared = plan_loaded_query(loaded, "SELECT COUNT(*) FROM store_sales")
+            .await
+            .expect("plan query");
+        let executed = execute_prepared_query(prepared)
             .await
             .expect("execute query");
+        let elapsed_ms = executed.execution_elapsed_ms;
+        let (metrics, _) = validate_executed_query(executed)
+            .await
+            .expect("validate query");
 
-        assert!(elapsed_override.is_some());
+        assert!(elapsed_ms > 0.0);
         assert!(metrics.rows_processed.is_some());
         assert!(metrics.rows_processed.unwrap_or(0) > 0);
     }
@@ -269,6 +355,7 @@ mod tests {
         let result = run_with_specs_and_sql_dir(
             temp_fixtures.path(),
             "sf1",
+            TimingPhase::Execute,
             0,
             1,
             &storage,

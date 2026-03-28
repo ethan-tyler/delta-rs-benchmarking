@@ -2,12 +2,19 @@ use std::fs;
 
 use chrono::Utc;
 use clap::Parser;
+use serde::Serialize;
 
-use delta_bench::cli::{parse_storage_options, validate_label, Args, Command, RunnerMode};
-use delta_bench::data::fixtures::{generate_fixtures_with_profile, FixtureProfile};
-use delta_bench::error::BenchResult;
+use delta_bench::cli::{
+    parse_storage_options, validate_label, Args, BenchmarkLane, BenchmarkMode, Command, RunnerMode,
+};
+use delta_bench::data::fixtures::{generate_fixtures_with_profile, load_manifest, FixtureProfile};
+use delta_bench::error::{BenchError, BenchResult};
+use delta_bench::fingerprint::hash_json;
 use delta_bench::manifests::{ensure_required_manifests_exist, DatasetId};
-use delta_bench::results::{render_run_summary_table, BenchContext, BenchRunResult};
+use delta_bench::results::{
+    build_run_summary, render_run_summary_table, BenchContext, BenchRunResult,
+    RESULT_SCHEMA_VERSION,
+};
 use delta_bench::storage::{load_backend_profile_options, StorageConfig};
 use delta_bench::suites::{
     apply_dataset_assertion_policy, list_targets, plan_run_cases, run_planned_cases,
@@ -46,8 +53,9 @@ async fn main() -> BenchResult<()> {
             seed,
             force,
         } => {
-            let effective_scale = resolve_scale(&scale, dataset_id.as_deref())?;
-            let profile = resolve_fixture_profile(dataset_id.as_deref())?;
+            let dataset = parse_dataset(dataset_id.as_deref())?;
+            let effective_scale = resolve_scale(&scale, dataset)?;
+            let profile = resolve_fixture_profile(dataset)?;
             generate_fixtures_with_profile(
                 &args.fixtures_dir,
                 effective_scale.as_str(),
@@ -69,39 +77,82 @@ async fn main() -> BenchResult<()> {
             target,
             case_filter,
             runner,
+            benchmark_mode,
+            lane,
+            timing_phase,
             warmup,
             iterations,
             no_summary_table,
         } => {
-            let effective_scale = resolve_scale(&scale, dataset_id.as_deref())?;
+            let dataset = parse_dataset(dataset_id.as_deref())?;
+            let effective_scale = resolve_scale(&scale, dataset)?;
             validate_label(&args.label)?;
             fs::create_dir_all(&args.results_dir)?;
             let mut run_plan = plan_run_cases(&target, runner, case_filter.as_deref())?;
-            apply_dataset_assertion_policy(&mut run_plan, dataset_id.as_deref());
+            apply_dataset_assertion_policy(&mut run_plan, dataset);
+            let effective_warmup = if benchmark_mode == BenchmarkMode::Assert
+                || lane == BenchmarkLane::Correctness
+                || lane == BenchmarkLane::Smoke
+            {
+                0
+            } else {
+                warmup
+            };
+            let effective_iterations = if benchmark_mode == BenchmarkMode::Assert
+                || lane == BenchmarkLane::Correctness
+                || lane == BenchmarkLane::Smoke
+            {
+                1
+            } else {
+                iterations
+            };
             let cases = run_planned_cases(
                 &args.fixtures_dir,
                 &run_plan,
                 effective_scale.as_str(),
-                warmup,
-                iterations,
+                lane,
+                timing_phase,
+                effective_warmup,
+                effective_iterations,
                 &storage,
             )
             .await?;
+            let fixture_manifest = load_manifest(&args.fixtures_dir, effective_scale.as_str())?;
             let fidelity = benchmark_fidelity_info(&FidelityEnvOverrides::from_env());
-
+            let measurement_kind = measurement_kind_for_target(&target);
+            let validation_level = validation_level_for_run_plan(&run_plan, lane);
+            let fidelity_fingerprint = compute_fidelity_fingerprint(&fidelity)?;
+            let run_id = compute_run_id(
+                &args.label,
+                args.git_sha.as_deref(),
+                &target,
+                &effective_scale,
+                lane.as_str(),
+                timing_phase.as_str(),
+            )?;
             let context = BenchContext {
-                schema_version: 2,
+                schema_version: RESULT_SCHEMA_VERSION,
                 label: args.label.clone(),
                 git_sha: args.git_sha.clone(),
                 created_at: Utc::now(),
                 host: host_name(),
                 suite: target.clone(),
                 scale: effective_scale.clone(),
-                iterations,
-                warmup,
+                iterations: effective_iterations,
+                warmup: effective_warmup,
+                timing_phase: Some(timing_phase.as_str().to_string()),
                 dataset_id: dataset_id.clone(),
-                dataset_fingerprint: None,
+                dataset_fingerprint: Some(fixture_manifest.dataset_fingerprint.clone()),
                 runner: Some(runner.as_str().to_string()),
+                storage_backend: Some(args.storage_backend.as_str().to_string()),
+                benchmark_mode: Some(benchmark_mode.as_str().to_string()),
+                lane: Some(lane.as_str().to_string()),
+                measurement_kind: Some(measurement_kind.to_string()),
+                validation_level: Some(validation_level.to_string()),
+                run_id: Some(run_id),
+                harness_revision: args.harness_revision.clone(),
+                fixture_recipe_hash: Some(fixture_manifest.fixture_recipe_hash.clone()),
+                fidelity_fingerprint: Some(fidelity_fingerprint.clone()),
                 backend_profile: args.backend_profile.clone(),
                 image_version: fidelity.image_version,
                 hardening_profile_id: fidelity.hardening_profile_id,
@@ -116,8 +167,10 @@ async fn main() -> BenchResult<()> {
                 run_mode: fidelity.run_mode,
                 maintenance_window_id: fidelity.maintenance_window_id,
             };
+            let cases = finalize_cases(cases, &run_plan, benchmark_mode, lane, &context)?;
+
             let output = BenchRunResult {
-                schema_version: 2,
+                schema_version: RESULT_SCHEMA_VERSION,
                 context,
                 cases,
             };
@@ -275,19 +328,17 @@ async fn main() -> BenchResult<()> {
     Ok(())
 }
 
-fn resolve_scale(scale: &str, dataset_id: Option<&str>) -> BenchResult<String> {
-    let Some(dataset_id) = dataset_id else {
+fn resolve_scale(scale: &str, dataset: Option<DatasetId>) -> BenchResult<String> {
+    let Some(dataset) = dataset else {
         return Ok(scale.to_string());
     };
-    let dataset = DatasetId::parse(dataset_id)?;
     Ok(dataset.scale().to_string())
 }
 
-fn resolve_fixture_profile(dataset_id: Option<&str>) -> BenchResult<FixtureProfile> {
-    let Some(dataset_id) = dataset_id else {
+fn resolve_fixture_profile(dataset: Option<DatasetId>) -> BenchResult<FixtureProfile> {
+    let Some(dataset) = dataset else {
         return Ok(FixtureProfile::Standard);
     };
-    let dataset = DatasetId::parse(dataset_id)?;
     Ok(match dataset.fixture_profile() {
         "many_versions" => FixtureProfile::ManyVersions,
         "tpcds_duckdb" => FixtureProfile::TpcdsDuckdb,
@@ -295,6 +346,360 @@ fn resolve_fixture_profile(dataset_id: Option<&str>) -> BenchResult<FixtureProfi
     })
 }
 
+fn parse_dataset(dataset_id: Option<&str>) -> BenchResult<Option<DatasetId>> {
+    dataset_id.map(DatasetId::parse).transpose()
+}
+
+fn finalize_cases(
+    mut cases: Vec<delta_bench::results::CaseResult>,
+    plan: &[delta_bench::suites::PlannedCase],
+    benchmark_mode: BenchmarkMode,
+    lane: BenchmarkLane,
+    context: &BenchContext,
+) -> BenchResult<Vec<delta_bench::results::CaseResult>> {
+    for (case, planned) in cases.iter_mut().zip(plan.iter()) {
+        case.run_summary = Some(build_run_summary(
+            &case.samples,
+            Some(context.host.as_str()),
+            context.fidelity_fingerprint.as_deref(),
+        ));
+        case.suite_manifest_hash = Some(planned.suite_manifest_hash.clone());
+        case.case_definition_hash = Some(planned.case_definition_hash.clone());
+        case.supports_decision = Some(planned.supports_decision);
+        case.required_runs = planned.required_runs;
+        case.decision_threshold_pct = planned.decision_threshold_pct;
+        case.decision_metric = planned.decision_metric.clone();
+        case.compatibility_key =
+            compute_case_compatibility_key(planned, lane, context).map(Some)?;
+        if benchmark_mode == BenchmarkMode::Assert
+            || lane == BenchmarkLane::Correctness
+            || lane == BenchmarkLane::Smoke
+            || (lane == BenchmarkLane::Macro && planned.lane == BenchmarkLane::Correctness.as_str())
+        {
+            case.perf_valid = false;
+            case.elapsed_stats = None;
+        }
+    }
+    Ok(cases)
+}
+
+fn measurement_kind_for_target(target: &str) -> &'static str {
+    if matches!(target, "scan" | "tpcds") {
+        "phase_breakdown"
+    } else {
+        "end_to_end"
+    }
+}
+
+fn validation_level_for_run_plan(
+    plan: &[delta_bench::suites::PlannedCase],
+    lane: BenchmarkLane,
+) -> &'static str {
+    if lane != BenchmarkLane::Correctness {
+        return "operational";
+    }
+    if plan.iter().all(case_supports_semantic_validation) {
+        "semantic"
+    } else {
+        "operational"
+    }
+}
+
+fn case_supports_semantic_validation(case: &delta_bench::suites::PlannedCase) -> bool {
+    matches!(
+        case.target.as_str(),
+        "write" | "delete_update" | "merge" | "metadata" | "optimize_vacuum"
+    )
+}
+
+fn compute_fidelity_fingerprint(
+    fidelity: &delta_bench::system::BenchmarkFidelityInfo,
+) -> BenchResult<String> {
+    hash_json(&serde_json::json!({
+        "image_version": fidelity.image_version,
+        "hardening_profile_id": fidelity.hardening_profile_id,
+        "hardening_profile_sha256": fidelity.hardening_profile_sha256,
+        "cpu_model": fidelity.cpu_model,
+        "cpu_microcode": fidelity.cpu_microcode,
+        "kernel": fidelity.kernel,
+        "boot_params": fidelity.boot_params,
+        "cpu_steal_pct": fidelity.cpu_steal_pct,
+        "numa_topology": fidelity.numa_topology,
+        "egress_policy_sha256": fidelity.egress_policy_sha256,
+        "run_mode": fidelity.run_mode,
+        "maintenance_window_id": fidelity.maintenance_window_id,
+    }))
+}
+
+fn compute_run_id(
+    label: &str,
+    git_sha: Option<&str>,
+    suite: &str,
+    scale: &str,
+    lane: &str,
+    timing_phase: &str,
+) -> BenchResult<String> {
+    hash_json(&serde_json::json!({
+        "label": label,
+        "git_sha": git_sha,
+        "suite": suite,
+        "scale": scale,
+        "lane": lane,
+        "timing_phase": timing_phase,
+        "created_at": Utc::now().to_rfc3339(),
+    }))
+}
+
+fn compute_case_compatibility_key(
+    planned: &delta_bench::suites::PlannedCase,
+    lane: BenchmarkLane,
+    context: &BenchContext,
+) -> BenchResult<String> {
+    if planned
+        .decision_threshold_pct
+        .is_some_and(|threshold| !threshold.is_finite())
+    {
+        return Err(BenchError::InvalidArgument(format!(
+            "decision_threshold_pct must be finite for compatibility_key generation (case='{}')",
+            planned.id
+        )));
+    }
+
+    #[derive(Serialize)]
+    struct CompatibilityKeyInput<'a> {
+        suite_scope: &'a str,
+        target: &'a str,
+        runner: Option<&'a str>,
+        timing_phase: Option<&'a str>,
+        dataset_id: Option<&'a str>,
+        dataset_fingerprint: Option<&'a str>,
+        scale: &'a str,
+        storage_backend: Option<&'a str>,
+        backend_profile: Option<&'a str>,
+        lane: &'a str,
+        measurement_kind: Option<&'a str>,
+        validation_level: Option<&'a str>,
+        harness_revision: Option<&'a str>,
+        fixture_recipe_hash: Option<&'a str>,
+        fidelity_fingerprint: Option<&'a str>,
+        planned_lane: &'a str,
+        suite_manifest_hash: &'a str,
+        case_definition_hash: &'a str,
+        supports_decision: bool,
+        required_runs: Option<u32>,
+        decision_threshold_pct: Option<f64>,
+        decision_metric: Option<&'a str>,
+    }
+
+    hash_json(&CompatibilityKeyInput {
+        suite_scope: context.suite.as_str(),
+        target: planned.target.as_str(),
+        runner: context.runner.as_deref(),
+        timing_phase: context.timing_phase.as_deref(),
+        dataset_id: context.dataset_id.as_deref(),
+        dataset_fingerprint: context.dataset_fingerprint.as_deref(),
+        scale: context.scale.as_str(),
+        storage_backend: context.storage_backend.as_deref(),
+        backend_profile: context.backend_profile.as_deref(),
+        lane: lane.as_str(),
+        measurement_kind: context.measurement_kind.as_deref(),
+        validation_level: context.validation_level.as_deref(),
+        harness_revision: context.harness_revision.as_deref(),
+        fixture_recipe_hash: context.fixture_recipe_hash.as_deref(),
+        fidelity_fingerprint: context.fidelity_fingerprint.as_deref(),
+        planned_lane: planned.lane.as_str(),
+        suite_manifest_hash: planned.suite_manifest_hash.as_str(),
+        case_definition_hash: planned.case_definition_hash.as_str(),
+        supports_decision: planned.supports_decision,
+        required_runs: planned.required_runs,
+        decision_threshold_pct: planned.decision_threshold_pct,
+        decision_metric: planned.decision_metric.as_deref(),
+    })
+}
+
 fn command_requires_manifest_preflight(command: &Command) -> bool {
     matches!(command, Command::List { .. } | Command::Run { .. })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_case_compatibility_key, finalize_cases};
+    use chrono::Utc;
+    use delta_bench::cli::{BenchmarkLane, BenchmarkMode};
+    use delta_bench::error::BenchError;
+    use delta_bench::results::{BenchContext, CaseResult, ElapsedStats, IterationSample};
+    use delta_bench::suites::PlannedCase;
+
+    fn planned_case(decision_threshold_pct: Option<f64>) -> PlannedCase {
+        PlannedCase {
+            id: "case-a".to_string(),
+            target: "scan".to_string(),
+            lane: "macro".to_string(),
+            assertions: Vec::new(),
+            suite_manifest_hash: "sha256:manifest".to_string(),
+            case_definition_hash: "sha256:case-def".to_string(),
+            supports_decision: true,
+            required_runs: Some(5),
+            decision_threshold_pct,
+            decision_metric: Some("median".to_string()),
+        }
+    }
+
+    fn case_result() -> CaseResult {
+        CaseResult {
+            case: "case-a".to_string(),
+            success: true,
+            validation_passed: true,
+            perf_valid: true,
+            classification: "supported".to_string(),
+            samples: Vec::new(),
+            elapsed_stats: None,
+            run_summary: None,
+            run_summaries: None,
+            suite_manifest_hash: None,
+            case_definition_hash: None,
+            compatibility_key: None,
+            supports_decision: None,
+            required_runs: None,
+            decision_threshold_pct: None,
+            decision_metric: None,
+            failure_kind: None,
+            failure: None,
+        }
+    }
+
+    fn timed_case_result() -> CaseResult {
+        let mut case = case_result();
+        case.samples = vec![IterationSample {
+            elapsed_ms: 123.0,
+            rows: None,
+            bytes: None,
+            metrics: None,
+        }];
+        case.elapsed_stats = Some(ElapsedStats {
+            min_ms: 123.0,
+            max_ms: 123.0,
+            mean_ms: 123.0,
+            median_ms: 123.0,
+            stddev_ms: 0.0,
+            cv_pct: Some(0.0),
+        });
+        case
+    }
+
+    fn bench_context() -> BenchContext {
+        BenchContext {
+            schema_version: 4,
+            label: "test".to_string(),
+            git_sha: Some("abc123".to_string()),
+            created_at: Utc::now(),
+            host: "host-a".to_string(),
+            suite: "scan".to_string(),
+            scale: "sf1".to_string(),
+            iterations: 5,
+            warmup: 1,
+            timing_phase: Some("execute".to_string()),
+            dataset_id: Some("tiny_smoke".to_string()),
+            dataset_fingerprint: Some("sha256:dataset".to_string()),
+            runner: Some("rust".to_string()),
+            storage_backend: Some("local".to_string()),
+            benchmark_mode: Some("perf".to_string()),
+            lane: Some("macro".to_string()),
+            measurement_kind: Some("phase_breakdown".to_string()),
+            validation_level: Some("operational".to_string()),
+            run_id: Some("sha256:run".to_string()),
+            harness_revision: Some("harness-1".to_string()),
+            fixture_recipe_hash: Some("sha256:recipe-a".to_string()),
+            fidelity_fingerprint: Some("sha256:fidelity".to_string()),
+            backend_profile: Some("local".to_string()),
+            image_version: None,
+            hardening_profile_id: None,
+            hardening_profile_sha256: None,
+            cpu_model: None,
+            cpu_microcode: None,
+            kernel: None,
+            boot_params: None,
+            cpu_steal_pct: None,
+            numa_topology: None,
+            egress_policy_sha256: None,
+            run_mode: None,
+            maintenance_window_id: None,
+        }
+    }
+
+    #[test]
+    fn compatibility_key_rejects_non_finite_decision_thresholds() {
+        let err = compute_case_compatibility_key(
+            &planned_case(Some(f64::NAN)),
+            BenchmarkLane::Macro,
+            &bench_context(),
+        )
+        .expect_err("non-finite thresholds must fail compatibility hashing");
+
+        assert!(
+            matches!(err, BenchError::InvalidArgument(_)),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn finalize_cases_propagates_compatibility_key_errors() {
+        let err = finalize_cases(
+            vec![case_result()],
+            &[planned_case(Some(f64::NAN))],
+            BenchmarkMode::Perf,
+            BenchmarkLane::Macro,
+            &bench_context(),
+        )
+        .expect_err("finalization must not silently drop compatibility-key failures");
+
+        assert!(
+            matches!(err, BenchError::InvalidArgument(_)),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn compatibility_key_changes_when_context_identity_changes() {
+        let planned = planned_case(Some(5.0));
+        let baseline_context = bench_context();
+        let baseline =
+            compute_case_compatibility_key(&planned, BenchmarkLane::Macro, &baseline_context)
+                .expect("baseline compatibility key");
+        let mut fixture_context = bench_context();
+        fixture_context.fixture_recipe_hash = Some("sha256:recipe-b".to_string());
+        let fixture_changed =
+            compute_case_compatibility_key(&planned, BenchmarkLane::Macro, &fixture_context)
+                .expect("fixture change must hash");
+        let mut runner_context = bench_context();
+        runner_context.runner = Some("python".to_string());
+        let runner_changed =
+            compute_case_compatibility_key(&planned, BenchmarkLane::Macro, &runner_context)
+                .expect("runner change must hash");
+
+        assert_ne!(baseline, fixture_changed);
+        assert_ne!(baseline, runner_changed);
+    }
+
+    #[test]
+    fn finalize_cases_marks_correctness_tagged_macro_runs_not_perf_valid() {
+        let mut planned = planned_case(Some(5.0));
+        planned.target = "write".to_string();
+        planned.lane = "correctness".to_string();
+
+        let cases = finalize_cases(
+            vec![timed_case_result()],
+            &[planned],
+            BenchmarkMode::Perf,
+            BenchmarkLane::Macro,
+            &bench_context(),
+        )
+        .expect("finalization succeeds");
+
+        let case = &cases[0];
+        assert!(case.success);
+        assert!(!case.perf_valid);
+        assert!(case.elapsed_stats.is_none());
+        assert_eq!(case.samples.len(), 1);
+    }
 }

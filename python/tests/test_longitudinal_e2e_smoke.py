@@ -10,7 +10,7 @@ from delta_bench_longitudinal.artifacts import (
     artifact_metadata_path,
 )
 from delta_bench_longitudinal.cli import orchestrate_from_manifest
-from delta_bench_longitudinal.matrix_runner import sanitize_label
+from delta_bench_longitudinal.matrix_runner import matrix_result_label
 from delta_bench_longitudinal.revisions import (
     RevisionEntry,
     RevisionManifest,
@@ -52,26 +52,27 @@ def _make_fake_build(
 def _make_fake_executor(
     results_dir: Path,
     label_fn: Callable[..., str] | None = None,
+    lane: str = "macro",
 ):  # type: ignore[no-untyped-def]
     """Factory for a fake matrix executor that writes result JSON files.
 
     Args:
         results_dir: Directory where results will be written.
-        label_fn: Optional callable(artifact, scale) -> str for custom labels.
-            Defaults to ``f"longitudinal-{artifact.revision}"``.
+        label_fn: Optional callable(artifact, scale, lane) -> str for custom labels.
+            Defaults to the shared lane-scoped longitudinal label contract.
     """
 
     def fake_matrix_executor(artifact, suite, scale, attempt, timeout):  # type: ignore[no-untyped-def]
         if label_fn is not None:
-            label = label_fn(artifact, scale)
+            label = label_fn(artifact, scale, lane)
         else:
-            label = f"longitudinal-{artifact.revision}"
+            label = matrix_result_label("longitudinal", artifact.revision, scale, lane)
         out_dir = results_dir / label
         out_dir.mkdir(parents=True, exist_ok=True)
         result = {
-            "schema_version": 2,
+            "schema_version": 3,
             "context": {
-                "schema_version": 2,
+                "schema_version": 3,
                 "label": label,
                 "git_sha": artifact.revision,
                 "created_at": "2026-02-02T00:00:00+00:00",
@@ -86,6 +87,8 @@ def _make_fake_executor(
                     "case": "scan_all",
                     "classification": "supported",
                     "success": True,
+                    "validation_passed": True,
+                    "perf_valid": True,
                     "samples": [{"elapsed_ms": 100.0}],
                     "failure": None,
                 }
@@ -200,8 +203,8 @@ def test_orchestrate_uses_sanitized_label_prefix_for_ingest(tmp_path: Path) -> N
         build_fn=_make_fake_build(artifacts_dir),
         matrix_executor=_make_fake_executor(
             results_dir,
-            label_fn=lambda artifact, scale: sanitize_label(
-                f"{label_prefix}-{artifact.revision}"
+            label_fn=lambda artifact, scale, lane: matrix_result_label(
+                label_prefix, artifact.revision, scale, lane
             ),
         ),
     )
@@ -255,8 +258,9 @@ def test_orchestrate_ingests_distinct_scales(tmp_path: Path) -> None:
         build_fn=_make_fake_build(artifacts_dir, write_metadata=False),
         matrix_executor=_make_fake_executor(
             results_dir,
-            label_fn=lambda artifact,
-            scale: f"longitudinal-{artifact.revision}-{scale}",
+            label_fn=lambda artifact, scale, lane: matrix_result_label(
+                "longitudinal", artifact.revision, scale, lane
+            ),
         ),
     )
 

@@ -13,6 +13,8 @@ REQUIRE_NO_PUBLIC_IPV4=0
 REQUIRE_EGRESS_POLICY=0
 NOISE_THRESHOLD="${BENCH_NOISE_THRESHOLD:-0.05}"
 AGGREGATION="${BENCH_AGGREGATION:-median}"
+COMPARE_MODE="${BENCH_COMPARE_MODE:-exploratory}"
+COMPARE_FAIL_ON="${BENCH_COMPARE_FAIL_ON:-}"
 BENCH_WARMUP="${BENCH_WARMUP:-2}"
 BENCH_ITERS="${BENCH_ITERS:-9}"
 BENCH_PREWARM_ITERS="${BENCH_PREWARM_ITERS:-1}"
@@ -26,6 +28,9 @@ STORAGE_BACKEND="${BENCH_STORAGE_BACKEND:-local}"
 STORAGE_OPTIONS=()
 BACKEND_PROFILE="${BENCH_BACKEND_PROFILE:-}"
 RUNNER_MODE="${BENCH_RUNNER_MODE:-all}"
+BENCHMARK_MODE="${BENCH_BENCHMARK_MODE:-perf}"
+DATASET_ID="${BENCH_DATASET_ID:-}"
+TIMING_PHASE="${BENCH_TIMING_PHASE:-execute}"
 
 sanitize_label() {
   local raw="${1:-}"
@@ -67,6 +72,9 @@ Options:
   --require-egress-policy         Require nftables egress hash check during preflight (set DELTA_BENCH_EGRESS_POLICY_SHA256)
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
   --aggregation <min|median|p95>  Representative sample aggregation for compare.py (default: median)
+  --compare-mode <exploratory|decision>
+                                  Compare classification mode passed to compare.py (default: ${COMPARE_MODE})
+  --fail-on <statuses>            Comma-separated compare statuses that force exit code 2 (for decision automation)
   --warmup <N>                    Warmup iterations per benchmark case (default: ${BENCH_WARMUP})
   --iters <N>                     Measured iterations per benchmark case (default: ${BENCH_ITERS})
   --prewarm-iters <N>             Unreported prewarm iterations per ref before measured runs (default: ${BENCH_PREWARM_ITERS})
@@ -83,8 +91,24 @@ Options:
   --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
   --backend-profile <name>        Optional backend profile file under backends/<name>.env
   --runner <rust|python|all>      Runner mode forwarded to bench.sh run (default: all)
+  --mode <perf|assert>            Benchmark mode forwarded to bench.sh run (default: perf)
+  --dataset-id <id>               Dataset id forwarded to bench.sh data/run
+  --timing-phase <phase>          Timing phase forwarded to bench.sh run (default: execute)
+                                  Trusted macro-lane compare suites: scan, write_perf, tpcds, interop_py (default: scan)
   -h, --help                      Show this help
 EOF
+}
+
+trusted_macro_compare_suite() {
+  local requested_suite="${1:-}"
+  case "${requested_suite}" in
+    scan|write_perf|tpcds|interop_py)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 while [[ $# -gt 0 ]]; do
@@ -115,6 +139,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --aggregation)
       AGGREGATION="$2"
+      shift 2
+      ;;
+    --compare-mode)
+      COMPARE_MODE="$2"
+      shift 2
+      ;;
+    --fail-on)
+      COMPARE_FAIL_ON="$2"
       shift 2
       ;;
     --warmup)
@@ -169,6 +201,18 @@ while [[ $# -gt 0 ]]; do
       RUNNER_MODE="$2"
       shift 2
       ;;
+    --mode)
+      BENCHMARK_MODE="$2"
+      shift 2
+      ;;
+    --dataset-id)
+      DATASET_ID="$2"
+      shift 2
+      ;;
+    --timing-phase)
+      TIMING_PHASE="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -196,7 +240,7 @@ fi
 
 base_ref="${positional_refs[0]:-main}"
 candidate_ref="${positional_refs[1]:-}"
-suite="${positional_refs[2]:-all}"
+suite="${positional_refs[2]:-scan}"
 base_ref_mode="auto"
 candidate_ref_mode="auto"
 
@@ -212,7 +256,7 @@ if (( WORKING_VS_UPSTREAM_MAIN != 0 )); then
   fi
   base_ref=""
   candidate_ref=""
-  suite="${positional_refs[0]:-all}"
+  suite="${positional_refs[0]:-scan}"
 fi
 
 if [[ -n "${BASE_SHA_OVERRIDE}" ]]; then
@@ -252,6 +296,22 @@ case "${AGGREGATION}" in
     ;;
 esac
 
+case "${COMPARE_MODE}" in
+  exploratory|decision)
+    ;;
+  *)
+    echo "invalid --compare-mode '${COMPARE_MODE}'; expected exploratory or decision" >&2
+    exit 1
+    ;;
+esac
+
+if ! trusted_macro_compare_suite "${suite}"; then
+  echo "suite '${suite}' is not supported for macro-lane branch compare." >&2
+  echo "compare_branch.sh supports only trusted perf suites: scan, write_perf, tpcds, interop_py." >&2
+  echo "use suite 'scan' for the curated default, or run unsupported stateful suites through purpose-built validation/longitudinal flows." >&2
+  exit 1
+fi
+
 if ! is_positive_integer "${BENCH_WARMUP}"; then
   echo "invalid --warmup '${BENCH_WARMUP}'; expected positive integer" >&2
   exit 1
@@ -277,6 +337,19 @@ case "${BENCH_MEASURE_ORDER}" in
     ;;
   *)
     echo "invalid --measure-order '${BENCH_MEASURE_ORDER}'; expected base-first, candidate-first, or alternate" >&2
+    exit 1
+    ;;
+esac
+
+case "${BENCHMARK_MODE}" in
+  perf)
+    ;;
+  assert)
+    echo "compare_branch.sh requires --mode perf; assert mode emits validation-only artifacts that cannot be compared" >&2
+    exit 1
+    ;;
+  *)
+    echo "invalid --mode '${BENCHMARK_MODE}'; expected perf or assert" >&2
     exit 1
     ;;
 esac
@@ -607,7 +680,11 @@ run_benchmark_suite_for_ref() {
     run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
   fi
 
-  local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup "${warmup}" --iters "${iters}")
+  local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --lane macro --mode "${BENCHMARK_MODE}" --warmup "${warmup}" --iters "${iters}")
+  if [[ -n "${DATASET_ID}" ]]; then
+    run_cmd+=(--dataset-id "${DATASET_ID}")
+  fi
+  run_cmd+=(--timing-phase "${TIMING_PHASE}")
   run_cmd+=("${storage_args[@]}")
   if [[ ${#profile_args[@]} -gt 0 ]]; then
     run_cmd+=("${profile_args[@]}")
@@ -684,7 +761,15 @@ cand_label="cand-$(sanitize_label "${candidate_ref}")"
 
 prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
+data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)
+if [[ -n "${DATASET_ID}" ]]; then
+  data_cmd+=(--dataset-id "${DATASET_ID}")
+fi
+data_cmd+=("${storage_args[@]}")
+if [[ ${#profile_args[@]} -gt 0 ]]; then
+  data_cmd+=("${profile_args[@]}")
+fi
+run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" "${data_cmd[@]}"
 
 if (( BENCH_PREWARM_ITERS > 0 )); then
   phase "${current_phase}" "${total_phases}" "Prewarm runs (${BENCH_PREWARM_ITERS} iterations, results discarded)"
@@ -727,7 +812,10 @@ cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"
 
 phase "${current_phase}" "${total_phases}" "Comparison report"
 
-compare_args=(--noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
+compare_args=(--mode "${COMPARE_MODE}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
+if [[ -n "${COMPARE_FAIL_ON}" ]]; then
+  compare_args+=(--fail-on "${COMPARE_FAIL_ON}")
+fi
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.hash_policy "${base_json}" "${cand_json}"

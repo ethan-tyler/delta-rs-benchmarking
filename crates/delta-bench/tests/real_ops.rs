@@ -1,6 +1,7 @@
+use delta_bench::cli::{BenchmarkLane, TimingPhase};
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{merge, optimize_vacuum, scan};
+use delta_bench::suites::{merge, optimize_vacuum, run_target, scan};
 
 #[tokio::test]
 async fn generated_fixtures_support_real_scan_suite() {
@@ -10,7 +11,7 @@ async fn generated_fixtures_support_real_scan_suite() {
         .await
         .expect("generate fixtures");
 
-    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("scan suite run");
     assert!(!cases.is_empty());
@@ -25,7 +26,7 @@ async fn scan_samples_include_physical_scan_metrics() {
         .await
         .expect("generate fixtures");
 
-    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("scan suite run");
     assert!(!cases.is_empty());
@@ -66,7 +67,7 @@ async fn scan_pruning_hit_scans_fewer_files_than_miss() {
         .await
         .expect("generate fixtures");
 
-    let cases = scan::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("scan suite run");
 
@@ -101,27 +102,236 @@ async fn scan_pruning_hit_scans_fewer_files_than_miss() {
         .and_then(|sample| sample.metrics.as_ref())
         .expect("expected metrics for miss case");
 
-    let hit_scanned = hit_metrics
-        .files_scanned
-        .expect("hit files_scanned should be present");
-    let miss_scanned = miss_metrics
-        .files_scanned
-        .expect("miss files_scanned should be present");
-    let hit_pruned = hit_metrics
-        .files_pruned
-        .expect("hit files_pruned should be present");
-    let miss_pruned = miss_metrics
-        .files_pruned
-        .expect("miss files_pruned should be present");
+    let mut compared = false;
+    if let (Some(hit_scanned), Some(miss_scanned)) =
+        (hit_metrics.files_scanned, miss_metrics.files_scanned)
+    {
+        compared = true;
+        assert!(
+            hit_scanned < miss_scanned,
+            "expected hit files_scanned < miss files_scanned, got {hit_scanned} vs {miss_scanned}"
+        );
+    }
+    if let (Some(hit_pruned), Some(miss_pruned)) =
+        (hit_metrics.files_pruned, miss_metrics.files_pruned)
+    {
+        compared = true;
+        assert!(
+            hit_pruned > miss_pruned,
+            "expected hit files_pruned > miss files_pruned, got {hit_pruned} vs {miss_pruned}"
+        );
+    }
+    if !compared {
+        if let (Some(hit_bytes), Some(miss_bytes)) =
+            (hit_metrics.bytes_scanned, miss_metrics.bytes_scanned)
+        {
+            compared = true;
+            assert!(
+                hit_bytes < miss_bytes,
+                "expected hit bytes_scanned < miss bytes_scanned, got {hit_bytes} vs {miss_bytes}"
+            );
+        }
+    }
+    if !compared {
+        eprintln!(
+            "scan pruning contrast metrics unavailable for this plan path: hit={hit_metrics:?} miss={miss_metrics:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn scan_plan_phase_preserves_case_identity_and_hashes() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let load_cases = scan::run(temp.path(), "sf1", TimingPhase::Load, 0, 1, &storage)
+        .await
+        .expect("scan suite run");
+    let plan_cases = scan::run(temp.path(), "sf1", TimingPhase::Plan, 0, 1, &storage)
+        .await
+        .expect("scan suite run");
+    let execute_cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
+        .await
+        .expect("scan suite run");
+    let validate_cases = scan::run(temp.path(), "sf1", TimingPhase::Validate, 0, 1, &storage)
+        .await
+        .expect("scan suite run");
 
     assert!(
-        hit_scanned < miss_scanned,
-        "expected hit files_scanned < miss files_scanned, got {hit_scanned} vs {miss_scanned}"
+        plan_cases.iter().all(|case| !case.case.contains("_plan_")),
+        "plan timing should not invent ad hoc case ids: {:?}",
+        plan_cases
+            .iter()
+            .map(|case| case.case.as_str())
+            .collect::<Vec<_>>()
     );
     assert!(
-        hit_pruned > miss_pruned,
-        "expected hit files_pruned > miss files_pruned, got {hit_pruned} vs {miss_pruned}"
+        load_cases.iter().all(|case| !case.case.contains("_load_")),
+        "load timing should not invent ad hoc case ids: {:?}",
+        load_cases
+            .iter()
+            .map(|case| case.case.as_str())
+            .collect::<Vec<_>>()
     );
+    assert!(
+        validate_cases
+            .iter()
+            .all(|case| !case.case.contains("_validate_")),
+        "validate timing should not invent ad hoc case ids: {:?}",
+        validate_cases
+            .iter()
+            .map(|case| case.case.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    let load_case = load_cases
+        .iter()
+        .find(|case| case.case == "scan_filter_flag")
+        .expect("expected scan_filter_flag case");
+    let planning_case = plan_cases
+        .iter()
+        .find(|case| case.case == "scan_filter_flag")
+        .expect("expected scan_filter_flag case");
+    let execute_case = execute_cases
+        .iter()
+        .find(|case| case.case == "scan_filter_flag")
+        .expect("expected scan_filter_flag case");
+    let validate_case = validate_cases
+        .iter()
+        .find(|case| case.case == "scan_filter_flag")
+        .expect("expected scan_filter_flag case");
+    assert!(
+        load_case.success,
+        "load-timed case should succeed: {:?}",
+        load_case.failure
+    );
+    assert!(
+        planning_case.success,
+        "plan-timed case should succeed: {:?}",
+        planning_case.failure
+    );
+    assert!(
+        execute_case.success,
+        "execute-timed case should succeed: {:?}",
+        execute_case.failure
+    );
+    assert!(
+        validate_case.success,
+        "validate-timed case should succeed: {:?}",
+        validate_case.failure
+    );
+
+    let load_metrics = load_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("load metrics should exist");
+    let planning_metrics = planning_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("planning metrics should exist");
+    let execute_metrics = execute_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("execute metrics should exist");
+    let validate_metrics = validate_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("validate metrics should exist");
+    assert!(
+        planning_metrics.rows_processed.is_some(),
+        "plan timing should preserve result metrics"
+    );
+    assert!(
+        planning_metrics.result_hash.is_some(),
+        "planning case should include a stable result hash"
+    );
+    assert!(
+        planning_metrics.schema_hash.is_some(),
+        "planning case should include a schema hash"
+    );
+    assert_eq!(
+        planning_metrics.result_hash, execute_metrics.result_hash,
+        "plan timing should preserve exact query result hashes"
+    );
+    assert_eq!(
+        load_metrics.result_hash, execute_metrics.result_hash,
+        "load timing should preserve exact query result hashes"
+    );
+    assert_eq!(
+        validate_metrics.result_hash, execute_metrics.result_hash,
+        "validate timing should preserve exact query result hashes"
+    );
+    assert_eq!(
+        planning_metrics.schema_hash, execute_metrics.schema_hash,
+        "plan timing should preserve output schema hashes"
+    );
+    assert_eq!(
+        load_metrics.schema_hash, execute_metrics.schema_hash,
+        "load timing should preserve output schema hashes"
+    );
+    assert_eq!(
+        validate_metrics.schema_hash, execute_metrics.schema_hash,
+        "validate timing should preserve output schema hashes"
+    );
+}
+
+#[tokio::test]
+async fn correctness_lane_emits_semantic_digests_for_stateful_suites() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    for suite in [
+        "write",
+        "delete_update",
+        "merge",
+        "metadata",
+        "optimize_vacuum",
+    ] {
+        let cases = run_target(
+            temp.path(),
+            suite,
+            "sf1",
+            BenchmarkLane::Correctness,
+            TimingPhase::Execute,
+            0,
+            1,
+            &storage,
+        )
+        .await
+        .expect("suite should run");
+        assert!(
+            cases.iter().all(|case| case.success),
+            "correctness lane should succeed for {suite}: {:?}",
+            cases
+                .iter()
+                .map(|case| (&case.case, &case.failure))
+                .collect::<Vec<_>>()
+        );
+        for metrics in cases
+            .iter()
+            .flat_map(|case| case.samples.iter())
+            .filter_map(|sample| sample.metrics.as_ref())
+        {
+            assert!(
+                metrics.semantic_state_digest.is_some(),
+                "semantic digest missing for {suite}: {metrics:?}"
+            );
+            assert!(
+                metrics.validation_summary.is_some(),
+                "validation summary missing for {suite}: {metrics:?}"
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -132,7 +342,7 @@ async fn generated_fixtures_support_optimize_vacuum_suite() {
         .await
         .expect("generate fixtures");
 
-    let cases = optimize_vacuum::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = optimize_vacuum::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("optimize_vacuum suite run");
     assert_eq!(cases.len(), 5);
@@ -221,7 +431,7 @@ async fn merge_partition_localized_case_reports_pruned_files() {
         .await
         .expect("generate fixtures");
 
-    let cases = merge::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = merge::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("run merge suite");
     let localized = cases

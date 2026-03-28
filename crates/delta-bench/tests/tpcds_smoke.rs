@@ -2,6 +2,7 @@
 mod support;
 
 use chrono::Utc;
+use delta_bench::cli::{BenchmarkLane, TimingPhase};
 use delta_bench::results::{BenchContext, BenchRunResult};
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::run_target;
@@ -12,9 +13,18 @@ async fn tpcds_smoke_produces_deterministic_case_names_and_json_shape() {
     support::write_store_sales_fixture(temp.path(), "sf1").await;
     let storage = StorageConfig::local();
 
-    let cases = run_target(temp.path(), "tpcds", "sf1", 0, 1, &storage)
-        .await
-        .expect("run tpcds target");
+    let cases = run_target(
+        temp.path(),
+        "tpcds",
+        "sf1",
+        BenchmarkLane::Macro,
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect("run tpcds target");
 
     let case_names = cases
         .iter()
@@ -31,9 +41,9 @@ async fn tpcds_smoke_produces_deterministic_case_names_and_json_shape() {
     );
 
     let output = BenchRunResult {
-        schema_version: 2,
+        schema_version: 4,
         context: BenchContext {
-            schema_version: 2,
+            schema_version: 4,
             label: "smoke".to_string(),
             git_sha: Some("deadbeef".to_string()),
             created_at: Utc::now(),
@@ -42,9 +52,19 @@ async fn tpcds_smoke_produces_deterministic_case_names_and_json_shape() {
             scale: "sf1".to_string(),
             iterations: 1,
             warmup: 0,
+            timing_phase: Some("execute".to_string()),
             dataset_id: None,
             dataset_fingerprint: None,
             runner: None,
+            storage_backend: Some("local".to_string()),
+            benchmark_mode: Some("perf".to_string()),
+            lane: None,
+            measurement_kind: None,
+            validation_level: None,
+            run_id: None,
+            harness_revision: None,
+            fixture_recipe_hash: None,
+            fidelity_fingerprint: None,
             backend_profile: None,
             image_version: None,
             hardening_profile_id: None,

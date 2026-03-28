@@ -16,6 +16,8 @@ pub struct Args {
     pub label: String,
     #[arg(long)]
     pub git_sha: Option<String>,
+    #[arg(long, env = "DELTA_BENCH_HARNESS_REVISION")]
+    pub harness_revision: Option<String>,
     #[arg(
         long,
         env = "DELTA_BENCH_STORAGE_BACKEND",
@@ -54,6 +56,66 @@ impl RunnerMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BenchmarkMode {
+    Perf,
+    Assert,
+}
+
+impl BenchmarkMode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Perf => "perf",
+            Self::Assert => "assert",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BenchmarkLane {
+    Smoke,
+    Correctness,
+    Macro,
+}
+
+impl BenchmarkLane {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Smoke => "smoke",
+            Self::Correctness => "correctness",
+            Self::Macro => "macro",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum TimingPhase {
+    Load,
+    Execute,
+    Plan,
+    Validate,
+}
+
+impl TimingPhase {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Load => "load",
+            Self::Execute => "execute",
+            Self::Plan => "plan",
+            Self::Validate => "validate",
+        }
+    }
+}
+
+impl StorageBackend {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::S3 => "s3",
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum Command {
     List {
@@ -81,6 +143,12 @@ pub enum Command {
         case_filter: Option<String>,
         #[arg(long, value_enum, default_value_t = RunnerMode::All)]
         runner: RunnerMode,
+        #[arg(long = "mode", value_enum, default_value_t = BenchmarkMode::Perf)]
+        benchmark_mode: BenchmarkMode,
+        #[arg(long, value_enum, default_value_t = BenchmarkLane::Macro)]
+        lane: BenchmarkLane,
+        #[arg(long, value_enum, default_value_t = TimingPhase::Execute)]
+        timing_phase: TimingPhase,
         #[arg(long, default_value_t = 1)]
         warmup: u32,
         #[arg(long, default_value_t = 5)]

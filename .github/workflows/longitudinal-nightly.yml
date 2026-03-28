@@ -96,17 +96,13 @@ jobs:
             --state-path "${MATRIX_STATE_PATH}" \
             --results-dir "${RESULTS_DIR}" \
             --label-prefix "${LABEL_PREFIX}" \
+            --lane macro \
             --timeout-seconds 3600 \
             --max-retries 2 \
             --max-parallel "${LONGITUDINAL_MAX_PARALLEL}" \
             --max-load-per-cpu "${LONGITUDINAL_MAX_LOAD_PER_CPU}" \
             --load-check-interval-seconds "${LONGITUDINAL_LOAD_CHECK_INTERVAL_SECONDS}" \
             --suite scan \
-            --suite write \
-            --suite delete_update \
-            --suite merge \
-            --suite metadata \
-            --suite optimize_vacuum \
             --scale sf1
 
       - name: Ingest normalized rows

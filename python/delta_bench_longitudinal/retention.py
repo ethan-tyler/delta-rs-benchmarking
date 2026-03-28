@@ -6,7 +6,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .store import _connect_store, _raise_if_unmigrated_legacy_store, store_db_path, store_lock
+from .store import (
+    _connect_store,
+    _raise_if_unmigrated_legacy_store,
+    store_db_path,
+    store_lock,
+)
 
 
 def prune_artifacts(

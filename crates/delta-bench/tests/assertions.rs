@@ -24,6 +24,8 @@ fn sample_with_hashes(
                     spill_bytes: None,
                     result_hash: result_hash.map(ToOwned::to_owned),
                     schema_hash: schema_hash.map(ToOwned::to_owned),
+                    semantic_state_digest: None,
+                    validation_summary: None,
                 },
             ),
         ),
@@ -39,9 +41,21 @@ fn case_result(
     CaseResult {
         case: "test_case".to_string(),
         success,
+        validation_passed: success,
+        perf_valid: success,
         classification: classification.to_string(),
         samples,
         elapsed_stats: None,
+        run_summary: None,
+        run_summaries: None,
+        suite_manifest_hash: None,
+        case_definition_hash: None,
+        compatibility_key: None,
+        supports_decision: None,
+        required_runs: None,
+        decision_threshold_pct: None,
+        decision_metric: None,
+        failure_kind: None,
         failure,
     }
 }
@@ -65,6 +79,8 @@ fn expected_error_assertion_reclassifies_failure() {
     );
 
     assert!(case.success);
+    assert!(case.validation_passed);
+    assert!(!case.perf_valid);
     assert_eq!(case.classification, "expected_failure");
 }
 
@@ -80,6 +96,8 @@ fn expected_error_assertion_fails_when_case_unexpectedly_succeeds() {
     );
 
     assert!(!case.success);
+    assert!(!case.validation_passed);
+    assert!(!case.perf_valid);
     assert_eq!(case.classification, "supported");
     let message = case
         .failure
@@ -110,12 +128,54 @@ fn exact_result_hash_assertion_fails_mismatch() {
     );
 
     assert!(!case.success);
+    assert!(!case.validation_passed);
+    assert!(!case.perf_valid);
+    assert_eq!(case.failure_kind.as_deref(), Some("assertion_mismatch"));
     let message = case
         .failure
         .as_ref()
         .map(|f| f.message.as_str())
         .unwrap_or("");
     assert!(message.contains("result hash mismatch"));
+}
+
+#[test]
+fn exact_result_hash_assertion_checks_every_sample() {
+    let mut case = case_result(
+        true,
+        "supported",
+        vec![
+            sample_with_hashes(
+                Some("sha256:result-abc"),
+                Some("sha256:schema-abc"),
+                Some(1),
+            ),
+            sample_with_hashes(
+                Some("sha256:result-def"),
+                Some("sha256:schema-abc"),
+                Some(2),
+            ),
+        ],
+        None,
+    );
+
+    apply_case_assertions(
+        &mut case,
+        &[CaseAssertion::ExactResultHash(
+            "sha256:result-abc".to_string(),
+        )],
+    );
+
+    assert!(!case.success);
+    assert!(!case.validation_passed);
+    assert!(!case.perf_valid);
+    assert_eq!(case.failure_kind.as_deref(), Some("assertion_mismatch"));
+    let message = case
+        .failure
+        .as_ref()
+        .map(|f| f.message.as_str())
+        .unwrap_or("");
+    assert!(message.contains("sample 2"));
 }
 
 #[test]
@@ -140,6 +200,8 @@ fn schema_hash_assertion_uses_schema_hash_field_not_result_hash() {
         case.success,
         "schema hash assertion should pass when schema_hash matches"
     );
+    assert!(case.validation_passed);
+    assert!(case.perf_valid);
     assert!(case.failure.is_none());
 }
 
@@ -158,6 +220,9 @@ fn version_monotonicity_assertion_fails_on_decrease() {
     apply_case_assertions(&mut case, &[CaseAssertion::VersionMonotonicity]);
 
     assert!(!case.success);
+    assert!(!case.validation_passed);
+    assert!(!case.perf_valid);
+    assert_eq!(case.failure_kind.as_deref(), Some("assertion_mismatch"));
     let message = case
         .failure
         .as_ref()

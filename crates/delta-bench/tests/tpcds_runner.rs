@@ -1,6 +1,7 @@
 #[path = "support/tpcds_fixture.rs"]
 mod support;
 
+use delta_bench::cli::TimingPhase;
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::tpcds;
@@ -11,7 +12,7 @@ async fn enabled_queries_execute_and_emit_successful_cases() {
     support::write_store_sales_fixture(temp.path(), "sf1").await;
     let storage = StorageConfig::local();
 
-    let cases = tpcds::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = tpcds::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("run tpcds");
 
@@ -34,7 +35,7 @@ async fn generated_fixtures_provide_required_tpcds_tables() {
         .await
         .expect("generate fixtures");
 
-    let cases = tpcds::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = tpcds::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("run tpcds");
     let enabled = cases
@@ -53,7 +54,7 @@ async fn q72_is_reported_as_deterministically_skipped() {
     support::write_store_sales_fixture(temp.path(), "sf1").await;
     let storage = StorageConfig::local();
 
-    let cases = tpcds::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = tpcds::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("run tpcds");
     let q72 = cases
@@ -78,7 +79,7 @@ async fn successful_samples_include_normalized_and_scan_metrics() {
     support::write_store_sales_fixture(temp.path(), "sf1").await;
     let storage = StorageConfig::local();
 
-    let cases = tpcds::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = tpcds::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
         .await
         .expect("run tpcds");
 
@@ -109,4 +110,32 @@ async fn successful_samples_include_normalized_and_scan_metrics() {
             "expected at least one scan metric in sample: {metrics:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn tpcds_case_names_remain_stable_under_plan_timing() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    support::write_store_sales_fixture(temp.path(), "sf1").await;
+    let storage = StorageConfig::local();
+
+    let cases = tpcds::run(temp.path(), "sf1", TimingPhase::Plan, 0, 1, &storage)
+        .await
+        .expect("run tpcds");
+
+    assert_eq!(
+        cases
+            .iter()
+            .map(|case| case.case.as_str())
+            .collect::<Vec<_>>(),
+        vec!["tpcds_q03", "tpcds_q07", "tpcds_q64", "tpcds_q72"]
+    );
+    let q03 = cases
+        .iter()
+        .find(|case| case.case == "tpcds_q03")
+        .expect("q03 case should exist");
+    assert!(
+        q03.success,
+        "plan timing should not change enabled case success: {:?}",
+        q03.failure
+    );
 }

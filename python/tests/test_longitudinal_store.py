@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -15,9 +16,9 @@ from delta_bench_longitudinal.store import (
 
 def _result_payload() -> dict:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "context": {
-            "schema_version": 2,
+            "schema_version": 3,
             "label": "longitudinal-rev1",
             "git_sha": "rev1",
             "created_at": "2026-02-01T00:00:00+00:00",
@@ -36,6 +37,8 @@ def _result_payload() -> dict:
                 "case": "scan_all",
                 "classification": "supported",
                 "success": True,
+                "validation_passed": True,
+                "perf_valid": True,
                 "samples": [
                     {"elapsed_ms": 100.0},
                     {"elapsed_ms": 120.0},
@@ -47,11 +50,217 @@ def _result_payload() -> dict:
                 "case": "scan_predicate",
                 "classification": "supported",
                 "success": False,
+                "validation_passed": False,
+                "perf_valid": False,
                 "samples": [],
                 "failure": {"message": "failed op"},
             },
         ],
     }
+
+
+def _result_payload_v4() -> dict:
+    payload = _result_payload()
+    payload["schema_version"] = 4
+    payload["context"]["schema_version"] = 4
+    payload["context"]["lane"] = "macro"
+    payload["context"]["measurement_kind"] = "end_to_end"
+    payload["context"]["validation_level"] = "operational"
+    payload["context"]["run_id"] = "run-v4"
+    payload["context"]["harness_revision"] = "harness-rev"
+    payload["context"]["fixture_recipe_hash"] = "sha256:recipe"
+    payload["context"]["fidelity_fingerprint"] = "sha256:fidelity"
+    payload["cases"][0]["compatibility_key"] = "sha256:compat"
+    payload["cases"][0]["case_definition_hash"] = "sha256:case-def"
+    payload["cases"][0]["run_summary"] = {
+        "sample_count": 3,
+        "invalid_sample_count": 0,
+        "median_ms": 100.0,
+        "host_label": "bench-host",
+        "fidelity_fingerprint": "sha256:fidelity",
+    }
+    payload["cases"][1]["compatibility_key"] = "sha256:compat-fail"
+    payload["cases"][1]["case_definition_hash"] = "sha256:case-def-fail"
+    payload["cases"][1]["run_summary"] = {
+        "sample_count": 0,
+        "invalid_sample_count": 0,
+        "median_ms": None,
+        "host_label": "bench-host",
+        "fidelity_fingerprint": "sha256:fidelity",
+    }
+    return payload
+
+
+def _create_legacy_store_sqlite(store_dir: Path) -> None:
+    store_dir.mkdir(parents=True, exist_ok=True)
+    db_path = store_db_path(store_dir)
+    with sqlite3.connect(db_path) as conn:
+        conn.executescript(
+            """
+            CREATE TABLE runs (
+                run_id TEXT PRIMARY KEY,
+                schema_version INTEGER NOT NULL,
+                ingested_at TEXT NOT NULL,
+                revision TEXT NOT NULL,
+                revision_commit_timestamp TEXT NOT NULL,
+                benchmark_created_at TEXT,
+                label TEXT,
+                git_sha TEXT,
+                host TEXT,
+                suite TEXT,
+                scale TEXT,
+                lane TEXT,
+                measurement_kind TEXT,
+                validation_level TEXT,
+                harness_revision TEXT,
+                fixture_recipe_hash TEXT,
+                fidelity_fingerprint TEXT,
+                iterations INTEGER,
+                warmup INTEGER,
+                image_version TEXT,
+                hardening_profile_id TEXT,
+                hardening_profile_sha256 TEXT,
+                cpu_model TEXT,
+                cpu_microcode TEXT,
+                kernel TEXT,
+                boot_params TEXT,
+                cpu_steal_pct REAL,
+                numa_topology TEXT,
+                egress_policy_sha256 TEXT,
+                run_mode TEXT,
+                maintenance_window_id TEXT,
+                source_result_path TEXT NOT NULL
+            );
+
+            CREATE TABLE case_rows (
+                run_id TEXT NOT NULL,
+                case_name TEXT NOT NULL,
+                compatibility_key TEXT,
+                case_definition_hash TEXT,
+                success INTEGER NOT NULL,
+                failure_reason TEXT,
+                sample_count INTEGER NOT NULL,
+                sample_values_json TEXT NOT NULL,
+                best_ms REAL,
+                min_ms REAL,
+                max_ms REAL,
+                mean_ms REAL,
+                median_ms REAL,
+                PRIMARY KEY (run_id, case_name)
+            );
+            """
+        )
+
+
+def _seed_legacy_store_sqlite(store_dir: Path) -> None:
+    _create_legacy_store_sqlite(store_dir)
+    with sqlite3.connect(store_db_path(store_dir)) as conn:
+        conn.execute(
+            """
+            INSERT INTO runs (
+                run_id,
+                schema_version,
+                ingested_at,
+                revision,
+                revision_commit_timestamp,
+                benchmark_created_at,
+                label,
+                git_sha,
+                host,
+                suite,
+                scale,
+                lane,
+                measurement_kind,
+                validation_level,
+                harness_revision,
+                fixture_recipe_hash,
+                fidelity_fingerprint,
+                iterations,
+                warmup,
+                image_version,
+                hardening_profile_id,
+                hardening_profile_sha256,
+                cpu_model,
+                cpu_microcode,
+                kernel,
+                boot_params,
+                cpu_steal_pct,
+                numa_topology,
+                egress_policy_sha256,
+                run_mode,
+                maintenance_window_id,
+                source_result_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-run",
+                1,
+                "2026-01-01T00:00:00+00:00",
+                "rev0",
+                "2026-01-01T00:00:00+00:00",
+                "2026-01-01T00:00:00+00:00",
+                "legacy-label",
+                "rev0",
+                "bench-host",
+                "scan",
+                "sf1",
+                "macro",
+                "phase_breakdown",
+                "operational",
+                "h0",
+                "sha256:recipe-legacy",
+                "sha256:fidelity-legacy",
+                1,
+                0,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                str(store_dir / "legacy-run.json"),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO case_rows (
+                run_id,
+                case_name,
+                compatibility_key,
+                case_definition_hash,
+                success,
+                failure_reason,
+                sample_count,
+                sample_values_json,
+                best_ms,
+                min_ms,
+                max_ms,
+                mean_ms,
+                median_ms
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-run",
+                "scan_all",
+                "sha256:compat-legacy",
+                "sha256:case-def-legacy",
+                1,
+                None,
+                1,
+                json.dumps([100.0]),
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+            ),
+        )
 
 
 def test_ingest_is_append_safe_and_idempotent(tmp_path: Path) -> None:
@@ -212,3 +421,56 @@ def test_store_uses_public_benchmark_schema_loader() -> None:
     source = module_path.read_text(encoding="utf-8")
     assert "from delta_bench_compare.schema import load_benchmark_payload" in source
     assert "from delta_bench_compare.compare import _load" not in source
+
+
+def test_v4_rows_preserve_compatibility_identity_fields(tmp_path: Path) -> None:
+    result_path = tmp_path / "result-v4.json"
+    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+    store_dir = tmp_path / "store"
+
+    ingest_benchmark_result(
+        store_dir=store_dir,
+        result_path=result_path,
+        revision="rev1",
+        commit_timestamp="2026-01-01T00:00:00+00:00",
+    )
+    rows = load_longitudinal_rows(store_dir)
+    scan_all = next(row for row in rows if row["case"] == "scan_all")
+
+    assert scan_all["lane"] == "macro"
+    assert scan_all["measurement_kind"] == "end_to_end"
+    assert scan_all["validation_level"] == "operational"
+    assert scan_all["harness_revision"] == "harness-rev"
+    assert scan_all["fixture_recipe_hash"] == "sha256:recipe"
+    assert scan_all["compatibility_key"] == "sha256:compat"
+
+
+def test_load_rows_migrates_existing_legacy_sqlite_store(tmp_path: Path) -> None:
+    store_dir = tmp_path / "store"
+    _seed_legacy_store_sqlite(store_dir)
+
+    rows = load_longitudinal_rows(store_dir)
+
+    assert len(rows) == 1
+    assert rows[0]["case"] == "scan_all"
+    assert rows[0]["runner"] is None
+    assert rows[0]["timing_phase"] is None
+    assert rows[0]["storage_backend"] is None
+
+
+def test_ingest_v4_result_migrates_existing_legacy_sqlite_store(tmp_path: Path) -> None:
+    store_dir = tmp_path / "store"
+    _create_legacy_store_sqlite(store_dir)
+    result_path = tmp_path / "result-v4.json"
+    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+
+    outcome = ingest_benchmark_result(
+        store_dir=store_dir,
+        result_path=result_path,
+        revision="rev1",
+        commit_timestamp="2026-01-01T00:00:00+00:00",
+    )
+
+    assert outcome["rows_appended"] == 2
+    rows = load_longitudinal_rows(store_dir)
+    assert any(row["case"] == "scan_all" for row in rows)

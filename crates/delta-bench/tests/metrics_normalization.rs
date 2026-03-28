@@ -1,6 +1,7 @@
+use delta_bench::cli::{BenchmarkLane, TimingPhase};
 use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::{merge, metadata, write};
+use delta_bench::suites::{merge, metadata, scan, write};
 
 #[tokio::test]
 async fn write_samples_include_normalized_metrics() {
@@ -10,7 +11,7 @@ async fn write_samples_include_normalized_metrics() {
         .await
         .expect("generate fixtures");
 
-    let cases = write::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = write::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("run write suite");
     let first_sample = &cases[0].samples[0];
@@ -31,7 +32,7 @@ async fn metadata_samples_report_table_version_metric() {
         .await
         .expect("generate fixtures");
 
-    let cases = metadata::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = metadata::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("run metadata suite");
     assert!(!cases.is_empty());
@@ -54,7 +55,7 @@ async fn merge_samples_include_merge_scan_and_rewrite_metrics() {
         .await
         .expect("generate fixtures");
 
-    let cases = merge::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = merge::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("run merge suite");
     assert!(
@@ -80,4 +81,35 @@ async fn merge_samples_include_merge_scan_and_rewrite_metrics() {
     assert!(sample_metrics.iter().any(|m| m.files_pruned.is_some()));
     assert!(sample_metrics.iter().any(|m| m.scan_time_ms.is_some()));
     assert!(sample_metrics.iter().any(|m| m.rewrite_time_ms.is_some()));
+}
+
+#[tokio::test]
+async fn scan_samples_do_not_populate_write_or_version_metrics() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+
+    let cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
+        .await
+        .expect("run scan suite");
+    let sample_metrics = cases
+        .iter()
+        .filter(|case| case.success)
+        .flat_map(|case| case.samples.iter())
+        .filter_map(|sample| sample.metrics.as_ref())
+        .collect::<Vec<_>>();
+
+    assert!(!sample_metrics.is_empty(), "expected scan sample metrics");
+    for metrics in sample_metrics {
+        assert_eq!(
+            metrics.operations, None,
+            "scan cases should not populate operations"
+        );
+        assert_eq!(
+            metrics.table_version, None,
+            "scan cases should not populate table_version"
+        );
+    }
 }

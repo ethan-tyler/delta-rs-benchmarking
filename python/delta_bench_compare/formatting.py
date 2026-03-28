@@ -67,7 +67,7 @@ def _fmt_metric(value: int | None) -> str:
 def _fmt_delta_pct(
     baseline_ms: float | None, candidate_ms: float | None, change: str
 ) -> str:
-    if change in {"incomparable", "expected_failure", "new", "removed"}:
+    if change in {"incomparable", "expected_failure", "new", "removed", "inconclusive"}:
         return "-"
     if baseline_ms is None or candidate_ms is None or baseline_ms <= 0.0:
         return "-"
@@ -115,7 +115,10 @@ def _headers(rows: list[ComparisonRow], include_metrics: bool = False) -> list[s
 def _display_headers(
     rows: list[ComparisonRow], include_metrics: bool = False
 ) -> list[str]:
-    return [_DISPLAY_HEADERS.get(h, h) for h in _headers(rows, include_metrics)]
+    return [
+        _DISPLAY_HEADERS.get(h, h)
+        for h in _headers(rows, include_metrics=include_metrics)
+    ]
 
 
 def _contention_values(metrics: object | None) -> list[str]:
@@ -206,17 +209,24 @@ def _row_cells(
 
 
 def _colorize_cells(cells: list[str], change: str) -> list[str]:
+    """Apply ANSI color to delta_pct and change columns based on classification."""
     colored = list(cells)
-    if "faster" in change:
+    if "faster" in change or change == "improvement":
         colored[3] = green(cells[3])
         colored[4] = green(cells[4])
-    elif "slower" in change:
+    elif "slower" in change or change == "regression":
         colored[3] = red(cells[3])
         colored[4] = red(cells[4])
     elif change == "no change":
         colored[3] = dim(cells[3])
         colored[4] = dim(cells[4])
-    elif change in {"incomparable", "expected_failure", "new", "removed"}:
+    elif change in {
+        "incomparable",
+        "expected_failure",
+        "new",
+        "removed",
+        "inconclusive",
+    }:
         colored[4] = yellow(cells[4])
     return colored
 
@@ -230,6 +240,8 @@ def _pad(value: str, width: int, right_align: bool) -> str:
     if right_align:
         return " " * padding + value
     return value + " " * padding
+
+
 def _table_lines_markdown(
     reference_rows: list[ComparisonRow],
     rows: list[ComparisonRow],
@@ -270,6 +282,7 @@ def _table_lines_plain(
     right_indices = set(_RIGHT_ALIGN_INDICES)
     if include_metrics:
         right_indices.update(range(5, len(header)))
+
     lines = [
         "  ".join(
             _pad(column, widths[idx], idx in right_indices)
@@ -277,6 +290,7 @@ def _table_lines_plain(
         ),
         "  ".join("-" * widths[idx] for idx in range(len(header))),
     ]
+
     for raw_cells, row in zip(raw_body, rows):
         colored = _colorize_cells(raw_cells, row.change)
         lines.append(
@@ -289,13 +303,22 @@ def _table_lines_plain(
 
 
 def _group_rows(comparison: Comparison) -> list[tuple[str, list[ComparisonRow]]]:
-    slower = [row for row in comparison.rows if "slower" in row.change]
-    faster = [row for row in comparison.rows if "faster" in row.change]
+    slower = [
+        row
+        for row in comparison.rows
+        if "slower" in row.change or row.change == "regression"
+    ]
+    faster = [
+        row
+        for row in comparison.rows
+        if "faster" in row.change or row.change == "improvement"
+    ]
     stable = [row for row in comparison.rows if row.change == "no change"]
     needs_attention = [
         row
         for row in comparison.rows
-        if row.change in {"incomparable", "expected_failure", "new", "removed"}
+        if row.change
+        in {"incomparable", "expected_failure", "new", "removed", "inconclusive"}
     ]
     return [
         ("Regressions (slower)", slower),

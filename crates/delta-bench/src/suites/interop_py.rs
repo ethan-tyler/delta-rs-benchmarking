@@ -4,13 +4,15 @@ use std::time::Instant;
 
 use serde::Deserialize;
 
+use crate::cli::BenchmarkLane;
 use crate::error::{BenchError, BenchResult};
 use crate::results::{
     validate_case_classification, CaseFailure, CaseResult, ElapsedStats, IterationSample,
-    RuntimeIOMetrics, SampleMetrics,
+    RuntimeIOMetrics, SampleMetrics, FAILURE_KIND_EXECUTION_ERROR,
 };
 use crate::stats::compute_stats;
 use crate::storage::StorageConfig;
+use crate::validation::lane_requires_semantic_validation;
 
 const CASES: [&str; 3] = [
     "pandas_roundtrip_smoke",
@@ -48,6 +50,10 @@ struct InteropCaseOutput {
     result_hash: Option<String>,
     #[serde(default)]
     schema_hash: Option<String>,
+    #[serde(default)]
+    semantic_state_digest: Option<String>,
+    #[serde(default)]
+    validation_summary: Option<String>,
     #[serde(default)]
     elapsed_ms: Option<f64>,
     classification: String,
@@ -109,6 +115,7 @@ pub fn case_names() -> Vec<String> {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    lane: BenchmarkLane,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -119,9 +126,21 @@ pub async fn run(
             .map(|case| CaseResult {
                 case,
                 success: true,
+                validation_passed: true,
+                perf_valid: false,
                 classification: "expected_failure".to_string(),
                 samples: Vec::new(),
                 elapsed_stats: None,
+                run_summary: None,
+                run_summaries: None,
+                suite_manifest_hash: None,
+                case_definition_hash: None,
+                compatibility_key: None,
+                supports_decision: None,
+                required_runs: None,
+                decision_threshold_pct: None,
+                decision_metric: None,
+                failure_kind: Some(FAILURE_KIND_EXECUTION_ERROR.to_string()),
                 failure: Some(CaseFailure {
                     message: "interop_py currently supports local backend only in P0".to_string(),
                 }),
@@ -132,7 +151,18 @@ pub async fn run(
     let runtime = InteropRuntimeConfig::from_env()?;
     let mut out = Vec::new();
     for case in CASES {
-        out.push(run_case(case, fixtures_dir, scale, warmup, iterations, &runtime).await?);
+        out.push(
+            run_case(
+                case,
+                fixtures_dir,
+                scale,
+                lane,
+                warmup,
+                iterations,
+                &runtime,
+            )
+            .await?,
+        );
     }
     Ok(out)
 }
@@ -141,6 +171,7 @@ async fn run_case(
     case: &str,
     fixtures_dir: &Path,
     scale: &str,
+    lane: BenchmarkLane,
     warmup: u32,
     iterations: u32,
     runtime: &InteropRuntimeConfig,
@@ -161,6 +192,23 @@ async fn run_case(
                 let elapsed_ms = output
                     .elapsed_ms
                     .unwrap_or_else(|| started.elapsed().as_secs_f64() * 1000.0);
+                let semantic_state_digest = if lane_requires_semantic_validation(lane) {
+                    output
+                        .semantic_state_digest
+                        .clone()
+                        .or_else(|| output.result_hash.clone())
+                } else {
+                    None
+                };
+                let validation_summary = if lane_requires_semantic_validation(lane) {
+                    output.validation_summary.clone().or_else(|| {
+                        output
+                            .rows_processed
+                            .map(|rows| format!("rows_processed={rows}"))
+                    })
+                } else {
+                    None
+                };
                 let metrics = SampleMetrics::base(
                     output.rows_processed,
                     output.bytes_processed,
@@ -177,6 +225,8 @@ async fn run_case(
                     spill_bytes: output.spill_bytes,
                     result_hash: output.result_hash,
                     schema_hash: output.schema_hash,
+                    semantic_state_digest,
+                    validation_summary,
                 });
                 samples.push(IterationSample {
                     elapsed_ms,
@@ -189,9 +239,21 @@ async fn run_case(
                 return Ok(CaseResult {
                     case: case.to_string(),
                     success: false,
+                    validation_passed: false,
+                    perf_valid: false,
                     classification,
-                    elapsed_stats: elapsed_stats_from_samples(&samples),
+                    elapsed_stats: None,
+                    run_summary: None,
+                    run_summaries: None,
+                    suite_manifest_hash: None,
+                    case_definition_hash: None,
+                    compatibility_key: None,
+                    supports_decision: None,
+                    required_runs: None,
+                    decision_threshold_pct: None,
+                    decision_metric: None,
                     samples,
+                    failure_kind: Some(FAILURE_KIND_EXECUTION_ERROR.to_string()),
                     failure: Some(CaseFailure {
                         message: error.to_string(),
                     }),
@@ -203,9 +265,21 @@ async fn run_case(
     Ok(CaseResult {
         case: case.to_string(),
         success: true,
+        validation_passed: true,
+        perf_valid: true,
         classification,
         elapsed_stats: elapsed_stats_from_samples(&samples),
+        run_summary: None,
+        run_summaries: None,
+        suite_manifest_hash: None,
+        case_definition_hash: None,
+        compatibility_key: None,
+        supports_decision: None,
+        required_runs: None,
+        decision_threshold_pct: None,
+        decision_metric: None,
         samples,
+        failure_kind: None,
         failure: None,
     })
 }
@@ -323,6 +397,8 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
+    use crate::cli::BenchmarkLane;
+
     use super::{run_case, run_python_case_with_runtime, InteropRuntimeConfig};
 
     #[cfg(unix)]
@@ -353,9 +429,17 @@ printf '%s' '{"rows_processed":1,"bytes_processed":1,"operations":1,"classificat
             python_executable: fake_python.to_string_lossy().into_owned(),
         };
 
-        let case = run_case("pandas_roundtrip_smoke", temp.path(), "sf1", 0, 1, &runtime)
-            .await
-            .expect("run case");
+        let case = run_case(
+            "pandas_roundtrip_smoke",
+            temp.path(),
+            "sf1",
+            BenchmarkLane::Macro,
+            0,
+            1,
+            &runtime,
+        )
+        .await
+        .expect("run case");
 
         assert_eq!(case.samples.len(), 1);
         assert!(

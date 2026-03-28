@@ -1,5 +1,5 @@
 use clap::Parser;
-use delta_bench::cli::{Args, Command, RunnerMode};
+use delta_bench::cli::{Args, BenchmarkMode, Command, RunnerMode};
 
 #[test]
 fn run_command_accepts_new_selector_flags() {
@@ -99,6 +99,17 @@ fn run_command_accepts_no_summary_table_flag() {
         Command::Run {
             no_summary_table, ..
         } => assert!(no_summary_table),
+        other => panic!("unexpected command: {other:?}"),
+    }
+}
+
+#[test]
+fn run_command_accepts_assert_mode() {
+    let args = Args::parse_from(["delta-bench", "run", "--mode", "assert"]);
+    match args.command {
+        Command::Run { benchmark_mode, .. } => {
+            assert_eq!(benchmark_mode, BenchmarkMode::Assert);
+        }
         other => panic!("unexpected command: {other:?}"),
     }
 }

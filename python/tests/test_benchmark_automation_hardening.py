@@ -238,10 +238,14 @@ def test_compare_branch_supports_aggregation_passthrough() -> None:
     )
 
 
-def test_compare_branch_defaults_to_exploratory_mode_and_macro_lane() -> None:
+def test_compare_branch_defaults_to_exploratory_mode_curated_scan_and_macro_lane() -> (
+    None
+):
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "--compare-mode <exploratory|decision>" in script
     assert re.search(r'COMPARE_MODE="\$\{BENCH_COMPARE_MODE:-exploratory\}"', script)
+    assert re.search(r'suite="\$\{positional_refs\[2\]:-scan\}"', script)
+    assert re.search(r'suite="\$\{positional_refs\[0\]:-scan\}"', script)
     assert re.search(r"run_cmd=\(\./scripts/bench\.sh run .* --lane macro", script)
     assert re.search(
         r'compare_args=\(--mode "\$\{COMPARE_MODE\}" --noise-threshold "\$\{NOISE_THRESHOLD\}" --aggregation "\$\{AGGREGATION\}" --format text\)',
@@ -256,15 +260,44 @@ def test_compare_branch_supports_fail_on_passthrough() -> None:
     assert re.search(r'compare_args\+=\(--fail-on "\$\{COMPARE_FAIL_ON\}"\)', script)
 
 
-def test_benchmark_workflow_separates_exploratory_from_decision_status_labels() -> None:
+def test_benchmark_workflow_reports_execution_status_separately_from_compare_mode() -> (
+    None
+):
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "status_label=EXPLORATORY" in workflow
-    assert "Benchmark EXPLORATORY" in workflow
-    assert 'compareMode === "exploratory"' in workflow
+    assert "status_label=EXPLORATORY" not in workflow
+    assert "Benchmark EXPLORATORY" not in workflow
     assert "--compare-mode decision" in workflow
     assert "--fail-on regression,inconclusive" in workflow
     assert "status_label=PASS" in workflow
     assert "status_label=FAIL" in workflow
+    assert "`Compare mode: ${compareMode}`" in workflow
+
+
+def test_benchmark_workflow_fails_job_when_compare_fails() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert 'if [[ "${status}" -ne 0 ]]; then' in workflow
+    assert 'exit "${status}"' in workflow
+
+
+def test_benchmark_workflow_posts_results_even_after_compare_step_failure() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert (
+        "if: always() && steps.parse.outputs.mode == 'run' && "
+        "steps.auth.outputs.allowed == 'true' && "
+        "steps.pr.outputs.same_repo == 'true'"
+    ) in workflow
+
+
+def test_benchmark_workflow_does_not_mask_exploratory_failures() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert (
+        'if [[ "${compare_mode}" == "exploratory" ]]; then\n'
+        '            echo "status_label=EXPLORATORY" >> "$GITHUB_OUTPUT"'
+    ) not in workflow
+    assert (
+        'const heading = compareMode === "exploratory"\n'
+        '              ? "### Benchmark EXPLORATORY"'
+    ) not in workflow
 
 
 def test_benchmark_nightly_is_explicit_macro_lane_for_curated_scan_only() -> None:
@@ -729,7 +762,7 @@ exit 99
         env["BENCH_ITERS"] = "1"
 
         result = subprocess.run(
-            ["bash", str(compare_copy), "main", "candidate", "all"],
+            ["bash", str(compare_copy), "main", "candidate", "scan"],
             cwd=temp_root,
             env=env,
             check=False,
@@ -792,7 +825,7 @@ exit 99
         )
 
         result = subprocess.run(
-            ["bash", str(compare_copy), "main", "candidate", "all"],
+            ["bash", str(compare_copy), "main", "candidate", "scan"],
             cwd=temp_root,
             env=env,
             check=False,
@@ -805,6 +838,51 @@ exit 99
             "DELTA_BENCH_CHECKOUT_LOCK_FILE must be outside DELTA_RS_DIR before initial clone"
             in result.stderr
         )
+        assert "git should not be invoked" not in result.stderr
+
+
+def test_compare_branch_rejects_untrusted_macro_compare_suites_before_checkout() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        compare_copy.write_text(
+            COMPARE_BRANCH.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        compare_copy.chmod(0o755)
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        fake_git = fake_bin / "git"
+        fake_git.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+printf "git should not be invoked\\n" >&2
+exit 99
+""",
+            encoding="utf-8",
+        )
+        fake_git.chmod(0o755)
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+        result = subprocess.run(
+            ["bash", str(compare_copy), "main", "candidate", "all"],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "suite 'all' is not supported" in result.stderr
+        assert "macro-lane branch compare" in result.stderr
+        assert "scan" in result.stderr
         assert "git should not be invoked" not in result.stderr
 
 

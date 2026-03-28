@@ -159,9 +159,9 @@ def run_matrix(
     if not pending:
         return state
 
-    in_flight: dict[
-        concurrent.futures.Future, tuple[str, MatrixArtifact, str, str]
-    ] = {}
+    in_flight: dict[concurrent.futures.Future, tuple[str, MatrixArtifact, str, str]] = (
+        {}
+    )
     next_idx = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=config.max_parallel) as pool:
         while next_idx < len(pending) or in_flight:
@@ -197,6 +197,7 @@ def run_matrix(
                 "revision": artifact.revision,
                 "suite": suite,
                 "scale": scale,
+                "lane": config.lane,
                 "status": status,
                 "attempts": attempts,
                 "failure_reason": failure_reason,
@@ -287,7 +288,12 @@ def _default_executor(
     if not artifact_binary.exists():
         return 1, f"artifact binary not found: {artifact_binary}"
 
-    label = matrix_result_label(config.label_prefix, artifact.revision, scale)
+    label = matrix_result_label(
+        config.label_prefix,
+        artifact.revision,
+        scale,
+        config.lane,
+    )
     cmd = [
         str(artifact_binary),
         "--fixtures-dir",
@@ -337,8 +343,16 @@ def _case_key(revision: str, suite: str, scale: str) -> str:
     return f"{revision}|{suite}|{scale}"
 
 
-def matrix_result_label(label_prefix: str, revision: str, scale: str) -> str:
-    return sanitize_label(f"{label_prefix}-{revision}-{scale}")
+def matrix_result_label(
+    label_prefix: str,
+    revision: str,
+    scale: str,
+    lane: str | None = None,
+) -> str:
+    parts = [label_prefix, revision, scale]
+    if lane:
+        parts.append(lane)
+    return sanitize_label("-".join(parts))
 
 
 def sanitize_label(value: str) -> str:

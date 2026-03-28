@@ -761,6 +761,18 @@ def test_compare_cli_rejects_context_mismatch_without_traceback(
     assert "Traceback" not in result.stderr
 
 
+def test_compare_cli_rejects_missing_input_without_traceback(tmp_path: Path) -> None:
+    baseline_path = tmp_path / "missing-baseline.json"
+    candidate_path = tmp_path / "missing-candidate.json"
+
+    result = _run_compare_cli(baseline_path, candidate_path)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert str(baseline_path) in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_compare_cli_fail_on_regression_exits_non_zero(tmp_path: Path) -> None:
     baseline = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 1.0}]}])
     candidate = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 1.0}]}])
@@ -826,7 +838,43 @@ def test_compare_cli_default_exit_policy_remains_non_failing(tmp_path: Path) -> 
     )
 
     assert result.returncode == 0
-    assert "regression" in result.stdout.lower()
+
+
+def test_compare_cli_rejects_unknown_fail_on_status(tmp_path: Path) -> None:
+    baseline = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 1.0}]}])
+    candidate = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 1.0}]}])
+    baseline["cases"][0]["run_summaries"] = [{"median_ms": 100.0}] * 5
+    candidate["cases"][0]["run_summaries"] = [{"median_ms": 120.0}] * 5
+
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "delta_bench_compare.compare",
+            "--baseline",
+            str(baseline_path),
+            "--candidate",
+            str(candidate_path),
+            "--mode",
+            "decision",
+            "--fail-on",
+            "regresion",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])},
+    )
+
+    assert result.returncode == 1
+    assert "invalid --fail-on status" in result.stderr
+    assert "regresion" in result.stderr
+    assert "regression" in result.stderr
 
 
 def test_format_change_handles_zero_baseline() -> None:

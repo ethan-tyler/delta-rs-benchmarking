@@ -14,6 +14,7 @@ from delta_bench_longitudinal.matrix_runner import (
     MatrixRunConfig,
     _validate_tokens,
     load_matrix_state,
+    matrix_result_label,
     run_matrix,
     sanitize_label,
     save_matrix_state,
@@ -510,3 +511,20 @@ def test_python_label_contract_matches_shared_fixture() -> None:
 
     for raw, expected in contract["sanitized"].items():
         assert sanitize_label(raw) == expected
+
+
+def test_matrix_result_label_scopes_results_by_lane() -> None:
+    assert (
+        matrix_result_label("nightly/bench", "revA", "sf1", "macro")
+        == "nightly_bench-revA-sf1-macro"
+    )
+    assert (
+        matrix_result_label("nightly/bench", "revA", "sf1", "correctness")
+        == "nightly_bench-revA-sf1-correctness"
+    )
+    assert matrix_result_label("nightly/bench", "revA", "sf1", "macro") != (
+        matrix_result_label("nightly/bench", "revA", "sf1", "correctness")
+    )
+    assert matrix_result_label("nightly/bench", "revA", "sf1") == (
+        "nightly_bench-revA-sf1"
+    )

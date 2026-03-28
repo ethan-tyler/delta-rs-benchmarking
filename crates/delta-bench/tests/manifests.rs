@@ -171,6 +171,40 @@ cases:
 }
 
 #[test]
+fn manifest_rejects_unknown_lane_values() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let file = temp.path().join("manifest.yaml");
+    std::fs::write(
+        &file,
+        r#"
+id: test
+description: invalid lane manifest
+cases:
+  - id: case1
+    target: write
+    runner: rust
+    lane: macroo
+"#,
+    )
+    .expect("write manifest");
+
+    let err = load_manifest(&file).expect_err("unknown lane must fail");
+    let message = err.to_string();
+    assert!(
+        message.contains("case1"),
+        "case id should be named: {message}"
+    );
+    assert!(
+        message.contains("macroo"),
+        "invalid lane should be echoed back: {message}"
+    );
+    assert!(
+        message.contains("smoke, correctness, macro"),
+        "allowed lanes should be documented: {message}"
+    );
+}
+
+#[test]
 fn p0_rust_manifest_includes_all_delete_update_cases() {
     let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");

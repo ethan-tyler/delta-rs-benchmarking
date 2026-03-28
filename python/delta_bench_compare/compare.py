@@ -27,6 +27,16 @@ from .schema import (
 
 VALID_AGGREGATIONS = {"min", "median", "p95"}
 VALID_COMPARE_MODES = {"exploratory", "decision"}
+VALID_FAIL_ON_STATUSES = {
+    "expected_failure",
+    "improvement",
+    "incomparable",
+    "inconclusive",
+    "new",
+    "no change",
+    "regression",
+    "removed",
+}
 
 
 def representative_sample(case: dict, aggregation: str = "median") -> dict | None:
@@ -422,7 +432,19 @@ def _resolve_input_paths(
 
 
 def _parse_fail_on(raw: str) -> set[str]:
-    return {item.strip() for item in raw.split(",") if item.strip()}
+    statuses = {item.strip() for item in raw.split(",") if item.strip()}
+    invalid = sorted(
+        status for status in statuses if status not in VALID_FAIL_ON_STATUSES
+    )
+    if invalid:
+        raise ValueError(
+            "invalid --fail-on status(es): "
+            + ", ".join(invalid)
+            + " (expected one of: "
+            + ", ".join(sorted(VALID_FAIL_ON_STATUSES))
+            + ")"
+        )
+    return statuses
 
 
 def main() -> None:
@@ -459,6 +481,7 @@ def main() -> None:
         set_color_mode(args.color == "always")
 
     try:
+        fail_on_statuses = _parse_fail_on(args.fail_on)
         comparison = compare_runs(
             _load(baseline_path),
             _load(candidate_path),
@@ -466,7 +489,7 @@ def main() -> None:
             aggregation=args.aggregation,
             mode=args.mode,
         )
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
     output = (
@@ -475,7 +498,7 @@ def main() -> None:
         else render_text(comparison, include_metrics=args.include_metrics)
     )
     print(output)
-    if any(row.change in _parse_fail_on(args.fail_on) for row in comparison.rows):
+    if any(row.change in fail_on_statuses for row in comparison.rows):
         raise SystemExit(2)
 
 

@@ -94,8 +94,21 @@ Options:
   --mode <perf|assert>            Benchmark mode forwarded to bench.sh run (default: perf)
   --dataset-id <id>               Dataset id forwarded to bench.sh data/run
   --timing-phase <phase>          Timing phase forwarded to bench.sh run (default: execute)
+                                  Trusted macro-lane compare suites: scan, write_perf, tpcds, interop_py (default: scan)
   -h, --help                      Show this help
 EOF
+}
+
+trusted_macro_compare_suite() {
+  local requested_suite="${1:-}"
+  case "${requested_suite}" in
+    scan|write_perf|tpcds|interop_py)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 while [[ $# -gt 0 ]]; do
@@ -227,7 +240,7 @@ fi
 
 base_ref="${positional_refs[0]:-main}"
 candidate_ref="${positional_refs[1]:-}"
-suite="${positional_refs[2]:-all}"
+suite="${positional_refs[2]:-scan}"
 base_ref_mode="auto"
 candidate_ref_mode="auto"
 
@@ -243,7 +256,7 @@ if (( WORKING_VS_UPSTREAM_MAIN != 0 )); then
   fi
   base_ref=""
   candidate_ref=""
-  suite="${positional_refs[0]:-all}"
+  suite="${positional_refs[0]:-scan}"
 fi
 
 if [[ -n "${BASE_SHA_OVERRIDE}" ]]; then
@@ -291,6 +304,13 @@ case "${COMPARE_MODE}" in
     exit 1
     ;;
 esac
+
+if ! trusted_macro_compare_suite "${suite}"; then
+  echo "suite '${suite}' is not supported for macro-lane branch compare." >&2
+  echo "compare_branch.sh supports only trusted perf suites: scan, write_perf, tpcds, interop_py." >&2
+  echo "use suite 'scan' for the curated default, or run unsupported stateful suites through purpose-built validation/longitudinal flows." >&2
+  exit 1
+fi
 
 if ! is_positive_integer "${BENCH_WARMUP}"; then
   echo "invalid --warmup '${BENCH_WARMUP}'; expected positive integer" >&2

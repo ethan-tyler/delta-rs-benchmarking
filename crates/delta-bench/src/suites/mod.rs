@@ -373,7 +373,7 @@ fn assertions_for_requested_lane(
 ) -> Vec<CaseAssertion> {
     match requested_lane {
         BenchmarkLane::Correctness => plan.assertions.clone(),
-        BenchmarkLane::Macro if plan.lane == "correctness" => plan
+        BenchmarkLane::Macro if plan.lane == BenchmarkLane::Correctness.as_str() => plan
             .assertions
             .iter()
             .filter(|assertion| {

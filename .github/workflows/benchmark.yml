@@ -234,16 +234,17 @@ jobs:
           set -e
 
           echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
-          if [[ "${compare_mode}" == "exploratory" ]]; then
-            echo "status_label=EXPLORATORY" >> "$GITHUB_OUTPUT"
-          elif [[ "${status}" -eq 0 ]]; then
+          if [[ "${status}" -eq 0 ]]; then
             echo "status_label=PASS" >> "$GITHUB_OUTPUT"
           else
             echo "status_label=FAIL" >> "$GITHUB_OUTPUT"
           fi
+          if [[ "${status}" -ne 0 ]]; then
+            exit "${status}"
+          fi
 
       - name: Post benchmark result
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
+        if: always() && steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -254,13 +255,10 @@ jobs:
             const exitCode = `${{ steps.bench.outputs.exit_code }}`;
             const compareMode = `${{ steps.parse.outputs.compare_mode }}`;
             const headingByStatus = {
-              EXPLORATORY: "### Benchmark EXPLORATORY",
               PASS: "### Benchmark PASS",
               FAIL: "### Benchmark FAIL",
             };
-            const heading = compareMode === "exploratory"
-              ? "### Benchmark EXPLORATORY"
-              : (headingByStatus[status] || `### Benchmark ${status}`);
+            const heading = headingByStatus[status] || `### Benchmark ${status}`;
             let output = "(no output produced)";
             if (fs.existsSync("benchmark_output.md")) {
               output = fs.readFileSync("benchmark_output.md", "utf8");

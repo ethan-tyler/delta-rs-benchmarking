@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::assertions::CaseAssertion;
+use crate::cli::BenchmarkLane;
 use crate::error::{BenchError, BenchResult};
 
 pub const DEFAULT_RUST_MANIFEST_PATH: &str = "bench/manifests/core_rust.yaml";
@@ -48,6 +49,14 @@ fn default_runner() -> String {
 
 fn default_lane() -> String {
     "macro".to_string()
+}
+
+fn valid_manifest_lanes() -> [&'static str; 3] {
+    [
+        BenchmarkLane::Smoke.as_str(),
+        BenchmarkLane::Correctness.as_str(),
+        BenchmarkLane::Macro.as_str(),
+    ]
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -138,9 +147,26 @@ impl DatasetId {
 pub fn load_manifest(path: impl AsRef<Path>) -> BenchResult<BenchmarkManifest> {
     let path = path.as_ref();
     let bytes = std::fs::read(path)?;
-    serde_yaml::from_slice::<BenchmarkManifest>(&bytes).map_err(|error| {
+    let manifest = serde_yaml::from_slice::<BenchmarkManifest>(&bytes).map_err(|error| {
         BenchError::InvalidArgument(format!("invalid manifest '{}': {error}", path.display()))
-    })
+    })?;
+    validate_manifest(path, manifest)
+}
+
+fn validate_manifest(path: &Path, manifest: BenchmarkManifest) -> BenchResult<BenchmarkManifest> {
+    let valid_lanes = valid_manifest_lanes();
+    for case in &manifest.cases {
+        if !valid_lanes.contains(&case.lane.as_str()) {
+            return Err(BenchError::InvalidArgument(format!(
+                "invalid manifest '{}': case '{}' uses unsupported lane '{}' (expected one of: {})",
+                path.display(),
+                case.id,
+                case.lane,
+                valid_lanes.join(", ")
+            )));
+        }
+    }
+    Ok(manifest)
 }
 
 pub(crate) fn benchmark_repo_root() -> PathBuf {

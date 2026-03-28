@@ -280,7 +280,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--measure-order` | `alternate` | Run interleaving: `base-first`, `candidate-first`, `alternate` |
 | `--aggregation` | `median` | Aggregation method: `min`, `median`, `p95` |
 | `--compare-mode` | `exploratory` | Comparison policy for `compare.py`: `exploratory` or `decision` |
-| `--fail-on` | — | Comma-separated statuses that should force a non-zero compare exit (`regression`, `inconclusive`, `new`, `removed`, `incomparable`) |
+| `--fail-on` | — | Comma-separated statuses that should force a non-zero compare exit (`expected_failure`, `improvement`, `incomparable`, `inconclusive`, `new`, `no change`, `regression`, `removed`) |
 | `--noise-threshold` | `0.05` | Minimum relative change to classify as regression/improvement |
 | `--remote-runner` | — | SSH target for remote execution |
 | `--remote-root` | — | Remote working directory |

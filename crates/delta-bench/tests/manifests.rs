@@ -33,6 +33,10 @@ fn loads_p0_rust_manifest_in_file_order() {
             "write_append_small",
             "write_append_large",
             "write_overwrite",
+            "write_perf_partitioned_1m_parts_010",
+            "write_perf_partitioned_1m_parts_100",
+            "write_perf_partitioned_5m_parts_010",
+            "write_perf_unpartitioned_1m",
             "delete_1pct_localized",
             "delete_5pct_scattered",
             "delete_50pct_broad",
@@ -63,6 +67,25 @@ fn loads_p0_rust_manifest_in_file_order() {
             "tpcds_q64",
         ]
     );
+}
+
+#[test]
+fn p0_rust_manifest_includes_all_write_perf_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let expected_cases = list_cases_for_target("write_perf")
+        .expect("write_perf should be a registered suite target");
+
+    for case in expected_cases {
+        let present = manifest
+            .cases
+            .iter()
+            .any(|entry| entry.target == "write_perf" && entry.id == case);
+        assert!(
+            present,
+            "missing write_perf manifest entry for case '{case}'"
+        );
+    }
 }
 
 #[test]
@@ -115,7 +138,12 @@ cases:
   - id: case1
     target: write
     runner: rust
+    lane: correctness
     enabled: true
+    supports_decision: false
+    required_runs: 1
+    decision_threshold_pct: 0.0
+    decision_metric: median
     assertions:
       - type: expected_error_contains
         value: fixture load failed
@@ -126,6 +154,11 @@ cases:
 
     let manifest = load_manifest(&file).expect("manifest should parse");
     assert_eq!(manifest.cases.len(), 1);
+    assert_eq!(manifest.cases[0].lane, "correctness");
+    assert_eq!(manifest.cases[0].supports_decision, Some(false));
+    assert_eq!(manifest.cases[0].required_runs, Some(1));
+    assert_eq!(manifest.cases[0].decision_threshold_pct, Some(0.0));
+    assert_eq!(manifest.cases[0].decision_metric.as_deref(), Some("median"));
     assert_eq!(manifest.cases[0].assertions.len(), 2);
     assert!(matches!(
         manifest.cases[0].assertions[0],

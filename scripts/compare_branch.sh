@@ -26,6 +26,9 @@ STORAGE_BACKEND="${BENCH_STORAGE_BACKEND:-local}"
 STORAGE_OPTIONS=()
 BACKEND_PROFILE="${BENCH_BACKEND_PROFILE:-}"
 RUNNER_MODE="${BENCH_RUNNER_MODE:-all}"
+BENCHMARK_MODE="${BENCH_BENCHMARK_MODE:-perf}"
+DATASET_ID="${BENCH_DATASET_ID:-}"
+TIMING_PHASE="${BENCH_TIMING_PHASE:-execute}"
 
 sanitize_label() {
   local raw="${1:-}"
@@ -83,6 +86,9 @@ Options:
   --storage-option <KEY=VALUE>    Repeatable storage option forwarded to bench.sh (for non-local backends)
   --backend-profile <name>        Optional backend profile file under backends/<name>.env
   --runner <rust|python|all>      Runner mode forwarded to bench.sh run (default: all)
+  --mode <perf|assert>            Benchmark mode forwarded to bench.sh run (default: perf)
+  --dataset-id <id>               Dataset id forwarded to bench.sh data/run
+  --timing-phase <phase>          Timing phase forwarded to bench.sh run (default: execute)
   -h, --help                      Show this help
 EOF
 }
@@ -167,6 +173,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --runner)
       RUNNER_MODE="$2"
+      shift 2
+      ;;
+    --mode)
+      BENCHMARK_MODE="$2"
+      shift 2
+      ;;
+    --dataset-id)
+      DATASET_ID="$2"
+      shift 2
+      ;;
+    --timing-phase)
+      TIMING_PHASE="$2"
       shift 2
       ;;
     -h|--help)
@@ -277,6 +295,19 @@ case "${BENCH_MEASURE_ORDER}" in
     ;;
   *)
     echo "invalid --measure-order '${BENCH_MEASURE_ORDER}'; expected base-first, candidate-first, or alternate" >&2
+    exit 1
+    ;;
+esac
+
+case "${BENCHMARK_MODE}" in
+  perf)
+    ;;
+  assert)
+    echo "compare_branch.sh requires --mode perf; assert mode emits validation-only artifacts that cannot be compared" >&2
+    exit 1
+    ;;
+  *)
+    echo "invalid --mode '${BENCHMARK_MODE}'; expected perf or assert" >&2
     exit 1
     ;;
 esac
@@ -607,7 +638,11 @@ run_benchmark_suite_for_ref() {
     run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
   fi
 
-  local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --warmup "${warmup}" --iters "${iters}")
+  local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --mode "${BENCHMARK_MODE}" --warmup "${warmup}" --iters "${iters}")
+  if [[ -n "${DATASET_ID}" ]]; then
+    run_cmd+=(--dataset-id "${DATASET_ID}")
+  fi
+  run_cmd+=(--timing-phase "${TIMING_PHASE}")
   run_cmd+=("${storage_args[@]}")
   if [[ ${#profile_args[@]} -gt 0 ]]; then
     run_cmd+=("${profile_args[@]}")
@@ -684,7 +719,15 @@ cand_label="cand-$(sanitize_label "${candidate_ref}")"
 
 prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
 run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" ./scripts/bench.sh data --scale sf1 --seed 42 "${storage_args[@]}" ${profile_args[@]+"${profile_args[@]}"}
+data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)
+if [[ -n "${DATASET_ID}" ]]; then
+  data_cmd+=(--dataset-id "${DATASET_ID}")
+fi
+data_cmd+=("${storage_args[@]}")
+if [[ ${#profile_args[@]} -gt 0 ]]; then
+  data_cmd+=("${profile_args[@]}")
+fi
+run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" "${data_cmd[@]}"
 
 if (( BENCH_PREWARM_ITERS > 0 )); then
   phase "${current_phase}" "${total_phases}" "Prewarm runs (${BENCH_PREWARM_ITERS} iterations, results discarded)"

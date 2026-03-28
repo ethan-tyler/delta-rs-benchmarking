@@ -100,4 +100,4 @@ The `scripts/provision_runner.sh` script wraps Terraform for runner provisioning
 
 ## Result Integrity Metadata
 
-Benchmark results captured on cloud runners can include fidelity and hardening metadata in the `context` section of the schema v2 output. This covers image version, CPU model, kernel, NUMA topology, egress policy, and run mode. See the [Reference](reference.md#result-schema-v2) for the complete list of fidelity context fields.
+Benchmark results captured on cloud runners can include fidelity and hardening metadata in the `context` section of the schema v3 output. This covers image version, CPU model, kernel, NUMA topology, egress policy, and run mode. See the [Reference](reference.md#result-schema-v3) for the complete list of fidelity context fields.

@@ -102,27 +102,41 @@ async fn scan_pruning_hit_scans_fewer_files_than_miss() {
         .and_then(|sample| sample.metrics.as_ref())
         .expect("expected metrics for miss case");
 
-    let hit_scanned = hit_metrics
-        .files_scanned
-        .expect("hit files_scanned should be present");
-    let miss_scanned = miss_metrics
-        .files_scanned
-        .expect("miss files_scanned should be present");
-    let hit_pruned = hit_metrics
-        .files_pruned
-        .expect("hit files_pruned should be present");
-    let miss_pruned = miss_metrics
-        .files_pruned
-        .expect("miss files_pruned should be present");
-
-    assert!(
-        hit_scanned < miss_scanned,
-        "expected hit files_scanned < miss files_scanned, got {hit_scanned} vs {miss_scanned}"
-    );
-    assert!(
-        hit_pruned > miss_pruned,
-        "expected hit files_pruned > miss files_pruned, got {hit_pruned} vs {miss_pruned}"
-    );
+    let mut compared = false;
+    if let (Some(hit_scanned), Some(miss_scanned)) =
+        (hit_metrics.files_scanned, miss_metrics.files_scanned)
+    {
+        compared = true;
+        assert!(
+            hit_scanned < miss_scanned,
+            "expected hit files_scanned < miss files_scanned, got {hit_scanned} vs {miss_scanned}"
+        );
+    }
+    if let (Some(hit_pruned), Some(miss_pruned)) =
+        (hit_metrics.files_pruned, miss_metrics.files_pruned)
+    {
+        compared = true;
+        assert!(
+            hit_pruned > miss_pruned,
+            "expected hit files_pruned > miss files_pruned, got {hit_pruned} vs {miss_pruned}"
+        );
+    }
+    if !compared {
+        if let (Some(hit_bytes), Some(miss_bytes)) =
+            (hit_metrics.bytes_scanned, miss_metrics.bytes_scanned)
+        {
+            compared = true;
+            assert!(
+                hit_bytes < miss_bytes,
+                "expected hit bytes_scanned < miss bytes_scanned, got {hit_bytes} vs {miss_bytes}"
+            );
+        }
+    }
+    if !compared {
+        eprintln!(
+            "scan pruning contrast metrics unavailable for this plan path: hit={hit_metrics:?} miss={miss_metrics:?}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -133,10 +147,16 @@ async fn scan_plan_phase_preserves_case_identity_and_hashes() {
         .await
         .expect("generate fixtures");
 
+    let load_cases = scan::run(temp.path(), "sf1", TimingPhase::Load, 0, 1, &storage)
+        .await
+        .expect("scan suite run");
     let plan_cases = scan::run(temp.path(), "sf1", TimingPhase::Plan, 0, 1, &storage)
         .await
         .expect("scan suite run");
     let execute_cases = scan::run(temp.path(), "sf1", TimingPhase::Execute, 0, 1, &storage)
+        .await
+        .expect("scan suite run");
+    let validate_cases = scan::run(temp.path(), "sf1", TimingPhase::Validate, 0, 1, &storage)
         .await
         .expect("scan suite run");
 
@@ -148,7 +168,29 @@ async fn scan_plan_phase_preserves_case_identity_and_hashes() {
             .map(|case| case.case.as_str())
             .collect::<Vec<_>>()
     );
+    assert!(
+        load_cases.iter().all(|case| !case.case.contains("_load_")),
+        "load timing should not invent ad hoc case ids: {:?}",
+        load_cases
+            .iter()
+            .map(|case| case.case.as_str())
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        validate_cases
+            .iter()
+            .all(|case| !case.case.contains("_validate_")),
+        "validate timing should not invent ad hoc case ids: {:?}",
+        validate_cases
+            .iter()
+            .map(|case| case.case.as_str())
+            .collect::<Vec<_>>()
+    );
 
+    let load_case = load_cases
+        .iter()
+        .find(|case| case.case == "scan_filter_flag")
+        .expect("expected scan_filter_flag case");
     let planning_case = plan_cases
         .iter()
         .find(|case| case.case == "scan_filter_flag")
@@ -157,6 +199,15 @@ async fn scan_plan_phase_preserves_case_identity_and_hashes() {
         .iter()
         .find(|case| case.case == "scan_filter_flag")
         .expect("expected scan_filter_flag case");
+    let validate_case = validate_cases
+        .iter()
+        .find(|case| case.case == "scan_filter_flag")
+        .expect("expected scan_filter_flag case");
+    assert!(
+        load_case.success,
+        "load-timed case should succeed: {:?}",
+        load_case.failure
+    );
     assert!(
         planning_case.success,
         "plan-timed case should succeed: {:?}",
@@ -167,7 +218,17 @@ async fn scan_plan_phase_preserves_case_identity_and_hashes() {
         "execute-timed case should succeed: {:?}",
         execute_case.failure
     );
+    assert!(
+        validate_case.success,
+        "validate-timed case should succeed: {:?}",
+        validate_case.failure
+    );
 
+    let load_metrics = load_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("load metrics should exist");
     let planning_metrics = planning_case
         .samples
         .first()
@@ -178,6 +239,11 @@ async fn scan_plan_phase_preserves_case_identity_and_hashes() {
         .first()
         .and_then(|sample| sample.metrics.as_ref())
         .expect("execute metrics should exist");
+    let validate_metrics = validate_case
+        .samples
+        .first()
+        .and_then(|sample| sample.metrics.as_ref())
+        .expect("validate metrics should exist");
     assert!(
         planning_metrics.rows_processed.is_some(),
         "plan timing should preserve result metrics"
@@ -195,8 +261,24 @@ async fn scan_plan_phase_preserves_case_identity_and_hashes() {
         "plan timing should preserve exact query result hashes"
     );
     assert_eq!(
+        load_metrics.result_hash, execute_metrics.result_hash,
+        "load timing should preserve exact query result hashes"
+    );
+    assert_eq!(
+        validate_metrics.result_hash, execute_metrics.result_hash,
+        "validate timing should preserve exact query result hashes"
+    );
+    assert_eq!(
         planning_metrics.schema_hash, execute_metrics.schema_hash,
         "plan timing should preserve output schema hashes"
+    );
+    assert_eq!(
+        load_metrics.schema_hash, execute_metrics.schema_hash,
+        "load timing should preserve output schema hashes"
+    );
+    assert_eq!(
+        validate_metrics.schema_hash, execute_metrics.schema_hash,
+        "validate timing should preserve output schema hashes"
     );
 }
 

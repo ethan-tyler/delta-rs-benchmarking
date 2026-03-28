@@ -160,6 +160,8 @@ async fn run_append_case(
         spill_bytes: None,
         result_hash: Some(result_hash),
         schema_hash: Some(schema_hash),
+        semantic_state_digest: None,
+        validation_summary: None,
     }))
 }
 
@@ -206,6 +208,8 @@ async fn run_overwrite_case(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest: None,
+                validation_summary: None,
             }),
     )
 }

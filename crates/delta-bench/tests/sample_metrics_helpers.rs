@@ -54,6 +54,8 @@ fn runtime_io_builder_populates_result_and_schema_hashes() {
             spill_bytes: Some(78),
             result_hash: Some("sha256:result".to_string()),
             schema_hash: Some("sha256:schema".to_string()),
+            semantic_state_digest: None,
+            validation_summary: None,
         },
     );
 

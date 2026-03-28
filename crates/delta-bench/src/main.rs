@@ -3,11 +3,15 @@ use std::fs;
 use chrono::Utc;
 use clap::Parser;
 
-use delta_bench::cli::{parse_storage_options, validate_label, Args, Command, RunnerMode};
-use delta_bench::data::fixtures::{generate_fixtures_with_profile, FixtureProfile};
+use delta_bench::cli::{
+    parse_storage_options, validate_label, Args, BenchmarkMode, Command, RunnerMode,
+};
+use delta_bench::data::fixtures::{generate_fixtures_with_profile, load_manifest, FixtureProfile};
 use delta_bench::error::BenchResult;
 use delta_bench::manifests::{ensure_required_manifests_exist, DatasetId};
-use delta_bench::results::{render_run_summary_table, BenchContext, BenchRunResult};
+use delta_bench::results::{
+    render_run_summary_table, BenchContext, BenchRunResult, RESULT_SCHEMA_VERSION,
+};
 use delta_bench::storage::{load_backend_profile_options, StorageConfig};
 use delta_bench::suites::{
     apply_dataset_assertion_policy, list_targets, plan_run_cases, run_planned_cases,
@@ -46,8 +50,9 @@ async fn main() -> BenchResult<()> {
             seed,
             force,
         } => {
-            let effective_scale = resolve_scale(&scale, dataset_id.as_deref())?;
-            let profile = resolve_fixture_profile(dataset_id.as_deref())?;
+            let dataset = parse_dataset(dataset_id.as_deref())?;
+            let effective_scale = resolve_scale(&scale, dataset)?;
+            let profile = resolve_fixture_profile(dataset)?;
             generate_fixtures_with_profile(
                 &args.fixtures_dir,
                 effective_scale.as_str(),
@@ -69,42 +74,65 @@ async fn main() -> BenchResult<()> {
             target,
             case_filter,
             runner,
+            benchmark_mode,
             timing_phase,
             warmup,
             iterations,
             no_summary_table,
         } => {
-            let effective_scale = resolve_scale(&scale, dataset_id.as_deref())?;
+            let dataset = parse_dataset(dataset_id.as_deref())?;
+            let effective_scale = resolve_scale(&scale, dataset)?;
             validate_label(&args.label)?;
             fs::create_dir_all(&args.results_dir)?;
             let mut run_plan = plan_run_cases(&target, runner, case_filter.as_deref())?;
-            apply_dataset_assertion_policy(&mut run_plan, dataset_id.as_deref());
+            apply_dataset_assertion_policy(&mut run_plan, dataset);
+            let effective_warmup = if benchmark_mode == BenchmarkMode::Assert {
+                0
+            } else {
+                warmup
+            };
+            let effective_iterations = if benchmark_mode == BenchmarkMode::Assert {
+                1
+            } else {
+                iterations
+            };
             let cases = run_planned_cases(
                 &args.fixtures_dir,
                 &run_plan,
                 effective_scale.as_str(),
                 timing_phase,
-                warmup,
-                iterations,
+                effective_warmup,
+                effective_iterations,
                 &storage,
             )
             .await?;
+            let fixture_manifest = load_manifest(&args.fixtures_dir, effective_scale.as_str())?;
             let fidelity = benchmark_fidelity_info(&FidelityEnvOverrides::from_env());
+            let cases = finalize_cases_for_benchmark_mode(cases, benchmark_mode);
 
             let context = BenchContext {
-                schema_version: 2,
+                schema_version: RESULT_SCHEMA_VERSION,
                 label: args.label.clone(),
                 git_sha: args.git_sha.clone(),
                 created_at: Utc::now(),
                 host: host_name(),
                 suite: target.clone(),
                 scale: effective_scale.clone(),
-                iterations,
-                warmup,
+                iterations: effective_iterations,
+                warmup: effective_warmup,
                 timing_phase: Some(timing_phase.as_str().to_string()),
                 dataset_id: dataset_id.clone(),
-                dataset_fingerprint: None,
+                dataset_fingerprint: Some(fixture_manifest.dataset_fingerprint),
                 runner: Some(runner.as_str().to_string()),
+                storage_backend: Some(args.storage_backend.as_str().to_string()),
+                benchmark_mode: Some(benchmark_mode.as_str().to_string()),
+                lane: None,
+                measurement_kind: None,
+                validation_level: None,
+                run_id: None,
+                harness_revision: None,
+                fixture_recipe_hash: fixture_manifest.fixture_recipe_hash.clone().into(),
+                fidelity_fingerprint: None,
                 backend_profile: args.backend_profile.clone(),
                 image_version: fidelity.image_version,
                 hardening_profile_id: fidelity.hardening_profile_id,
@@ -120,7 +148,7 @@ async fn main() -> BenchResult<()> {
                 maintenance_window_id: fidelity.maintenance_window_id,
             };
             let output = BenchRunResult {
-                schema_version: 2,
+                schema_version: RESULT_SCHEMA_VERSION,
                 context,
                 cases,
             };
@@ -278,24 +306,41 @@ async fn main() -> BenchResult<()> {
     Ok(())
 }
 
-fn resolve_scale(scale: &str, dataset_id: Option<&str>) -> BenchResult<String> {
-    let Some(dataset_id) = dataset_id else {
+fn resolve_scale(scale: &str, dataset: Option<DatasetId>) -> BenchResult<String> {
+    let Some(dataset) = dataset else {
         return Ok(scale.to_string());
     };
-    let dataset = DatasetId::parse(dataset_id)?;
     Ok(dataset.scale().to_string())
 }
 
-fn resolve_fixture_profile(dataset_id: Option<&str>) -> BenchResult<FixtureProfile> {
-    let Some(dataset_id) = dataset_id else {
+fn resolve_fixture_profile(dataset: Option<DatasetId>) -> BenchResult<FixtureProfile> {
+    let Some(dataset) = dataset else {
         return Ok(FixtureProfile::Standard);
     };
-    let dataset = DatasetId::parse(dataset_id)?;
     Ok(match dataset.fixture_profile() {
         "many_versions" => FixtureProfile::ManyVersions,
         "tpcds_duckdb" => FixtureProfile::TpcdsDuckdb,
         _ => FixtureProfile::Standard,
     })
+}
+
+fn parse_dataset(dataset_id: Option<&str>) -> BenchResult<Option<DatasetId>> {
+    dataset_id.map(DatasetId::parse).transpose()
+}
+
+fn finalize_cases_for_benchmark_mode(
+    mut cases: Vec<delta_bench::results::CaseResult>,
+    benchmark_mode: BenchmarkMode,
+) -> Vec<delta_bench::results::CaseResult> {
+    if benchmark_mode != BenchmarkMode::Assert {
+        return cases;
+    }
+
+    for case in &mut cases {
+        case.perf_valid = false;
+        case.elapsed_stats = None;
+    }
+    cases
 }
 
 fn command_requires_manifest_preflight(command: &Command) -> bool {

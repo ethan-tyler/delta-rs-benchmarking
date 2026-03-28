@@ -5,8 +5,11 @@ use std::path::{Path, PathBuf};
 use crate::assertions::{apply_case_assertions, CaseAssertion};
 use crate::cli::{RunnerMode, TimingPhase};
 use crate::error::{BenchError, BenchResult};
-use crate::manifests::{load_manifest, DEFAULT_PYTHON_MANIFEST_PATH, DEFAULT_RUST_MANIFEST_PATH};
-use crate::results::{CaseFailure, CaseResult};
+use crate::manifests::{
+    load_manifest, DatasetAssertionPolicy, DatasetId, DEFAULT_PYTHON_MANIFEST_PATH,
+    DEFAULT_RUST_MANIFEST_PATH,
+};
+use crate::results::{CaseFailure, CaseResult, FAILURE_KIND_EXECUTION_ERROR};
 use crate::runner::CaseExecutionResult;
 use crate::storage::StorageConfig;
 
@@ -43,9 +46,21 @@ pub(crate) fn fixture_error_cases(case_names: Vec<String>, message: &str) -> Vec
         .map(|case| CaseResult {
             case,
             success: false,
+            validation_passed: false,
+            perf_valid: false,
             classification: "supported".to_string(),
             samples: Vec::new(),
             elapsed_stats: None,
+            run_summary: None,
+            run_summaries: None,
+            suite_manifest_hash: None,
+            case_definition_hash: None,
+            compatibility_key: None,
+            supports_decision: None,
+            required_runs: None,
+            decision_threshold_pct: None,
+            decision_metric: None,
+            failure_kind: Some(FAILURE_KIND_EXECUTION_ERROR.to_string()),
             failure: Some(CaseFailure {
                 message: format!("fixture load failed: {message}"),
             }),
@@ -63,17 +78,32 @@ pub mod scan;
 mod scan_metrics;
 pub mod tpcds;
 pub mod write;
+pub mod write_perf;
 
 /// Single source of truth for suite names. Adding a new suite requires updating
 /// this array, `list_cases_for_target`, and `run_target`.
-const SUITE_NAMES: [&str; 9] = [
+const SUITE_NAMES: [&str; 10] = [
+    "scan",
+    "write",
+    "write_perf",
+    "delete_update",
+    "merge",
+    "metadata",
+    "optimize_vacuum",
+    "concurrency",
+    "tpcds",
+    "interop_py",
+];
+
+/// `target=all` stays limited to the lightweight default suites; heavier perf
+/// scenarios such as `write_perf` must be requested explicitly.
+const DEFAULT_ALL_TARGETS: [&str; 8] = [
     "scan",
     "write",
     "delete_update",
     "merge",
     "metadata",
     "optimize_vacuum",
-    "concurrency",
     "tpcds",
     "interop_py",
 ];
@@ -113,8 +143,11 @@ pub fn plan_run_cases(
     Ok(planned)
 }
 
-pub fn apply_dataset_assertion_policy(planned: &mut [PlannedCase], dataset_id: Option<&str>) {
-    if dataset_id != Some("tpcds_duckdb") {
+pub fn apply_dataset_assertion_policy(planned: &mut [PlannedCase], dataset: Option<DatasetId>) {
+    let policy = dataset
+        .map(DatasetId::assertion_policy)
+        .unwrap_or_else(DatasetAssertionPolicy::default);
+    if !policy.relax_tpcds_exact_result_hash {
         return;
     }
     for case in planned.iter_mut().filter(|case| case.target == "tpcds") {
@@ -181,10 +214,12 @@ fn validate_timing_phase_for_planned_cases(
     timing_phase: TimingPhase,
 ) -> BenchResult<()> {
     for case in planned {
-        if timing_phase == TimingPhase::Plan && !matches!(case.target.as_str(), "scan" | "tpcds") {
+        if timing_phase != TimingPhase::Execute && !matches!(case.target.as_str(), "scan" | "tpcds")
+        {
             return Err(BenchError::InvalidArgument(format!(
-                "planned run cannot use timing_phase=plan because target='{}' is not phase-aware yet",
-                case.target
+                "planned run cannot use timing_phase={} because target='{}' is not phase-aware yet",
+                timing_phase.as_str(),
+                case.target,
             )));
         }
     }
@@ -196,6 +231,7 @@ pub fn list_cases_for_target(target: &str) -> BenchResult<Vec<String>> {
     match canonical_target {
         "scan" => Ok(scan::case_names()),
         "write" => Ok(write::case_names()),
+        "write_perf" => Ok(write_perf::case_names()),
         "delete_update" => Ok(delete_update::case_names()),
         "merge" => Ok(merge::case_names()),
         "metadata" => Ok(metadata::case_names()),
@@ -205,7 +241,7 @@ pub fn list_cases_for_target(target: &str) -> BenchResult<Vec<String>> {
         "interop_py" => Ok(interop_py::case_names()),
         "all" => {
             let mut names = Vec::new();
-            for suite in SUITE_NAMES {
+            for suite in DEFAULT_ALL_TARGETS {
                 names.extend(list_cases_for_target(suite)?);
             }
             Ok(names)
@@ -286,6 +322,9 @@ fn append_manifest_cases(
         if case.runner != runner_name {
             continue;
         }
+        if target == "all" && !DEFAULT_ALL_TARGETS.contains(&case.target.as_str()) {
+            continue;
+        }
         if target != "all" && case.target != target {
             continue;
         }
@@ -348,6 +387,7 @@ async fn run_single_suite(
             .await
         }
         "write" => write::run(fixtures_dir, scale, warmup, iterations, storage).await,
+        "write_perf" => write_perf::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "delete_update" => {
             delete_update::run(fixtures_dir, scale, warmup, iterations, storage).await
         }
@@ -376,9 +416,10 @@ async fn run_single_suite(
 }
 
 fn validate_timing_phase_for_suite(suite: &str, timing_phase: TimingPhase) -> BenchResult<()> {
-    if timing_phase == TimingPhase::Plan && !matches!(suite, "scan" | "tpcds") {
+    if timing_phase != TimingPhase::Execute && !matches!(suite, "scan" | "tpcds") {
         return Err(BenchError::InvalidArgument(format!(
-            "timing_phase=plan is not supported for target='{suite}'"
+            "timing_phase={} is not supported for target='{suite}'",
+            timing_phase.as_str()
         )));
     }
     Ok(())
@@ -455,6 +496,51 @@ mod tests {
         assert!(
             err.to_string().contains("invalid manifest"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn manifest_planning_for_all_excludes_opt_in_write_perf_cases() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let rust_manifest = temp.path().join("rust.yaml");
+        let python_manifest = temp.path().join("python.yaml");
+        fs::write(
+            &rust_manifest,
+            r#"
+id: core-rust
+description: test
+cases:
+  - id: write_append_small
+    target: write
+    runner: rust
+    enabled: true
+  - id: write_perf_partitioned_1m_parts_010
+    target: write_perf
+    runner: rust
+    enabled: true
+"#,
+        )
+        .expect("write rust manifest");
+        fs::write(
+            &python_manifest,
+            "id: core-python\ndescription: test\ncases: []\n",
+        )
+        .expect("write valid python manifest");
+
+        let planned = plan_cases_from_manifest_paths(
+            "all",
+            RunnerMode::Rust,
+            rust_manifest.to_str().expect("utf8 path"),
+            python_manifest.to_str().expect("utf8 path"),
+        )
+        .expect("planning should succeed");
+
+        assert_eq!(
+            planned
+                .iter()
+                .map(|case| case.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["write_append_small"]
         );
     }
 }

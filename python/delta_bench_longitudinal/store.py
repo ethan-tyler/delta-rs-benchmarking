@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover - non-POSIX platforms
     fcntl = None  # type: ignore[assignment]
 
 
-STORE_SCHEMA_VERSION = 1
+STORE_SCHEMA_VERSION = 2
 STORE_DB_FILENAME = "store.sqlite3"
 
 
@@ -69,6 +69,8 @@ def ingest_benchmark_result(
                         INSERT INTO case_rows (
                             run_id,
                             case_name,
+                            compatibility_key,
+                            case_definition_hash,
                             success,
                             failure_reason,
                             sample_count,
@@ -78,7 +80,7 @@ def ingest_benchmark_result(
                             max_ms,
                             mean_ms,
                             median_ms
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
                             _case_row_params(run_id=run_id, row=row)
@@ -109,6 +111,12 @@ def load_longitudinal_rows(store_dir: Path | str) -> list[dict[str, Any]]:
                 r.host,
                 r.suite,
                 r.scale,
+                r.lane,
+                r.measurement_kind,
+                r.validation_level,
+                r.harness_revision,
+                r.fixture_recipe_hash,
+                r.fidelity_fingerprint,
                 r.iterations,
                 r.warmup,
                 r.image_version,
@@ -125,6 +133,8 @@ def load_longitudinal_rows(store_dir: Path | str) -> list[dict[str, Any]]:
                 r.maintenance_window_id,
                 r.source_result_path,
                 c.case_name,
+                c.compatibility_key,
+                c.case_definition_hash,
                 c.success,
                 c.failure_reason,
                 c.sample_count,
@@ -137,6 +147,7 @@ def load_longitudinal_rows(store_dir: Path | str) -> list[dict[str, Any]]:
             FROM runs AS r
             LEFT JOIN case_rows AS c ON c.run_id = r.run_id
             ORDER BY
+                COALESCE(r.revision_commit_timestamp, ''),
                 COALESCE(r.benchmark_created_at, r.ingested_at, ''),
                 r.run_id,
                 c.case_name
@@ -165,6 +176,12 @@ def _normalize_run_record(
         "host": context.get("host"),
         "suite": context.get("suite"),
         "scale": context.get("scale"),
+        "lane": context.get("lane"),
+        "measurement_kind": context.get("measurement_kind"),
+        "validation_level": context.get("validation_level"),
+        "harness_revision": context.get("harness_revision"),
+        "fixture_recipe_hash": context.get("fixture_recipe_hash"),
+        "fidelity_fingerprint": context.get("fidelity_fingerprint"),
         "iterations": context.get("iterations"),
         "warmup": context.get("warmup"),
         "image_version": context.get("image_version"),
@@ -187,15 +204,29 @@ def _normalize_case_row(
     *,
     case: dict[str, Any],
 ) -> dict[str, Any]:
+    perf_valid = bool(case.get("perf_valid", True))
+    summary = case.get("run_summary") or {}
     samples = case.get("samples") or []
-    elapsed = [
-        float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample
-    ]
+    elapsed = (
+        [float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample]
+        if perf_valid
+        else []
+    )
     metrics = _elapsed_metrics(elapsed)
     failure = case.get("failure") or {}
+    if summary:
+        metrics = {
+            "best_ms": summary.get("min_ms"),
+            "min_ms": summary.get("min_ms"),
+            "max_ms": summary.get("max_ms"),
+            "mean_ms": summary.get("mean_ms"),
+            "median_ms": summary.get("median_ms"),
+        }
 
     return {
         "case": case.get("case"),
+        "compatibility_key": case.get("compatibility_key"),
+        "case_definition_hash": case.get("case_definition_hash"),
         "success": bool(case.get("success", False)),
         "failure_reason": failure.get("message"),
         "sample_count": len(elapsed),
@@ -233,6 +264,9 @@ def _run_id(
     context: dict[str, Any],
     payload: dict[str, Any],
 ) -> str:
+    explicit_run_id = context.get("run_id")
+    if isinstance(explicit_run_id, str) and explicit_run_id:
+        return explicit_run_id
     payload_digest = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
@@ -293,6 +327,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             host TEXT,
             suite TEXT,
             scale TEXT,
+            lane TEXT,
+            measurement_kind TEXT,
+            validation_level TEXT,
+            harness_revision TEXT,
+            fixture_recipe_hash TEXT,
+            fidelity_fingerprint TEXT,
             iterations INTEGER,
             warmup INTEGER,
             image_version TEXT,
@@ -313,6 +353,8 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS case_rows (
             run_id TEXT NOT NULL,
             case_name TEXT NOT NULL,
+            compatibility_key TEXT,
+            case_definition_hash TEXT,
             success INTEGER NOT NULL,
             failure_reason TEXT,
             sample_count INTEGER NOT NULL,
@@ -327,7 +369,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         );
 
         CREATE INDEX IF NOT EXISTS idx_runs_ordering
-        ON runs (suite, scale, benchmark_created_at, ingested_at, run_id);
+        ON runs (suite, scale, revision_commit_timestamp, benchmark_created_at, ingested_at, run_id);
         """
     )
 
@@ -355,6 +397,12 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             host,
             suite,
             scale,
+            lane,
+            measurement_kind,
+            validation_level,
+            harness_revision,
+            fixture_recipe_hash,
+            fidelity_fingerprint,
             iterations,
             warmup,
             image_version,
@@ -370,7 +418,7 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             run_mode,
             maintenance_window_id,
             source_result_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row["run_id"],
@@ -384,6 +432,12 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             row["host"],
             row["suite"],
             row["scale"],
+            row["lane"],
+            row["measurement_kind"],
+            row["validation_level"],
+            row["harness_revision"],
+            row["fixture_recipe_hash"],
+            row["fidelity_fingerprint"],
             row["iterations"],
             row["warmup"],
             row["image_version"],
@@ -407,6 +461,8 @@ def _case_row_params(*, run_id: str, row: dict[str, Any]) -> tuple[Any, ...]:
     return (
         run_id,
         row["case"],
+        row["compatibility_key"],
+        row["case_definition_hash"],
         int(bool(row["success"])),
         row["failure_reason"],
         row["sample_count"],
@@ -432,9 +488,17 @@ def _row_from_db(row: sqlite3.Row) -> dict[str, Any]:
         "host": row["host"],
         "suite": row["suite"],
         "scale": row["scale"],
+        "lane": row["lane"],
+        "measurement_kind": row["measurement_kind"],
+        "validation_level": row["validation_level"],
+        "harness_revision": row["harness_revision"],
+        "fixture_recipe_hash": row["fixture_recipe_hash"],
+        "fidelity_fingerprint": row["fidelity_fingerprint"],
         "iterations": row["iterations"],
         "warmup": row["warmup"],
         "case": row["case_name"],
+        "compatibility_key": row["compatibility_key"],
+        "case_definition_hash": row["case_definition_hash"],
         "success": bool(row["success"]),
         "failure_reason": row["failure_reason"],
         "sample_count": row["sample_count"],

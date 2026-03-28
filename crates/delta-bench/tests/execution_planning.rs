@@ -8,6 +8,7 @@ use delta_bench::cli::{RunnerMode, TimingPhase};
 use delta_bench::data::fixtures::{
     generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
 };
+use delta_bench::manifests::DatasetId;
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::{
     apply_dataset_assertion_policy, plan_run_cases, run_planned_cases, run_target, PlannedCase,
@@ -57,6 +58,19 @@ fn all_runner_plan_is_manifest_ordered() {
         rust_idx < py_idx,
         "expected rust manifest sequence to be emitted before python manifest sequence"
     );
+}
+
+#[test]
+fn write_perf_case_filter_can_select_single_scenario() {
+    let plan = plan_run_cases(
+        "write_perf",
+        RunnerMode::Rust,
+        Some("write_perf_partitioned_1m_parts_010"),
+    )
+    .expect("plan should build");
+    let ids = plan.iter().map(|case| case.id.as_str()).collect::<Vec<_>>();
+
+    assert_eq!(ids, vec!["write_perf_partitioned_1m_parts_010"]);
 }
 
 #[tokio::test]
@@ -254,7 +268,7 @@ fn tpcds_duckdb_dataset_skips_tpcds_hash_assertions() {
         ],
     }];
 
-    apply_dataset_assertion_policy(&mut planned, Some("tpcds_duckdb"));
+    apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TpcdsDuckdb));
 
     assert_eq!(planned.len(), 1);
     assert_eq!(planned[0].assertions.len(), 2);
@@ -289,7 +303,7 @@ fn tpcds_duckdb_dataset_policy_does_not_modify_non_tpcds_cases() {
         ],
     }];
 
-    apply_dataset_assertion_policy(&mut planned, Some("tpcds_duckdb"));
+    apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TpcdsDuckdb));
 
     assert_eq!(planned.len(), 1);
     assert_eq!(planned[0].assertions.len(), 2);
@@ -362,7 +376,7 @@ path.write_text(
         ],
     }];
 
-    apply_dataset_assertion_policy(&mut planned, Some("tpcds_duckdb"));
+    apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TpcdsDuckdb));
     assert!(
         planned[0]
             .assertions

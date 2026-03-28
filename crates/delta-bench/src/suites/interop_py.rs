@@ -7,7 +7,7 @@ use serde::Deserialize;
 use crate::error::{BenchError, BenchResult};
 use crate::results::{
     validate_case_classification, CaseFailure, CaseResult, ElapsedStats, IterationSample,
-    RuntimeIOMetrics, SampleMetrics,
+    RuntimeIOMetrics, SampleMetrics, FAILURE_KIND_EXECUTION_ERROR,
 };
 use crate::stats::compute_stats;
 use crate::storage::StorageConfig;
@@ -119,9 +119,21 @@ pub async fn run(
             .map(|case| CaseResult {
                 case,
                 success: true,
+                validation_passed: true,
+                perf_valid: false,
                 classification: "expected_failure".to_string(),
                 samples: Vec::new(),
                 elapsed_stats: None,
+                run_summary: None,
+                run_summaries: None,
+                suite_manifest_hash: None,
+                case_definition_hash: None,
+                compatibility_key: None,
+                supports_decision: None,
+                required_runs: None,
+                decision_threshold_pct: None,
+                decision_metric: None,
+                failure_kind: Some(FAILURE_KIND_EXECUTION_ERROR.to_string()),
                 failure: Some(CaseFailure {
                     message: "interop_py currently supports local backend only in P0".to_string(),
                 }),
@@ -177,6 +189,8 @@ async fn run_case(
                     spill_bytes: output.spill_bytes,
                     result_hash: output.result_hash,
                     schema_hash: output.schema_hash,
+                    semantic_state_digest: None,
+                    validation_summary: None,
                 });
                 samples.push(IterationSample {
                     elapsed_ms,
@@ -189,9 +203,21 @@ async fn run_case(
                 return Ok(CaseResult {
                     case: case.to_string(),
                     success: false,
+                    validation_passed: false,
+                    perf_valid: false,
                     classification,
-                    elapsed_stats: elapsed_stats_from_samples(&samples),
+                    elapsed_stats: None,
+                    run_summary: None,
+                    run_summaries: None,
+                    suite_manifest_hash: None,
+                    case_definition_hash: None,
+                    compatibility_key: None,
+                    supports_decision: None,
+                    required_runs: None,
+                    decision_threshold_pct: None,
+                    decision_metric: None,
                     samples,
+                    failure_kind: Some(FAILURE_KIND_EXECUTION_ERROR.to_string()),
                     failure: Some(CaseFailure {
                         message: error.to_string(),
                     }),
@@ -203,9 +229,21 @@ async fn run_case(
     Ok(CaseResult {
         case: case.to_string(),
         success: true,
+        validation_passed: true,
+        perf_valid: true,
         classification,
         elapsed_stats: elapsed_stats_from_samples(&samples),
+        run_summary: None,
+        run_summaries: None,
+        suite_manifest_hash: None,
+        case_definition_hash: None,
+        compatibility_key: None,
+        supports_decision: None,
+        required_runs: None,
+        decision_threshold_pct: None,
+        decision_metric: None,
         samples,
+        failure_kind: None,
         failure: None,
     })
 }

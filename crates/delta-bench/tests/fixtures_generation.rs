@@ -211,6 +211,214 @@ path.write_text(
     );
     let manifest = load_manifest(temp.path(), "sf1").expect("load fixture manifest");
     assert_eq!(manifest.profile, "tpcds_duckdb");
+    assert!(!manifest.dataset_fingerprint.is_empty());
+    assert!(manifest.generator_version > 0);
+}
+
+#[tokio::test]
+async fn fixture_manifest_records_stable_dataset_fingerprint() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+    let first = load_manifest(temp.path(), "sf1").expect("load first manifest");
+
+    generate_fixtures(temp.path(), "sf1", 42, false, &storage)
+        .await
+        .expect("regenerate fixtures with same inputs");
+    let second = load_manifest(temp.path(), "sf1").expect("load second manifest");
+
+    assert_eq!(first.dataset_fingerprint, second.dataset_fingerprint);
+    assert_eq!(first.generator_version, second.generator_version);
+    assert!(!first.table_inventory.is_empty());
+}
+
+#[tokio::test]
+async fn fixture_manifest_fingerprint_changes_with_profile() {
+    let standard = tempfile::tempdir().expect("standard tempdir");
+    let many_versions = tempfile::tempdir().expect("many-versions tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures_with_profile(
+        standard.path(),
+        "sf1",
+        42,
+        true,
+        FixtureProfile::Standard,
+        &storage,
+    )
+    .await
+    .expect("generate standard fixtures");
+    generate_fixtures_with_profile(
+        many_versions.path(),
+        "sf1",
+        42,
+        true,
+        FixtureProfile::ManyVersions,
+        &storage,
+    )
+    .await
+    .expect("generate many-versions fixtures");
+
+    let standard_manifest = load_manifest(standard.path(), "sf1").expect("standard manifest");
+    let many_versions_manifest =
+        load_manifest(many_versions.path(), "sf1").expect("many-versions manifest");
+
+    assert_ne!(
+        standard_manifest.dataset_fingerprint,
+        many_versions_manifest.dataset_fingerprint
+    );
+}
+
+#[tokio::test]
+async fn fixture_manifest_records_recipe_hash() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate fixtures");
+    let manifest = load_manifest(temp.path(), "sf1").expect("load fixture manifest");
+
+    assert!(!manifest.fixture_recipe_hash.is_empty());
+    assert!(manifest.fixture_recipe.is_some());
+}
+
+#[tokio::test]
+async fn fixture_recipe_hash_changes_with_profile() {
+    let standard = tempfile::tempdir().expect("standard tempdir");
+    let many_versions = tempfile::tempdir().expect("many-versions tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures_with_profile(
+        standard.path(),
+        "sf1",
+        42,
+        true,
+        FixtureProfile::Standard,
+        &storage,
+    )
+    .await
+    .expect("generate standard fixtures");
+    generate_fixtures_with_profile(
+        many_versions.path(),
+        "sf1",
+        42,
+        true,
+        FixtureProfile::ManyVersions,
+        &storage,
+    )
+    .await
+    .expect("generate many-versions fixtures");
+
+    let standard_manifest = load_manifest(standard.path(), "sf1").expect("standard manifest");
+    let many_versions_manifest =
+        load_manifest(many_versions.path(), "sf1").expect("many-versions manifest");
+
+    assert_ne!(
+        standard_manifest.fixture_recipe_hash,
+        many_versions_manifest.fixture_recipe_hash
+    );
+}
+
+#[tokio::test]
+async fn tpcds_duckdb_fingerprint_changes_when_generator_output_changes() {
+    let _env_lock = env_lock();
+    let first = tempfile::tempdir().expect("first tempdir");
+    let second = tempfile::tempdir().expect("second tempdir");
+    let storage = StorageConfig::local();
+
+    let first_script = first.path().join("generator_one.py");
+    std::fs::write(
+        &first_script,
+        r#"#!/usr/bin/env python3
+import argparse
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--scale-factor", required=True)
+parser.add_argument("--output-csv", required=True)
+args = parser.parse_args()
+
+path = Path(args.output_csv)
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(
+    "ss_customer_sk,ss_ext_sales_price,ss_item_sk,ss_quantity,ss_sold_date_sk\n"
+    "1,11.0,101,2,2450815\n",
+    encoding="utf-8",
+)
+"#,
+    )
+    .expect("write first script");
+
+    let second_script = second.path().join("generator_two.py");
+    std::fs::write(
+        &second_script,
+        r#"#!/usr/bin/env python3
+import argparse
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--scale-factor", required=True)
+parser.add_argument("--output-csv", required=True)
+args = parser.parse_args()
+
+path = Path(args.output_csv)
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text(
+    "ss_customer_sk,ss_ext_sales_price,ss_item_sk,ss_quantity,ss_sold_date_sk\n"
+    "2,99.5,202,7,2450999\n",
+    encoding="utf-8",
+)
+"#,
+    )
+    .expect("write second script");
+
+    with_env_var(
+        "DELTA_BENCH_TPCDS_DUCKDB_SCRIPT",
+        first_script.to_string_lossy().as_ref(),
+        || async {
+            generate_fixtures_with_profile(
+                first.path(),
+                "sf1",
+                42,
+                true,
+                FixtureProfile::TpcdsDuckdb,
+                &storage,
+            )
+            .await
+            .expect("generate first tpcds_duckdb fixtures");
+        },
+    )
+    .await;
+
+    with_env_var(
+        "DELTA_BENCH_TPCDS_DUCKDB_SCRIPT",
+        second_script.to_string_lossy().as_ref(),
+        || async {
+            generate_fixtures_with_profile(
+                second.path(),
+                "sf1",
+                42,
+                true,
+                FixtureProfile::TpcdsDuckdb,
+                &storage,
+            )
+            .await
+            .expect("generate second tpcds_duckdb fixtures");
+        },
+    )
+    .await;
+
+    let first_manifest = load_manifest(first.path(), "sf1").expect("first manifest");
+    let second_manifest = load_manifest(second.path(), "sf1").expect("second manifest");
+
+    assert_ne!(
+        first_manifest.dataset_fingerprint,
+        second_manifest.dataset_fingerprint
+    );
 }
 
 #[tokio::test]
@@ -257,6 +465,27 @@ async fn fixture_generation_creates_and_releases_scale_lock() {
         !scale_lock.exists(),
         "scale lock should be released after fixture generation"
     );
+}
+
+#[tokio::test]
+async fn matching_standard_fixtures_skip_lock_wait_on_cache_hit() {
+    let _env_lock = env_lock();
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("generate initial fixtures");
+
+    let lock_dir = temp.path().join(".delta_bench_locks").join("sf1.lock");
+    std::fs::create_dir_all(&lock_dir).expect("create held lock dir");
+
+    with_env_var("DELTA_BENCH_FIXTURE_LOCK_TIMEOUT_MS", "5", || async {
+        generate_fixtures(temp.path(), "sf1", 42, false, &storage)
+            .await
+            .expect("matching fixtures should return without acquiring lock");
+    })
+    .await;
 }
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {

@@ -22,8 +22,18 @@ pub struct ManifestCase {
     pub target: String,
     #[serde(default = "default_runner")]
     pub runner: String,
+    #[serde(default = "default_lane")]
+    pub lane: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub supports_decision: Option<bool>,
+    #[serde(default)]
+    pub required_runs: Option<u32>,
+    #[serde(default)]
+    pub decision_threshold_pct: Option<f64>,
+    #[serde(default)]
+    pub decision_metric: Option<String>,
     #[serde(default)]
     pub assertions: Vec<ManifestAssertion>,
 }
@@ -34,6 +44,10 @@ const fn default_enabled() -> bool {
 
 fn default_runner() -> String {
     "rust".to_string()
+}
+
+fn default_lane() -> String {
+    "macro".to_string()
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -97,6 +111,26 @@ impl DatasetId {
             Self::ManyVersions => "many_versions",
             Self::TpcdsDuckdb => "tpcds_duckdb",
             Self::TinySmoke | Self::MediumSelective | Self::SmallFiles => "standard",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct DatasetAssertionPolicy {
+    pub relax_tpcds_exact_result_hash: bool,
+}
+
+impl DatasetId {
+    pub const fn assertion_policy(self) -> DatasetAssertionPolicy {
+        match self {
+            Self::TpcdsDuckdb => DatasetAssertionPolicy {
+                relax_tpcds_exact_result_hash: true,
+            },
+            Self::TinySmoke | Self::MediumSelective | Self::SmallFiles | Self::ManyVersions => {
+                DatasetAssertionPolicy {
+                    relax_tpcds_exact_result_hash: false,
+                }
+            }
         }
     }
 }

@@ -9,6 +9,7 @@ use url::Url;
 use deltalake_core::DeltaTable;
 
 use super::{copy_dir_all, fixture_error_cases, into_case_result};
+use crate::cli::BenchmarkLane;
 use crate::data::datasets::NarrowSaleRow;
 use crate::data::fixtures::{
     load_rows, merge_partitioned_target_table_path, merge_target_table_path, rows_to_batch,
@@ -19,6 +20,7 @@ use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
 use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
+use crate::validation::{lane_requires_semantic_validation, validate_table_state};
 
 #[derive(Clone, Copy, Debug)]
 pub struct MergeCase {
@@ -117,6 +119,7 @@ pub fn merge_case_by_name(name: &str) -> Option<&'static MergeCase> {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    lane: BenchmarkLane,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -155,7 +158,7 @@ pub async fn run(
                 },
                 |setup| async move {
                     let _keep_temp = setup._temp;
-                    run_merge_case(setup.table, setup.source, setup.source_rows, case)
+                    run_merge_case(setup.table, setup.source, setup.source_rows, case, lane)
                         .await
                         .map_err(|e| e.to_string())
                 },
@@ -201,7 +204,7 @@ pub async fn run(
                 }
             },
             |(table, source, source_rows)| async move {
-                run_merge_case(table, source, source_rows, case)
+                run_merge_case(table, source, source_rows, case, lane)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -258,6 +261,7 @@ async fn run_merge_case(
     source: DataFrame,
     source_rows: usize,
     case: MergeCase,
+    lane: BenchmarkLane,
 ) -> BenchResult<SampleMetrics> {
     let mut predicate = col("target.id").eq(col("source.id"));
     if case.include_partition_predicate {
@@ -302,12 +306,20 @@ async fn run_merge_case(
         "target_files_scanned": merge_metrics.num_target_files_scanned as u64,
         "target_files_pruned": merge_metrics.num_target_files_skipped_during_scan as u64,
     }))?;
-    let schema_hash = hash_json(&json!([
+    let mut schema_hash = hash_json(&json!([
         "source_rows:u64",
         "table_version:u64",
         "target_files_scanned:u64",
         "target_files_pruned:u64",
     ]))?;
+    let mut semantic_state_digest = None;
+    let mut validation_summary = None;
+    if lane_requires_semantic_validation(lane) {
+        let validation = validate_table_state(&table).await?;
+        schema_hash = validation.schema_hash;
+        semantic_state_digest = Some(validation.digest);
+        validation_summary = Some(validation.summary);
+    }
 
     Ok(
         SampleMetrics::base(Some(source_rows as u64), None, Some(1), table_version)
@@ -328,8 +340,8 @@ async fn run_merge_case(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
-                semantic_state_digest: None,
-                validation_summary: None,
+                semantic_state_digest,
+                validation_summary,
             }),
     )
 }

@@ -13,7 +13,7 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 - [Longitudinal State and Store](#longitudinal-state-and-store)
 - [Datasets and Scales](#datasets-and-scales)
 - [Fixture Tables](#fixture-tables)
-- [Result Schema v3](#result-schema-v3)
+- [Result Schema v4](#result-schema-v4)
 - [Manifest Format](#manifest-format)
 - [Backend Profiles](#backend-profiles)
 
@@ -29,10 +29,10 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 | **Fixture** | Deterministic test data generated from a seed. Includes Delta tables, JSON row snapshots, and a manifest. |
 | **Fixture profile** | Controls how fixtures are generated: `Standard` (normal), `ManyVersions` (12 commits for version history), `TpcdsDuckdb` (DuckDB TPC-DS source). |
 | **Label** | A run identifier used in result paths (e.g., `results/<label>/<suite>.json`). Must match `[A-Za-z0-9._-]` and cannot be `.` or `..`. |
-| **Schema v2** | The normalized JSON result format that all benchmark output follows. Includes context, cases, and per-sample metrics. |
+| **Schema v4** | The normalized JSON result format for authoritative benchmark output. Includes context identity, cases, per-sample metrics, and run summaries. |
 | **Manifest** | A YAML or JSON file that declares which benchmark cases to execute and what assertions to validate. |
 | **Backend profile** | A `.env` file under `backends/` with storage configuration defaults (S3 bucket, locking, region). |
-| **Lane** | A release-tag track for longitudinal benchmarking (e.g., `rust` lane for `rust-v*` tags, `python` lane for `python-v*`). |
+| **Lane** | A benchmark execution contract such as `smoke`, `correctness`, or `macro`. Longitudinal release history also uses separate release lanes such as `rust` and `python`. |
 | **Matrix state** | The resumable JSON checkpoint written by `run-matrix`, including per-cell execution status and a configuration fingerprint. |
 | **Longitudinal store** | The SQLite database (`store.sqlite3`) that holds normalized run metadata and case rows for ingest/report/prune. |
 | **Fidelity** | System-level metadata (CPU model, kernel, run mode) captured alongside results to ensure reproducibility. |
@@ -256,6 +256,7 @@ These apply to all `delta-bench` subcommands and are passed through `bench.sh`:
 | `--results-dir` | `DELTA_BENCH_RESULTS` | `results` | Path to result output directory |
 | `--label` | `DELTA_BENCH_LABEL` | `local` | Run identifier in result paths |
 | `--git-sha` | — | — | Git SHA to record in result metadata |
+| `--harness-revision` | `DELTA_BENCH_HARNESS_REVISION` | repo `HEAD` | Harness revision recorded in schema v4 identity fields |
 | `--storage-backend` | `DELTA_BENCH_STORAGE_BACKEND` | `local` | Storage backend: `local` or `s3` |
 | `--storage-option` | — | — | Repeatable `KEY=VALUE` storage options |
 | `--backend-profile` | `DELTA_BENCH_BACKEND_PROFILE` | — | Profile name from `backends/*.env` |
@@ -275,10 +276,11 @@ These apply to all `delta-bench` subcommands and are passed through `bench.sh`:
 |---|---|---|
 | `--scale` | `sf1` | Scale factor |
 | `--dataset-id` | — | Dataset identifier |
-| `--target` | `all` | Suite to run (or `all`) |
+| `--suite` | `all` | Suite to run (or `all`) |
 | `--case-filter` | — | Substring filter for case names |
 | `--runner` | `all` | Runner mode: `rust`, `python`, or `all` |
-| `--mode` | `perf` | Benchmark mode: `perf` records compareable timings; `assert` validates workload correctness only |
+| `--lane` | `smoke` | Benchmark lane: `smoke`, `correctness`, or `macro`. `smoke` is the default local workflow; `correctness` is the trusted semantic lane for stateful Rust suites; `macro` is the perf lane for macro-safe cases. |
+| `--mode` | `perf` | Benchmark mode: `perf` records measurable timings; `assert` emits validation-only artifacts |
 | `--timing-phase` | `execute` | For phase-aware suites, isolate and record `load`, `plan`, `execute`, or `validate` time in `elapsed_ms` |
 | `--warmup` | `1` | Warmup iterations per case (not measured) |
 | `--iterations` | `5` | Measured iterations per case |
@@ -312,6 +314,8 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--compare-runs` | `3` | Measured runs per ref before aggregation |
 | `--measure-order` | `alternate` | Run interleaving: `base-first`, `candidate-first`, `alternate` |
 | `--aggregation` | `median` | Aggregation method: `min`, `median`, `p95` |
+| `--compare-mode` | `exploratory` | Comparison policy for `compare.py`: `exploratory` or `decision` |
+| `--fail-on` | — | Comma-separated statuses that should force a non-zero compare exit (`regression`, `inconclusive`, `new`, `removed`, `incomparable`) |
 | `--noise-threshold` | `0.05` | Minimum relative change to classify as regression/improvement |
 | `--remote-runner` | — | SSH target for remote execution |
 | `--remote-root` | — | Remote working directory |
@@ -326,7 +330,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 
 ### `longitudinal_bench.sh` — Longitudinal pipeline
 
-Subcommands: `select-revisions`, `build-artifacts`, `run-matrix`, `ingest-results`, `report`, `prune`, `orchestrate`. `run-matrix` writes a resumable `matrix-state.json` checkpoint, and `ingest-results` / `report` / `prune` operate on a SQLite `store.sqlite3` store. See [Longitudinal Benchmarking](longitudinal.md) for full flag documentation per subcommand.
+Subcommands: `select-revisions`, `build-artifacts`, `run-matrix`, `ingest-results`, `report`, `prune`, `orchestrate`. `run-matrix` writes a resumable `matrix-state.json` checkpoint, includes `--lane` in its resume fingerprint, and `ingest-results` / `report` / `prune` operate on a SQLite `store.sqlite3` store. See [Longitudinal Benchmarking](longitudinal.md) for full flag documentation per subcommand.
 
 ### `cleanup_local.sh` — Safe artifact cleanup
 
@@ -400,6 +404,7 @@ These commands are the current repo-wide baseline for code, dependency, and self
 | `BENCH_BACKEND_PROFILE` | — | Backend profile for script-level workflows |
 | `BENCH_RUNNER_MODE` | — | Runner mode for script-level workflows (`rust`, `python`, `all`) |
 | `BENCH_BENCHMARK_MODE` | `perf` | Benchmark mode for script-level workflows (`perf`, `assert`) |
+| `BENCH_COMPARE_FAIL_ON` | — | Default `--fail-on` statuses for `compare_branch.sh` / `compare.py` automation |
 
 ### Fidelity and hardening
 
@@ -423,7 +428,7 @@ The longitudinal pipeline persists two primary artifacts beyond the raw `results
 
 | Artifact | Typical location | Description |
 |---|---|---|
-| `matrix-state.json` | `longitudinal/state/matrix-state.json` or lane-specific `longitudinal/releases/<lane>/state/matrix-state.json` | JSON checkpoint for `run-matrix`. Stores per-cell status and a top-level `config` fingerprint so resume only happens against the same suite/scale/warmup/iteration/output contract. |
+| `matrix-state.json` | `longitudinal/state/matrix-state.json` or lane-specific `longitudinal/releases/<lane>/state/matrix-state.json` | JSON checkpoint for `run-matrix`. Stores per-cell status and a top-level `config` fingerprint so resume only happens against the same suite/scale/lane/warmup/iteration/output contract. |
 | `store.sqlite3` | `longitudinal/store/store.sqlite3` or lane-specific `longitudinal/releases/<lane>/store/store.sqlite3` | SQLite database populated by `ingest-results`. Holds normalized run metadata and case rows used by `report` and `prune`. Duplicate ingests are deduplicated by run id. |
 
 Legacy `rows.jsonl` / `index.json` stores are no longer a supported primary path. If those files exist without `store.sqlite3`, ingest/report/prune fail fast so the operator can migrate or remove the stale state intentionally.
@@ -476,13 +481,13 @@ Additional fixture artifacts:
 - `rows.jsonl` — JSON-lines snapshot of the source row data
 - `manifest.json` — Fixture generation metadata (schema version, seed, scale, fingerprint)
 
-## Result Schema v3
+## Result Schema v4
 
 ### Top-level structure
 
 | Field | Type | Description |
 |---|---|---|
-| `schema_version` | u32 | Format version (currently 3) |
+| `schema_version` | u32 | Format version (currently 4) |
 | `context` | object | Host, run configuration, and fidelity metadata |
 | `cases` | array | Array of benchmark case results |
 
@@ -505,6 +510,13 @@ Additional fixture artifacts:
 | `runner` | string | no | Runner mode (rust/python) |
 | `storage_backend` | string | no | Storage backend used for the run (`local` or `s3`) |
 | `benchmark_mode` | string | no | Benchmark mode for the artifact (`perf` or `assert`) |
+| `lane` | string | no | Benchmark lane (`smoke`, `correctness`, `macro`) |
+| `measurement_kind` | string | no | Timing contract (`end_to_end` or `phase_breakdown`) |
+| `validation_level` | string | no | Validation contract (`operational` or `semantic`) |
+| `run_id` | string | no | Unique id for the benchmark run |
+| `harness_revision` | string | no | Benchmark harness revision |
+| `fixture_recipe_hash` | string | no | Hash of the fixture recipe contract |
+| `fidelity_fingerprint` | string | no | Hash of the fidelity/environment envelope |
 | `backend_profile` | string | no | Backend profile name |
 
 ### Fidelity and security context fields
@@ -534,9 +546,18 @@ These are populated when running on cloud/hardened infrastructure.
 | `success` | bool | Whether the case satisfied workload validation |
 | `case` | string | Case name (e.g., `scan_full_narrow`) |
 | `validation_passed` | bool | Whether correctness/assertion validation passed |
-| `perf_valid` | bool | Whether the case is valid for performance comparison |
+| `perf_valid` | bool | Whether the case is valid for performance comparison. Smoke, correctness, assert, and correctness-tagged macro runs emit `false`. |
 | `classification` | string | `supported` or `expected_failure` |
 | `samples` | array | Per-iteration timing and metrics |
+| `run_summary` | object | Run-level summary consumed by automation and decision mode |
+| `run_summaries` | array | Aggregated list of run summaries when multiple runs are merged |
+| `suite_manifest_hash` | string | Hash of the manifest file that defined the case |
+| `case_definition_hash` | string | Hash of the case definition in the manifest |
+| `compatibility_key` | string | Derived key for strict comparison compatibility. In schema v4 it hashes the full comparison identity plus case-definition and decision metadata. |
+| `supports_decision` | bool | Whether the case participates in decision-grade compare mode |
+| `required_runs` | u32 | Minimum runs required for decision mode |
+| `decision_threshold_pct` | f64 | Regression threshold for decision mode |
+| `decision_metric` | string | Run summary metric used for decision mode |
 | `failure_kind` | string | Failure class such as `execution_error`, `assertion_mismatch`, `context_mismatch`, or `unsupported` |
 | `failure` | object | Failure payload with a `message` field when the case failed |
 | `elapsed_stats` | object | Timing statistics across samples when `perf_valid=true` (see [Elapsed statistics](#elapsed-statistics)) |
@@ -552,6 +573,8 @@ Each sample represents one measured iteration.
 | `bytes` | u64 | Optional byte count captured directly on the sample |
 | `metrics` | object | Optional flat and nested metric fields (see [Metrics Reference](#metrics-reference)) |
 | `metrics.contention` | object | Optional nested contention metrics domain emitted by `concurrency` |
+
+Schema v3 artifacts are still readable for exploratory analysis, but decision mode and authoritative longitudinal workflows require schema v4 with complete identity fields. Automated GitHub Actions perf workflows are currently macro-only and curated to `scan`.
 
 ## Manifest Format
 

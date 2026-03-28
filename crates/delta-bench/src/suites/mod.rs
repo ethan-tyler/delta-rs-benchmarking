@@ -3,8 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::assertions::{apply_case_assertions, CaseAssertion};
-use crate::cli::{RunnerMode, TimingPhase};
+use crate::cli::{BenchmarkLane, RunnerMode, TimingPhase};
 use crate::error::{BenchError, BenchResult};
+use crate::fingerprint::{hash_bytes, hash_json};
 use crate::manifests::{
     load_manifest, DatasetAssertionPolicy, DatasetId, DEFAULT_PYTHON_MANIFEST_PATH,
     DEFAULT_RUST_MANIFEST_PATH,
@@ -108,11 +109,18 @@ const DEFAULT_ALL_TARGETS: [&str; 8] = [
     "interop_py",
 ];
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlannedCase {
     pub id: String,
     pub target: String,
+    pub lane: String,
     pub assertions: Vec<CaseAssertion>,
+    pub suite_manifest_hash: String,
+    pub case_definition_hash: String,
+    pub supports_decision: bool,
+    pub required_runs: Option<u32>,
+    pub decision_threshold_pct: Option<f64>,
+    pub decision_metric: Option<String>,
 }
 
 pub fn list_targets() -> Vec<&'static str> {
@@ -160,6 +168,7 @@ pub async fn run_planned_cases(
     fixtures_dir: &Path,
     planned: &[PlannedCase],
     scale: &str,
+    requested_lane: BenchmarkLane,
     timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
@@ -181,6 +190,7 @@ pub async fn run_planned_cases(
             fixtures_dir,
             target.as_str(),
             scale,
+            requested_lane,
             timing_phase,
             warmup,
             iterations,
@@ -201,8 +211,9 @@ pub async fn run_planned_cases(
                 plan.id, plan.target
             ))
         })?;
-        if !plan.assertions.is_empty() {
-            apply_case_assertions(&mut case, &plan.assertions);
+        let assertions = assertions_for_requested_lane(plan, requested_lane);
+        if !assertions.is_empty() {
+            apply_case_assertions(&mut case, assertions.as_slice());
         }
         ordered.push(case);
     }
@@ -314,6 +325,13 @@ fn append_manifest_cases(
             "failed to load required manifest '{display_path}': {error}"
         ))
     })?;
+    let manifest_hash = std::fs::read(&resolved_path)
+        .map(|bytes| hash_bytes(&bytes))
+        .map_err(|error| {
+            BenchError::InvalidArgument(format!(
+                "failed to load required manifest '{display_path}': {error}"
+            ))
+        })?;
 
     for case in manifest.cases {
         if !case.enabled {
@@ -328,17 +346,57 @@ fn append_manifest_cases(
         if target != "all" && case.target != target {
             continue;
         }
+        let case_definition_hash = hash_json(&case)?;
         out.push(PlannedCase {
             id: case.id,
             target: case.target,
+            lane: case.lane,
             assertions: case
                 .assertions
                 .iter()
                 .map(|assertion| assertion.to_case_assertion())
                 .collect(),
+            suite_manifest_hash: manifest_hash.clone(),
+            case_definition_hash,
+            supports_decision: case.supports_decision.unwrap_or(false),
+            required_runs: case.required_runs,
+            decision_threshold_pct: case.decision_threshold_pct,
+            decision_metric: case.decision_metric,
         });
     }
     Ok(())
+}
+
+fn assertions_for_requested_lane(
+    plan: &PlannedCase,
+    requested_lane: BenchmarkLane,
+) -> Vec<CaseAssertion> {
+    match requested_lane {
+        BenchmarkLane::Correctness => plan.assertions.clone(),
+        BenchmarkLane::Macro if plan.lane == "correctness" => plan
+            .assertions
+            .iter()
+            .filter(|assertion| {
+                matches!(
+                    assertion,
+                    CaseAssertion::ExpectedErrorContains(_) | CaseAssertion::VersionMonotonicity
+                )
+            })
+            .cloned()
+            .collect(),
+        BenchmarkLane::Smoke => plan
+            .assertions
+            .iter()
+            .filter(|assertion| {
+                matches!(
+                    assertion,
+                    CaseAssertion::ExpectedErrorContains(_) | CaseAssertion::VersionMonotonicity
+                )
+            })
+            .cloned()
+            .collect(),
+        BenchmarkLane::Macro => plan.assertions.clone(),
+    }
 }
 
 fn resolve_manifest_path(path: &str) -> PathBuf {
@@ -368,6 +426,7 @@ async fn run_single_suite(
     fixtures_dir: &Path,
     suite: &str,
     scale: &str,
+    requested_lane: BenchmarkLane,
     timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
@@ -386,15 +445,61 @@ async fn run_single_suite(
             )
             .await
         }
-        "write" => write::run(fixtures_dir, scale, warmup, iterations, storage).await,
+        "write" => {
+            write::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
         "write_perf" => write_perf::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "delete_update" => {
-            delete_update::run(fixtures_dir, scale, warmup, iterations, storage).await
+            delete_update::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
         }
-        "merge" => merge::run(fixtures_dir, scale, warmup, iterations, storage).await,
-        "metadata" => metadata::run(fixtures_dir, scale, warmup, iterations, storage).await,
+        "merge" => {
+            merge::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
+        "metadata" => {
+            metadata::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
         "optimize_vacuum" => {
-            optimize_vacuum::run(fixtures_dir, scale, warmup, iterations, storage).await
+            optimize_vacuum::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
         }
         "concurrency" => concurrency::run(fixtures_dir, scale, warmup, iterations, storage).await,
         "tpcds" => {
@@ -408,7 +513,17 @@ async fn run_single_suite(
             )
             .await
         }
-        "interop_py" => interop_py::run(fixtures_dir, scale, warmup, iterations, storage).await,
+        "interop_py" => {
+            interop_py::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
         other => Err(BenchError::InvalidArgument(format!(
             "unknown suite target: {other}"
         ))),
@@ -429,6 +544,7 @@ pub async fn run_target(
     fixtures_dir: &Path,
     target: &str,
     scale: &str,
+    requested_lane: BenchmarkLane,
     timing_phase: TimingPhase,
     warmup: u32,
     iterations: u32,
@@ -445,6 +561,7 @@ pub async fn run_target(
         fixtures_dir,
         canonical_target,
         scale,
+        requested_lane,
         timing_phase,
         warmup,
         iterations,

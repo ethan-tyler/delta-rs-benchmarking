@@ -31,6 +31,7 @@ This creates a fast smoke-test fixture set that is stable across runs and machin
 ./scripts/bench.sh run \
   --suite scan \
   --runner rust \
+  --lane smoke \
   --dataset-id tiny_smoke \
   --warmup 1 \
   --iters 5 \
@@ -38,6 +39,8 @@ This creates a fast smoke-test fixture set that is stable across runs and machin
 ```
 
 This writes a result file to `results/local/scan.json` and prints a terminal summary table.
+
+`bench.sh run` defaults to `--lane smoke`. Keep that default for quick local validation, switch to `--lane correctness` for trusted semantic validation on stateful Rust suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`), and use `--lane macro` only for macro-safe perf exploration.
 
 ### 4. Expand to the common workflows
 
@@ -47,6 +50,7 @@ Run the full local suite:
 ./scripts/bench.sh run \
   --suite all \
   --runner all \
+  --lane smoke \
   --dataset-id tiny_smoke \
   --warmup 1 \
   --iters 5 \
@@ -56,8 +60,10 @@ Run the full local suite:
 Compare your current delta-rs checkout against upstream `main`:
 
 ```bash
-./scripts/compare_branch.sh --current-vs-main all
+./scripts/compare_branch.sh --current-vs-main scan
 ```
+
+PR automation is narrower than local exploration: `run benchmark scan` posts exploratory output, and `run benchmark decision scan` runs the explicit decision-grade path. Automated perf workflows are currently curated to `scan`; stateful Rust suites and `tpcds` remain manual-only.
 
 If you want Python interop coverage (`--runner all`), install the optional Python dependencies first:
 
@@ -85,7 +91,7 @@ Most workflows follow the same shape:
 1. `prepare_delta_rs.sh` creates or updates the managed checkout at `.delta-rs-under-test/`.
 2. `sync_harness_to_delta_rs.sh` copies the benchmark crate and config into that workspace.
 3. `bench.sh data` generates deterministic fixtures from a seed.
-4. `bench.sh run` executes suites and writes schema v2 JSON results under `results/<label>/`.
+4. `bench.sh run` executes suites and writes schema v4 JSON results under `results/<label>/`.
 5. `compare_branch.sh` or `longitudinal_bench.sh` analyze those results for branch-to-branch or time-series use cases.
 
 You usually do not modify delta-rs source from this repository. The harness exists to drive a delta-rs checkout, not replace it.
@@ -129,11 +135,12 @@ Self-hosted benchmark workflows also enforce runner preflight before execution:
 
 ## Current Benchmark Scope
 
-- Suites: `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `concurrency`, `tpcds`, `interop_py`
-- Coverage: 40 benchmark cases across Rust-native, concurrency, and Python interop paths
-- Fixtures: deterministic seed-based generation with normalized schema v2 results
+- Suites: `scan`, `write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `tpcds`, `interop_py`
+- Coverage: 35 benchmark cases across Rust-native and Python interop paths
+- Fixtures: deterministic seed-based generation with fixture recipe identity and schema v4 results
 - Comparison: branch-to-branch reporting with multi-run aggregation and grouped output
 - Longitudinal: resumable `matrix-state.json` checkpoints plus SQLite-backed history and trend reporting
+- Automation policy: trusted perf automation is macro-only and currently curated to `scan`; correctness-trusted stateful suites stay manual/local
 - Workflow hardening: self-hosted runs require benchmark mode, no public IPv4, and egress-policy preflight
 - Release tracking: `rust-v*` and `python-v*` tag history
 

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::assertions::CaseAssertion;
 use crate::error::{BenchError, BenchResult};
@@ -8,7 +8,7 @@ use crate::error::{BenchError, BenchResult};
 pub const DEFAULT_RUST_MANIFEST_PATH: &str = "bench/manifests/core_rust.yaml";
 pub const DEFAULT_PYTHON_MANIFEST_PATH: &str = "bench/manifests/core_python.yaml";
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BenchmarkManifest {
     pub id: String,
     pub description: String,
@@ -16,7 +16,7 @@ pub struct BenchmarkManifest {
     pub cases: Vec<ManifestCase>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ManifestCase {
     pub id: String,
     pub target: String,
@@ -50,7 +50,7 @@ fn default_lane() -> String {
     "macro".to_string()
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ManifestAssertion {
     ExactResultHash { value: String },

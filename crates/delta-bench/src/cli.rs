@@ -16,6 +16,8 @@ pub struct Args {
     pub label: String,
     #[arg(long)]
     pub git_sha: Option<String>,
+    #[arg(long, env = "DELTA_BENCH_HARNESS_REVISION")]
+    pub harness_revision: Option<String>,
     #[arg(
         long,
         env = "DELTA_BENCH_STORAGE_BACKEND",
@@ -65,6 +67,23 @@ impl BenchmarkMode {
         match self {
             Self::Perf => "perf",
             Self::Assert => "assert",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum BenchmarkLane {
+    Smoke,
+    Correctness,
+    Macro,
+}
+
+impl BenchmarkLane {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Smoke => "smoke",
+            Self::Correctness => "correctness",
+            Self::Macro => "macro",
         }
     }
 }
@@ -126,6 +145,8 @@ pub enum Command {
         runner: RunnerMode,
         #[arg(long = "mode", value_enum, default_value_t = BenchmarkMode::Perf)]
         benchmark_mode: BenchmarkMode,
+        #[arg(long, value_enum, default_value_t = BenchmarkLane::Macro)]
+        lane: BenchmarkLane,
         #[arg(long, value_enum, default_value_t = TimingPhase::Execute)]
         timing_phase: TimingPhase,
         #[arg(long, default_value_t = 1)]

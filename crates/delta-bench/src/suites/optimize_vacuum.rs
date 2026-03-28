@@ -9,6 +9,7 @@ use url::Url;
 use deltalake_core::DeltaTable;
 
 use super::{copy_dir_all, fixture_error_cases, into_case_result};
+use crate::cli::BenchmarkLane;
 use crate::data::fixtures::{
     load_rows, optimize_compacted_table_path, optimize_small_files_table_path,
     vacuum_ready_table_path, write_delta_table, write_delta_table_small_files,
@@ -19,6 +20,7 @@ use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
 use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
+use crate::validation::{lane_requires_semantic_validation, validate_table_state};
 
 const OPTIMIZE_COMPACT_TARGET_SIZE: u64 = 1_000_000;
 const OPTIMIZE_HEAVY_TARGET_SIZE: u64 = 64_000;
@@ -41,6 +43,7 @@ pub fn case_names() -> Vec<String> {
 pub async fn run(
     fixtures_dir: &Path,
     scale: &str,
+    lane: BenchmarkLane,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
@@ -77,7 +80,7 @@ pub async fn run(
             },
             |setup| async move {
                 let _keep_temp = setup._temp;
-                run_optimize_case(setup.table, OPTIMIZE_COMPACT_TARGET_SIZE)
+                run_optimize_case(setup.table, OPTIMIZE_COMPACT_TARGET_SIZE, lane)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -100,7 +103,7 @@ pub async fn run(
             },
             |setup| async move {
                 let _keep_temp = setup._temp;
-                run_optimize_case(setup.table, OPTIMIZE_COMPACT_TARGET_SIZE)
+                run_optimize_case(setup.table, OPTIMIZE_COMPACT_TARGET_SIZE, lane)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -123,7 +126,7 @@ pub async fn run(
             },
             |setup| async move {
                 let _keep_temp = setup._temp;
-                run_optimize_case(setup.table, OPTIMIZE_HEAVY_TARGET_SIZE)
+                run_optimize_case(setup.table, OPTIMIZE_HEAVY_TARGET_SIZE, lane)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -146,7 +149,7 @@ pub async fn run(
             },
             |setup| async move {
                 let _keep_temp = setup._temp;
-                run_vacuum_case(setup.table, true)
+                run_vacuum_case(setup.table, true, lane)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -169,7 +172,7 @@ pub async fn run(
             },
             |setup| async move {
                 let _keep_temp = setup._temp;
-                run_vacuum_case(setup.table, false)
+                run_vacuum_case(setup.table, false, lane)
                     .await
                     .map_err(|e| e.to_string())
             },
@@ -224,7 +227,7 @@ pub async fn run(
             }
         },
         |table| async move {
-            run_optimize_case(table, OPTIMIZE_COMPACT_TARGET_SIZE)
+            run_optimize_case(table, OPTIMIZE_COMPACT_TARGET_SIZE, lane)
                 .await
                 .map_err(|e| e.to_string())
         },
@@ -258,7 +261,7 @@ pub async fn run(
             }
         },
         |table| async move {
-            run_optimize_case(table, OPTIMIZE_COMPACT_TARGET_SIZE)
+            run_optimize_case(table, OPTIMIZE_COMPACT_TARGET_SIZE, lane)
                 .await
                 .map_err(|e| e.to_string())
         },
@@ -292,7 +295,7 @@ pub async fn run(
             }
         },
         |table| async move {
-            run_optimize_case(table, OPTIMIZE_HEAVY_TARGET_SIZE)
+            run_optimize_case(table, OPTIMIZE_HEAVY_TARGET_SIZE, lane)
                 .await
                 .map_err(|e| e.to_string())
         },
@@ -322,7 +325,7 @@ pub async fn run(
             }
         },
         |table| async move {
-            run_vacuum_case(table, true)
+            run_vacuum_case(table, true, lane)
                 .await
                 .map_err(|e| e.to_string())
         },
@@ -352,7 +355,7 @@ pub async fn run(
             }
         },
         |table| async move {
-            run_vacuum_case(table, false)
+            run_vacuum_case(table, false, lane)
                 .await
                 .map_err(|e| e.to_string())
         },
@@ -363,7 +366,11 @@ pub async fn run(
     Ok(out)
 }
 
-async fn run_optimize_case(table: DeltaTable, target_size: u64) -> BenchResult<SampleMetrics> {
+async fn run_optimize_case(
+    table: DeltaTable,
+    target_size: u64,
+    lane: BenchmarkLane,
+) -> BenchResult<SampleMetrics> {
     let (table, metrics) = table
         .optimize()
         .with_target_size(normalize_target_size(target_size)?)
@@ -378,7 +385,7 @@ async fn run_optimize_case(table: DeltaTable, target_size: u64) -> BenchResult<S
         "files_removed": metrics.num_files_removed,
         "table_version": table_version,
     }))?;
-    let schema_hash = hash_json(&json!([
+    let mut schema_hash = hash_json(&json!([
         "operation:string",
         "target_size:u64",
         "files_considered:u64",
@@ -387,6 +394,14 @@ async fn run_optimize_case(table: DeltaTable, target_size: u64) -> BenchResult<S
         "files_removed:u64",
         "table_version:u64",
     ]))?;
+    let mut semantic_state_digest = None;
+    let mut validation_summary = None;
+    if lane_requires_semantic_validation(lane) {
+        let validation = validate_table_state(&table).await?;
+        schema_hash = validation.schema_hash;
+        semantic_state_digest = Some(validation.digest);
+        validation_summary = Some(validation.summary);
+    }
     Ok(SampleMetrics::base(
         Some(metrics.total_considered_files as u64),
         None,
@@ -410,8 +425,8 @@ async fn run_optimize_case(table: DeltaTable, target_size: u64) -> BenchResult<S
         spill_bytes: None,
         result_hash: Some(result_hash),
         schema_hash: Some(schema_hash),
-        semantic_state_digest: None,
-        validation_summary: None,
+        semantic_state_digest,
+        validation_summary,
     }))
 }
 
@@ -421,7 +436,11 @@ fn normalize_target_size(target_size: u64) -> BenchResult<NonZeroU64> {
     })
 }
 
-async fn run_vacuum_case(table: DeltaTable, dry_run: bool) -> BenchResult<SampleMetrics> {
+async fn run_vacuum_case(
+    table: DeltaTable,
+    dry_run: bool,
+    lane: BenchmarkLane,
+) -> BenchResult<SampleMetrics> {
     let (table, metrics) = table
         .vacuum()
         .with_dry_run(dry_run)
@@ -435,12 +454,20 @@ async fn run_vacuum_case(table: DeltaTable, dry_run: bool) -> BenchResult<Sample
         "files_deleted": metrics.files_deleted.len() as u64,
         "table_version": table_version,
     }))?;
-    let schema_hash = hash_json(&json!([
+    let mut schema_hash = hash_json(&json!([
         "operation:string",
         "dry_run:bool",
         "files_deleted:u64",
         "table_version:u64",
     ]))?;
+    let mut semantic_state_digest = None;
+    let mut validation_summary = None;
+    if lane_requires_semantic_validation(lane) {
+        let validation = validate_table_state(&table).await?;
+        schema_hash = validation.schema_hash;
+        semantic_state_digest = Some(validation.digest);
+        validation_summary = Some(validation.summary);
+    }
     Ok(SampleMetrics::base(
         Some(metrics.files_deleted.len() as u64),
         None,
@@ -457,8 +484,8 @@ async fn run_vacuum_case(table: DeltaTable, dry_run: bool) -> BenchResult<Sample
         spill_bytes: None,
         result_hash: Some(result_hash),
         schema_hash: Some(schema_hash),
-        semantic_state_digest: None,
-        validation_summary: None,
+        semantic_state_digest,
+        validation_summary,
     }))
 }
 

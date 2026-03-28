@@ -41,6 +41,7 @@ def orchestrate_from_manifest(
     html_path: Path | str,
     suites: list[str],
     scales: list[str],
+    lane: str = "macro",
     timeout_seconds: int,
     max_retries: int,
     max_parallel: int,
@@ -93,6 +94,7 @@ def orchestrate_from_manifest(
         config=MatrixRunConfig(
             suites=suites,
             scales=scales,
+            lane=lane,
             timeout_seconds=timeout_seconds,
             max_retries=max_retries,
             state_path=state_path,
@@ -244,6 +246,11 @@ def main(argv: list[str] | None = None) -> int:
     matrix_cmd.add_argument("--fixtures-dir", default=Path("fixtures"), type=Path)
     matrix_cmd.add_argument("--suite", action="append", required=True)
     matrix_cmd.add_argument("--scale", action="append", required=True)
+    matrix_cmd.add_argument(
+        "--lane",
+        choices=["smoke", "correctness", "macro"],
+        default="macro",
+    )
     matrix_cmd.add_argument("--timeout-seconds", type=int, default=3600)
     matrix_cmd.add_argument("--max-retries", type=int, default=2)
     matrix_cmd.add_argument("--max-parallel", type=int, default=1)
@@ -296,6 +303,11 @@ def main(argv: list[str] | None = None) -> int:
     orchestration_cmd.add_argument("--html-path", required=True, type=Path)
     orchestration_cmd.add_argument("--suite", action="append", required=True)
     orchestration_cmd.add_argument("--scale", action="append", required=True)
+    orchestration_cmd.add_argument(
+        "--lane",
+        choices=["smoke", "correctness", "macro"],
+        default="macro",
+    )
     orchestration_cmd.add_argument("--timeout-seconds", type=int, default=3600)
     orchestration_cmd.add_argument("--max-retries", type=int, default=2)
     orchestration_cmd.add_argument("--max-parallel", type=int, default=1)
@@ -351,6 +363,7 @@ def main(argv: list[str] | None = None) -> int:
             config=MatrixRunConfig(
                 suites=args.suite,
                 scales=args.scale,
+                lane=args.lane,
                 timeout_seconds=args.timeout_seconds,
                 max_retries=args.max_retries,
                 max_parallel=args.max_parallel,
@@ -429,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
             html_path=args.html_path,
             suites=args.suite,
             scales=args.scale,
+            lane=args.lane,
             timeout_seconds=args.timeout_seconds,
             max_retries=args.max_retries,
             max_parallel=args.max_parallel,

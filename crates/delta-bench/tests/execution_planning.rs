@@ -4,7 +4,7 @@ mod env_lock_support;
 mod env_vars_support;
 
 use delta_bench::assertions::CaseAssertion;
-use delta_bench::cli::{RunnerMode, TimingPhase};
+use delta_bench::cli::{BenchmarkLane, RunnerMode, TimingPhase};
 use delta_bench::data::fixtures::{
     generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
 };
@@ -16,6 +16,21 @@ use delta_bench::suites::{
 
 use env_lock_support::env_lock;
 use env_vars_support::with_env_vars;
+
+fn planned_case(id: &str, target: &str, assertions: Vec<CaseAssertion>) -> PlannedCase {
+    PlannedCase {
+        id: id.to_string(),
+        target: target.to_string(),
+        lane: "macro".to_string(),
+        assertions,
+        suite_manifest_hash: "sha256:manifest".to_string(),
+        case_definition_hash: format!("sha256:{id}-def"),
+        supports_decision: false,
+        required_runs: None,
+        decision_threshold_pct: None,
+        decision_metric: None,
+    }
+}
 
 #[test]
 fn case_filter_requires_at_least_one_matching_case() {
@@ -81,17 +96,18 @@ async fn run_planned_cases_applies_assertions_and_can_fail_case() {
         .await
         .expect("generate fixtures");
 
-    let planned = vec![PlannedCase {
-        id: "write_append_small".to_string(),
-        target: "write".to_string(),
-        assertions: vec![CaseAssertion::ExactResultHash(
+    let planned = vec![planned_case(
+        "write_append_small",
+        "write",
+        vec![CaseAssertion::ExactResultHash(
             "sha256:not-real".to_string(),
         )],
-    }];
+    )];
     let cases = run_planned_cases(
         temp.path(),
         &planned,
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Execute,
         0,
         1,
@@ -116,17 +132,18 @@ async fn run_planned_cases_applies_assertions_and_can_fail_case() {
 async fn run_planned_cases_applies_expected_failure_reclassification() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
-    let planned = vec![PlannedCase {
-        id: "write_append_small".to_string(),
-        target: "write".to_string(),
-        assertions: vec![CaseAssertion::ExpectedErrorContains(
+    let planned = vec![planned_case(
+        "write_append_small",
+        "write",
+        vec![CaseAssertion::ExpectedErrorContains(
             "fixture load failed".to_string(),
         )],
-    }];
+    )];
     let cases = run_planned_cases(
         temp.path(),
         &planned,
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Execute,
         0,
         1,
@@ -160,6 +177,7 @@ async fn manifest_hash_assertions_pass_for_write_case() {
         temp.path(),
         &planned,
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Execute,
         0,
         1,
@@ -183,6 +201,7 @@ async fn run_target_all_requires_manifest_planning_api() {
         temp.path(),
         "all",
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Execute,
         0,
         1,
@@ -204,6 +223,7 @@ async fn plan_timing_rejects_non_phase_aware_suite() {
         temp.path(),
         "write",
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Plan,
         0,
         1,
@@ -222,22 +242,15 @@ async fn plan_timing_rejects_unsupported_target_before_running_supported_ones() 
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
     let planned = vec![
-        PlannedCase {
-            id: "scan_filter_flag".to_string(),
-            target: "scan".to_string(),
-            assertions: Vec::new(),
-        },
-        PlannedCase {
-            id: "write_append_small".to_string(),
-            target: "write".to_string(),
-            assertions: Vec::new(),
-        },
+        planned_case("scan_filter_flag", "scan", Vec::new()),
+        planned_case("write_append_small", "write", Vec::new()),
     ];
 
     let err = run_planned_cases(
         temp.path(),
         &planned,
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Plan,
         0,
         1,
@@ -258,15 +271,15 @@ async fn plan_timing_rejects_unsupported_target_before_running_supported_ones() 
 
 #[test]
 fn tpcds_duckdb_dataset_skips_tpcds_hash_assertions() {
-    let mut planned = vec![PlannedCase {
-        id: "tpcds_q03".to_string(),
-        target: "tpcds".to_string(),
-        assertions: vec![
+    let mut planned = vec![planned_case(
+        "tpcds_q03",
+        "tpcds",
+        vec![
             CaseAssertion::ExactResultHash("sha256:expected".to_string()),
             CaseAssertion::SchemaHash("sha256:schema".to_string()),
             CaseAssertion::ExpectedErrorContains("fixture load failed".to_string()),
         ],
-    }];
+    )];
 
     apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TpcdsDuckdb));
 
@@ -294,14 +307,14 @@ fn tpcds_duckdb_dataset_skips_tpcds_hash_assertions() {
 
 #[test]
 fn tpcds_duckdb_dataset_policy_does_not_modify_non_tpcds_cases() {
-    let mut planned = vec![PlannedCase {
-        id: "write_append_small".to_string(),
-        target: "write".to_string(),
-        assertions: vec![
+    let mut planned = vec![planned_case(
+        "write_append_small",
+        "write",
+        vec![
             CaseAssertion::ExactResultHash("sha256:expected".to_string()),
             CaseAssertion::SchemaHash("sha256:schema".to_string()),
         ],
-    }];
+    )];
 
     apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TpcdsDuckdb));
 
@@ -367,14 +380,14 @@ path.write_text(
     )
     .await;
 
-    let mut planned = vec![PlannedCase {
-        id: "tpcds_q03".to_string(),
-        target: "tpcds".to_string(),
-        assertions: vec![
+    let mut planned = vec![planned_case(
+        "tpcds_q03",
+        "tpcds",
+        vec![
             CaseAssertion::ExactResultHash("sha256:any".to_string()),
             CaseAssertion::SchemaHash("sha256:not-real".to_string()),
         ],
-    }];
+    )];
 
     apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TpcdsDuckdb));
     assert!(
@@ -396,6 +409,7 @@ path.write_text(
         temp.path(),
         &planned,
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Execute,
         0,
         1,

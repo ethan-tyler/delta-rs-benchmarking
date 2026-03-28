@@ -11,6 +11,7 @@ RESULTS_DIR="${DELTA_BENCH_RESULTS:-${ROOT_DIR}/results}"
 LABEL="${DELTA_BENCH_LABEL:-local}"
 BACKEND_PROFILE="${DELTA_BENCH_BACKEND_PROFILE:-}"
 DELTA_BENCH_SUPPRESS_RUST_WARNINGS="${DELTA_BENCH_SUPPRESS_RUST_WARNINGS:-1}"
+HARNESS_REVISION="${DELTA_BENCH_HARNESS_REVISION:-}"
 
 run_delta_bench() {
   (
@@ -62,6 +63,7 @@ Run command options:
     --suite <scan|write|write_perf|delete_update|merge|metadata|optimize_vacuum|tpcds|interop_py|all>
     --case-filter <SUBSTR>
     --runner <rust|python|all>
+    --lane <smoke|correctness|macro>
     --mode <perf|assert>
     --timing-phase <load|plan|execute|validate>
     --warmup <N>
@@ -146,6 +148,7 @@ case "${cmd}" in
     suite="all"
     case_filter=""
     runner="all"
+    lane="smoke"
     benchmark_mode="perf"
     timing_phase="execute"
     warmup="1"
@@ -161,6 +164,7 @@ case "${cmd}" in
         --suite) suite="$2"; shift 2 ;;
         --case-filter) case_filter="$2"; shift 2 ;;
         --runner) runner="$2"; shift 2 ;;
+        --lane) lane="$2"; shift 2 ;;
         --mode) benchmark_mode="$2"; shift 2 ;;
         --timing-phase) timing_phase="$2"; shift 2 ;;
         --warmup) warmup="$2"; shift 2 ;;
@@ -175,10 +179,14 @@ case "${cmd}" in
     done
 
     git_sha=""
+    harness_revision="${HARNESS_REVISION}"
     if [[ -d "${DELTA_BENCH_EXEC_ROOT}/.git" ]]; then
       git_sha="$(git -C "${DELTA_BENCH_EXEC_ROOT}" rev-parse HEAD 2>/dev/null || true)"
     elif [[ -d "${DELTA_RS_DIR}/.git" ]]; then
       git_sha="$(git -C "${DELTA_RS_DIR}" rev-parse HEAD 2>/dev/null || true)"
+    fi
+    if [[ -z "${harness_revision}" && -d "${ROOT_DIR}/.git" ]]; then
+      harness_revision="$(git -C "${ROOT_DIR}" rev-parse HEAD 2>/dev/null || true)"
     fi
 
     storage_args=(--storage-backend "${storage_backend}")
@@ -192,7 +200,7 @@ case "${cmd}" in
       done
     fi
 
-    run_args=(--scale "${scale}" --target "${suite}" --runner "${runner}" --mode "${benchmark_mode}" --timing-phase "${timing_phase}" --warmup "${warmup}" --iterations "${iters}")
+    run_args=(--scale "${scale}" --target "${suite}" --runner "${runner}" --lane "${lane}" --mode "${benchmark_mode}" --timing-phase "${timing_phase}" --warmup "${warmup}" --iterations "${iters}")
     if [[ -n "${dataset_id}" ]]; then
       run_args+=(--dataset-id "${dataset_id}")
     fi
@@ -210,6 +218,9 @@ case "${cmd}" in
       --git-sha "${git_sha}"
       "${storage_args[@]}"
     )
+    if [[ -n "${harness_revision}" ]]; then
+      cmd_args+=(--harness-revision "${harness_revision}")
+    fi
     if [[ ${#profile_args[@]} -gt 0 ]]; then
       cmd_args+=("${profile_args[@]}")
     fi

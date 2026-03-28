@@ -3,6 +3,7 @@ mod env_lock_support;
 #[path = "support/env_vars.rs"]
 mod env_vars_support;
 
+use delta_bench::cli::BenchmarkLane;
 use delta_bench::data::fixtures::{
     generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
 };
@@ -16,7 +17,7 @@ use env_vars_support::with_env_vars;
 async fn write_suite_missing_fixtures_returns_case_failures() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
-    let cases = write::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = write::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
@@ -34,7 +35,7 @@ async fn write_suite_non_local_backend_returns_explicit_failures() {
     let storage = StorageConfig::new(delta_bench::cli::StorageBackend::S3, options)
         .expect("valid s3 storage config");
 
-    let cases = write::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = write::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
@@ -83,7 +84,7 @@ async fn concurrency_suite_non_local_backend_returns_explicit_failures() {
 async fn merge_suite_missing_fixtures_returns_case_failures() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
-    let cases = merge::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = merge::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
@@ -104,7 +105,7 @@ async fn merge_suite_missing_partitioned_fixture_returns_fixture_failures_for_al
     )
     .expect("remove partitioned merge fixture");
 
-    let cases = merge::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = merge::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
@@ -126,7 +127,7 @@ async fn merge_suite_missing_partitioned_fixture_returns_fixture_failures_for_al
 async fn optimize_vacuum_suite_missing_fixtures_returns_case_failures() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
-    let cases = optimize_vacuum::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = optimize_vacuum::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
@@ -137,7 +138,7 @@ async fn optimize_vacuum_suite_missing_fixtures_returns_case_failures() {
 async fn delete_update_suite_missing_fixtures_returns_case_failures() {
     let temp = tempfile::tempdir().expect("tempdir");
     let storage = StorageConfig::local();
-    let cases = delete_update::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = delete_update::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());
@@ -210,7 +211,7 @@ async fn interop_py_non_local_backend_is_reported_as_expected_failure() {
     let storage = StorageConfig::new(delta_bench::cli::StorageBackend::S3, options)
         .expect("valid s3 storage config");
 
-    let cases = interop_py::run(temp.path(), "sf1", 0, 1, &storage)
+    let cases = interop_py::run(temp.path(), "sf1", BenchmarkLane::Macro, 0, 1, &storage)
         .await
         .expect("suite should not hard-fail");
     assert!(!cases.is_empty());

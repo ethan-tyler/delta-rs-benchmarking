@@ -4,6 +4,7 @@ import argparse
 import math
 import random
 import statistics
+import sys
 from pathlib import Path
 
 from .formatting import (
@@ -186,6 +187,8 @@ def _bootstrap_relative_change_ci(
 
 
 def _decision_change(case: dict, baseline: list[float], candidate: list[float]) -> str:
+    if not bool(case.get("supports_decision")):
+        return "inconclusive"
     required_runs = int(case.get("required_runs") or 5)
     if len(baseline) < required_runs or len(candidate) < required_runs:
         return "inconclusive"
@@ -293,8 +296,15 @@ def compare_runs(
             continue
 
         if mode == "decision":
-            if baseline.get("schema_version") != 4 or candidate.get("schema_version") != 4:
+            if (
+                baseline.get("schema_version") != 4
+                or candidate.get("schema_version") != 4
+            ):
                 raise ValueError("decision mode requires schema v4 inputs")
+            if not b.get("compatibility_key") or not c.get("compatibility_key"):
+                raise ValueError(
+                    f"decision mode requires compatibility_key for case '{name}'"
+                )
             if b.get("compatibility_key") != c.get("compatibility_key"):
                 raise ValueError(
                     f"compatibility mismatch for case '{name}': {b.get('compatibility_key')!r}!={c.get('compatibility_key')!r}"
@@ -388,10 +398,38 @@ def render_markdown(comparison: Comparison, include_metrics: bool = False) -> st
     return render_markdown_output(comparison, include_metrics=include_metrics)
 
 
+def _resolve_input_paths(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> tuple[Path, Path]:
+    paths = list(args.paths)
+    if len(paths) > 2:
+        parser.error("expected at most two positional arguments: baseline candidate")
+    if paths and (args.baseline_opt is not None or args.candidate_opt is not None):
+        parser.error(
+            "do not mix positional baseline/candidate arguments with --baseline/--candidate"
+        )
+
+    if args.baseline_opt is not None or args.candidate_opt is not None:
+        baseline_path = args.baseline_opt
+        candidate_path = args.candidate_opt
+    else:
+        baseline_path = paths[0] if len(paths) >= 1 else None
+        candidate_path = paths[1] if len(paths) >= 2 else None
+
+    if baseline_path is None or candidate_path is None:
+        parser.error("the following arguments are required: baseline, candidate")
+    return baseline_path, candidate_path
+
+
+def _parse_fail_on(raw: str) -> set[str]:
+    return {item.strip() for item in raw.split(",") if item.strip()}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare delta-bench JSON results")
-    parser.add_argument("baseline", type=Path)
-    parser.add_argument("candidate", type=Path)
+    parser.add_argument("paths", nargs="*", type=Path)
+    parser.add_argument("--baseline", dest="baseline_opt", type=Path)
+    parser.add_argument("--candidate", dest="candidate_opt", type=Path)
     parser.add_argument("--noise-threshold", type=float, default=0.05)
     parser.add_argument(
         "--mode", choices=["exploratory", "decision"], default="exploratory"
@@ -402,31 +440,43 @@ def main() -> None:
     parser.add_argument("--format", choices=["text", "markdown"], default="text")
     parser.add_argument("--include-metrics", action="store_true")
     parser.add_argument(
+        "--fail-on",
+        default="",
+        help="Comma-separated comparison statuses that should force exit code 2",
+    )
+    parser.add_argument(
         "--color",
         choices=["auto", "always", "never"],
         default="auto",
         help="Control ANSI color output (default: auto, detects TTY)",
     )
     args = parser.parse_args()
+    baseline_path, candidate_path = _resolve_input_paths(parser, args)
 
     if args.color != "auto":
         from .terminal import set_color_mode
 
         set_color_mode(args.color == "always")
 
-    comparison = compare_runs(
-        _load(args.baseline),
-        _load(args.candidate),
-        threshold=args.noise_threshold,
-        aggregation=args.aggregation,
-        mode=args.mode,
-    )
+    try:
+        comparison = compare_runs(
+            _load(baseline_path),
+            _load(candidate_path),
+            threshold=args.noise_threshold,
+            aggregation=args.aggregation,
+            mode=args.mode,
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
     output = (
         render_markdown(comparison, include_metrics=args.include_metrics)
         if args.format == "markdown"
         else render_text(comparison, include_metrics=args.include_metrics)
     )
     print(output)
+    if any(row.change in _parse_fail_on(args.fail_on) for row in comparison.rows):
+        raise SystemExit(2)
 
 
 if __name__ == "__main__":

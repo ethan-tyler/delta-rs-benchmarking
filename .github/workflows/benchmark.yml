@@ -27,37 +27,40 @@ jobs:
             const firstLine = body.split(/\r?\n/)[0].trim();
             const allowedSuites = new Set([
               "scan",
-              "write",
-              "delete_update",
-              "merge",
-              "metadata",
-              "optimize_vacuum",
-              "tpcds",
-              "interop_py",
-              "all",
             ]);
 
             let mode = "ignore";
             let suite = "";
+            let compareMode = "exploratory";
             let invalidReason = "";
 
             if (/^show benchmark queue$/i.test(firstLine)) {
               mode = "queue";
             } else {
-              const match = firstLine.match(/^run benchmark\s+(\S+)$/i);
+              // Supported commands:
+              //   run benchmark scan
+              //   run benchmark decision scan
+              const match = firstLine.match(/^run benchmark(?:\s+(decision))?\s+(\S+)$/i);
               if (match) {
-                suite = match[1].toLowerCase();
+                compareMode = match[1] ? "decision" : "exploratory";
+                suite = match[2].toLowerCase();
                 if (allowedSuites.has(suite)) {
                   mode = "run";
                 } else {
                   mode = "invalid";
-                  invalidReason = `invalid command: unknown benchmark suite '${suite}'. Allowed suites: ${Array.from(allowedSuites).join(", ")}`;
+                  invalidReason = [
+                    `invalid command: automated benchmark workflow currently supports only: ${Array.from(allowedSuites).join(", ")}.`,
+                    `Requested suite: ${suite}.`,
+                    `Use 'run benchmark scan' for exploratory output or 'run benchmark decision scan' for decision-grade automation.`,
+                    `Stateful Rust suites and tpcds remain manual-only until workflow fixture provisioning is explicit.`,
+                  ].join(" ");
                 }
               }
             }
 
             core.setOutput("mode", mode);
             core.setOutput("suite", suite);
+            core.setOutput("compare_mode", compareMode);
             core.setOutput("first_line", firstLine);
             core.setOutput("invalid_reason", invalidReason);
 
@@ -82,7 +85,7 @@ jobs:
               permission = "none";
             }
 
-            const allowed = ["admin", "maintain", "write"].includes(permission);
+            const allowed = ['admin', 'maintain', 'write'].includes(permission);
             core.setOutput("allowed", allowed ? "true" : "false");
             core.setOutput("permission", permission);
 
@@ -194,8 +197,10 @@ jobs:
         run: |
           set -euo pipefail
           status=0
+          compare_mode="${{ steps.parse.outputs.compare_mode }}"
           storage_args=()
           bench_args=()
+          compare_args=()
           if [[ -n "${BENCH_STORAGE_BACKEND:-}" ]]; then
             storage_args+=(--storage-backend "${BENCH_STORAGE_BACKEND}")
           fi
@@ -211,10 +216,14 @@ jobs:
           if [[ -n "${BENCH_RUNNER_MODE:-}" ]]; then
             bench_args+=(--runner "${BENCH_RUNNER_MODE}")
           fi
+          if [[ "${compare_mode}" == "decision" ]]; then
+            compare_args+=(--compare-mode decision --fail-on regression,inconclusive)
+          fi
           set +e
           ./scripts/compare_branch.sh \
             "${storage_args[@]}" \
             "${bench_args[@]}" \
+            "${compare_args[@]}" \
             --enforce-run-mode \
             --require-no-public-ipv4 \
             --require-egress-policy \
@@ -225,7 +234,9 @@ jobs:
           set -e
 
           echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
-          if [[ "${status}" -eq 0 ]]; then
+          if [[ "${compare_mode}" == "exploratory" ]]; then
+            echo "status_label=EXPLORATORY" >> "$GITHUB_OUTPUT"
+          elif [[ "${status}" -eq 0 ]]; then
             echo "status_label=PASS" >> "$GITHUB_OUTPUT"
           else
             echo "status_label=FAIL" >> "$GITHUB_OUTPUT"
@@ -241,6 +252,15 @@ jobs:
             const suite = `${{ steps.parse.outputs.suite }}`;
             const status = `${{ steps.bench.outputs.status_label }}`;
             const exitCode = `${{ steps.bench.outputs.exit_code }}`;
+            const compareMode = `${{ steps.parse.outputs.compare_mode }}`;
+            const headingByStatus = {
+              EXPLORATORY: "### Benchmark EXPLORATORY",
+              PASS: "### Benchmark PASS",
+              FAIL: "### Benchmark FAIL",
+            };
+            const heading = compareMode === "exploratory"
+              ? "### Benchmark EXPLORATORY"
+              : (headingByStatus[status] || `### Benchmark ${status}`);
             let output = "(no output produced)";
             if (fs.existsSync("benchmark_output.md")) {
               output = fs.readFileSync("benchmark_output.md", "utf8");
@@ -250,7 +270,8 @@ jobs:
             }
 
             const body = [
-              `### Benchmark ${status}: ${suite}`,
+              `${heading}: ${suite}`,
+              `Compare mode: ${compareMode}`,
               `Exit code: ${exitCode}`,
               "",
               "<details><summary>compare_branch.sh output</summary>",

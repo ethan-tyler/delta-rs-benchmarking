@@ -2,7 +2,7 @@
 mod support;
 
 use chrono::Utc;
-use delta_bench::cli::TimingPhase;
+use delta_bench::cli::{BenchmarkLane, TimingPhase};
 use delta_bench::results::{BenchContext, BenchRunResult};
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::run_target;
@@ -17,6 +17,7 @@ async fn tpcds_smoke_produces_deterministic_case_names_and_json_shape() {
         temp.path(),
         "tpcds",
         "sf1",
+        BenchmarkLane::Macro,
         TimingPhase::Execute,
         0,
         1,

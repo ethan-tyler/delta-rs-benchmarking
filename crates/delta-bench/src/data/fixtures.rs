@@ -8,9 +8,10 @@ use deltalake_core::arrow;
 use deltalake_core::protocol::SaveMode;
 use url::Url;
 
-use super::datasets::{FixtureManifest, NarrowSaleRow};
+use super::datasets::{FixtureManifest, FixtureRecipe, NarrowSaleRow};
 use super::generator::generate_narrow_sales_rows;
 use crate::error::{BenchError, BenchResult};
+use crate::fingerprint::{hash_bytes, hash_json};
 use crate::storage::StorageConfig;
 
 const NARROW_SALES_TABLE_DIR: &str = "narrow_sales_delta";
@@ -23,7 +24,8 @@ const OPTIMIZE_COMPACTED_TABLE_DIR: &str = "optimize_compacted_delta";
 const VACUUM_READY_TABLE_DIR: &str = "vacuum_ready_delta";
 const TPCDS_DIR: &str = "tpcds";
 const TPCDS_STORE_SALES_TABLE_DIR: &str = "store_sales";
-const FIXTURE_SCHEMA_VERSION: u32 = 2;
+const FIXTURE_SCHEMA_VERSION: u32 = 3;
+const FIXTURE_GENERATOR_VERSION: u32 = 1;
 const MANY_VERSIONS_APPEND_COMMITS: usize = 12;
 const FIXTURE_LOCK_DIR: &str = ".delta_bench_locks";
 const DEFAULT_FIXTURE_LOCK_TIMEOUT_MS: u64 = 120_000;
@@ -32,9 +34,74 @@ const FIXTURE_LOCK_TIMEOUT_ENV: &str = "DELTA_BENCH_FIXTURE_LOCK_TIMEOUT_MS";
 const FIXTURE_LOCK_RETRY_ENV: &str = "DELTA_BENCH_FIXTURE_LOCK_RETRY_MS";
 const DEFAULT_TPCDS_DUCKDB_TIMEOUT_MS: u64 = 600_000;
 const TPCDS_DUCKDB_CHUNK_ROWS: usize = 10_000;
+const READ_PARTITION_CHUNK_SIZE: usize = 128;
+const MERGE_PARTITION_CHUNK_SIZE: usize = 64;
+const DELETE_UPDATE_PARTITION_CHUNK_SIZE: usize = 64;
+const OPTIMIZE_SMALL_FILES_CHUNK_SIZE: usize = 128;
 const TPCDS_DUCKDB_PYTHON_ENV: &str = "DELTA_BENCH_DUCKDB_PYTHON";
 const TPCDS_DUCKDB_SCRIPT_ENV: &str = "DELTA_BENCH_TPCDS_DUCKDB_SCRIPT";
 const TPCDS_DUCKDB_TIMEOUT_ENV: &str = "DELTA_BENCH_TPCDS_DUCKDB_TIMEOUT_MS";
+
+fn fixture_table_inventory() -> Vec<String> {
+    vec![
+        NARROW_SALES_TABLE_DIR.to_string(),
+        MERGE_TARGET_TABLE_DIR.to_string(),
+        READ_PARTITIONED_TABLE_DIR.to_string(),
+        DELETE_UPDATE_SMALL_FILES_TABLE_DIR.to_string(),
+        MERGE_PARTITIONED_TARGET_TABLE_DIR.to_string(),
+        OPTIMIZE_SMALL_FILES_TABLE_DIR.to_string(),
+        OPTIMIZE_COMPACTED_TABLE_DIR.to_string(),
+        VACUUM_READY_TABLE_DIR.to_string(),
+        format!("{TPCDS_DIR}/{TPCDS_STORE_SALES_TABLE_DIR}"),
+    ]
+}
+
+fn compute_dataset_fingerprint(
+    recipe: &FixtureRecipe,
+    data: &[NarrowSaleRow],
+) -> BenchResult<String> {
+    #[derive(serde::Serialize)]
+    struct FingerprintInput<'a> {
+        fixture_recipe_hash: String,
+        profile: &'a str,
+        rows_hash: String,
+    }
+
+    hash_json(&FingerprintInput {
+        fixture_recipe_hash: hash_json(recipe)?,
+        profile: recipe.profile.as_str(),
+        rows_hash: hash_json(data)?,
+    })
+}
+
+fn build_fixture_recipe(
+    seed: u64,
+    scale: &str,
+    rows: usize,
+    profile: FixtureProfile,
+    table_inventory: Vec<String>,
+    profile_component_hash: Option<String>,
+) -> FixtureRecipe {
+    FixtureRecipe {
+        schema_version: FIXTURE_SCHEMA_VERSION,
+        generator_version: FIXTURE_GENERATOR_VERSION,
+        seed,
+        scale: scale.to_string(),
+        rows,
+        profile: profile.as_str().to_string(),
+        table_inventory,
+        many_versions_append_commits: MANY_VERSIONS_APPEND_COMMITS,
+        read_partition_chunk_size: READ_PARTITION_CHUNK_SIZE,
+        merge_partition_chunk_size: MERGE_PARTITION_CHUNK_SIZE,
+        delete_update_partition_chunk_size: DELETE_UPDATE_PARTITION_CHUNK_SIZE,
+        optimize_small_files_chunk_size: OPTIMIZE_SMALL_FILES_CHUNK_SIZE,
+        optimize_seed_rows: (rows / 2).max(2048),
+        merge_seed_rows: (rows / 4).max(1024),
+        vacuum_seed_rows: (rows / 3).max(1024),
+        tpcds_duckdb_chunk_rows: TPCDS_DUCKDB_CHUNK_ROWS,
+        profile_component_hash,
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FixtureProfile {
@@ -236,6 +303,12 @@ struct TpcdsDuckdbRuntime {
     timeout: Duration,
 }
 
+struct PreparedTpcdsDuckdbSource {
+    _temp_dir: tempfile::TempDir,
+    csv_path: PathBuf,
+    source_hash: String,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct TpcdsStoreSalesRow {
     ss_customer_sk: i64,
@@ -396,29 +469,63 @@ pub async fn generate_fixtures_with_profile(
     let data_path = dataset_dir.join("rows.jsonl");
     let manifest_path = root.join("manifest.json");
     let rows = scale_to_row_count(scale)?;
+    let table_inventory = fixture_table_inventory();
+
+    if !force
+        && profile != FixtureProfile::TpcdsDuckdb
+        && existing_fixtures_match_static_request(
+            fixtures_dir,
+            scale,
+            seed,
+            rows,
+            profile,
+            &table_inventory,
+            storage,
+        )
+    {
+        return Ok(());
+    }
+
     let _scale_lock = acquire_fixture_generation_lock(fixtures_dir, scale).await?;
 
-    if root.exists() && !force {
-        if let Ok(existing) = load_manifest(fixtures_dir, scale) {
-            let local_tables_ready =
-                !storage.is_local() || required_local_fixture_tables_exist(&root);
-            let matches_request = existing.schema_version == FIXTURE_SCHEMA_VERSION
-                && existing.seed == seed
-                && existing.scale == scale
-                && existing.rows == rows
-                && existing.profile == profile.as_str()
-                && local_tables_ready;
-            if matches_request {
-                return Ok(());
-            }
-        }
+    let data = generate_narrow_sales_rows(seed, rows);
+    let prepared_tpcds_duckdb = if profile == FixtureProfile::TpcdsDuckdb {
+        Some(prepare_tpcds_duckdb_source(scale).await?)
+    } else {
+        None
+    };
+    let fixture_recipe = build_fixture_recipe(
+        seed,
+        scale,
+        rows,
+        profile,
+        table_inventory.clone(),
+        prepared_tpcds_duckdb
+            .as_ref()
+            .map(|prepared| prepared.source_hash.clone()),
+    );
+    let fixture_recipe_hash = hash_json(&fixture_recipe)?;
+    let dataset_fingerprint = compute_dataset_fingerprint(&fixture_recipe, &data)?;
+
+    if !force
+        && existing_fixtures_match_full_request(
+            fixtures_dir,
+            scale,
+            seed,
+            rows,
+            profile,
+            &fixture_recipe_hash,
+            &dataset_fingerprint,
+            storage,
+        )
+    {
+        return Ok(());
     }
+
     if root.exists() {
         fs::remove_dir_all(&root)?;
     }
     fs::create_dir_all(&dataset_dir)?;
-
-    let data = generate_narrow_sales_rows(seed, rows);
     write_rows_jsonl(&data_path, &data)?;
 
     write_delta_table(
@@ -439,7 +546,7 @@ pub async fn generate_fixtures_with_profile(
     write_delta_table_partitioned_small_files(
         read_partitioned_table_url(fixtures_dir, scale, storage)?,
         &data,
-        128,
+        READ_PARTITION_CHUNK_SIZE,
         &["region"],
         storage,
     )
@@ -447,7 +554,7 @@ pub async fn generate_fixtures_with_profile(
 
     let merge_rows = data
         .iter()
-        .take((data.len() / 4).max(1024))
+        .take(fixture_recipe.merge_seed_rows)
         .cloned()
         .collect::<Vec<_>>();
     write_delta_table(
@@ -460,7 +567,7 @@ pub async fn generate_fixtures_with_profile(
     write_delta_table_partitioned_small_files(
         merge_partitioned_target_table_url(fixtures_dir, scale, storage)?,
         &merge_rows,
-        64,
+        MERGE_PARTITION_CHUNK_SIZE,
         &["region"],
         storage,
     )
@@ -469,7 +576,7 @@ pub async fn generate_fixtures_with_profile(
     write_delta_table_partitioned_small_files(
         delete_update_small_files_table_url(fixtures_dir, scale, storage)?,
         &data,
-        64,
+        DELETE_UPDATE_PARTITION_CHUNK_SIZE,
         &["region"],
         storage,
     )
@@ -477,13 +584,13 @@ pub async fn generate_fixtures_with_profile(
 
     let optimize_rows = data
         .iter()
-        .take((data.len() / 2).max(2048))
+        .take(fixture_recipe.optimize_seed_rows)
         .cloned()
         .collect::<Vec<_>>();
     write_delta_table_small_files(
         optimize_small_files_table_url(fixtures_dir, scale, storage)?,
         &optimize_rows,
-        128,
+        OPTIMIZE_SMALL_FILES_CHUNK_SIZE,
         storage,
     )
     .await?;
@@ -497,7 +604,7 @@ pub async fn generate_fixtures_with_profile(
 
     let vacuum_rows = data
         .iter()
-        .take((data.len() / 3).max(1024))
+        .take(fixture_recipe.vacuum_seed_rows)
         .cloned()
         .collect::<Vec<_>>();
     write_vacuum_ready_table(
@@ -510,8 +617,15 @@ pub async fn generate_fixtures_with_profile(
     let tpcds_store_sales_table_url = tpcds_store_sales_table_url(fixtures_dir, scale, storage)?;
     match profile {
         FixtureProfile::TpcdsDuckdb => {
-            write_tpcds_store_sales_table_from_duckdb(tpcds_store_sales_table_url, scale, storage)
-                .await?;
+            let prepared = prepared_tpcds_duckdb
+                .as_ref()
+                .expect("prepared DuckDB source for tpcds_duckdb profile");
+            write_tpcds_store_sales_csv_table(
+                tpcds_store_sales_table_url,
+                prepared.csv_path.as_path(),
+                storage,
+            )
+            .await?;
         }
         FixtureProfile::Standard | FixtureProfile::ManyVersions => {
             write_tpcds_store_sales_table(tpcds_store_sales_table_url, &data, storage).await?;
@@ -520,14 +634,106 @@ pub async fn generate_fixtures_with_profile(
 
     let manifest = FixtureManifest {
         schema_version: FIXTURE_SCHEMA_VERSION,
+        generator_version: FIXTURE_GENERATOR_VERSION,
         seed,
         scale: scale.to_string(),
         rows,
         profile: profile.as_str().to_string(),
+        dataset_fingerprint,
+        table_inventory,
+        fixture_recipe_hash,
+        fixture_recipe: Some(fixture_recipe),
     };
     fs::write(manifest_path, serde_json::to_vec_pretty(&manifest)?)?;
 
     Ok(())
+}
+
+fn existing_fixtures_match_static_request(
+    fixtures_dir: &Path,
+    scale: &str,
+    seed: u64,
+    rows: usize,
+    profile: FixtureProfile,
+    table_inventory: &[String],
+    storage: &StorageConfig,
+) -> bool {
+    let fixture_recipe_hash =
+        build_fixture_recipe(seed, scale, rows, profile, table_inventory.to_vec(), None);
+    let fixture_recipe_hash = hash_json(&fixture_recipe_hash).unwrap_or_default();
+    existing_fixture_manifest(fixtures_dir, scale)
+        .map(|existing| {
+            existing_fixture_manifest_matches(
+                fixtures_dir,
+                scale,
+                &existing,
+                seed,
+                rows,
+                profile,
+                &fixture_recipe_hash,
+                storage,
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn existing_fixtures_match_full_request(
+    fixtures_dir: &Path,
+    scale: &str,
+    seed: u64,
+    rows: usize,
+    profile: FixtureProfile,
+    fixture_recipe_hash: &str,
+    dataset_fingerprint: &str,
+    storage: &StorageConfig,
+) -> bool {
+    existing_fixture_manifest(fixtures_dir, scale)
+        .map(|existing| {
+            existing_fixture_manifest_matches(
+                fixtures_dir,
+                scale,
+                &existing,
+                seed,
+                rows,
+                profile,
+                fixture_recipe_hash,
+                storage,
+            ) && existing.dataset_fingerprint == dataset_fingerprint
+        })
+        .unwrap_or(false)
+}
+
+fn existing_fixture_manifest(fixtures_dir: &Path, scale: &str) -> Option<FixtureManifest> {
+    load_manifest(fixtures_dir, scale).ok()
+}
+
+fn existing_fixture_manifest_matches(
+    fixtures_dir: &Path,
+    scale: &str,
+    existing: &FixtureManifest,
+    seed: u64,
+    rows: usize,
+    profile: FixtureProfile,
+    fixture_recipe_hash: &str,
+    storage: &StorageConfig,
+) -> bool {
+    let root = fixture_root(fixtures_dir, scale);
+    let local_tables_ready = !storage.is_local() || required_local_fixture_tables_exist(&root);
+
+    existing.schema_version == FIXTURE_SCHEMA_VERSION
+        && existing.seed == seed
+        && existing.scale == scale
+        && existing.rows == rows
+        && existing.profile == profile.as_str()
+        && recipe_hash_matches(existing, fixture_recipe_hash)
+        && local_tables_ready
+}
+
+fn recipe_hash_matches(existing: &FixtureManifest, fixture_recipe_hash: &str) -> bool {
+    if !existing.fixture_recipe_hash.is_empty() {
+        return existing.fixture_recipe_hash == fixture_recipe_hash;
+    }
+    existing.generator_version == FIXTURE_GENERATOR_VERSION
 }
 
 fn write_rows_jsonl(path: &Path, rows: &[NarrowSaleRow]) -> BenchResult<()> {
@@ -690,18 +896,19 @@ async fn write_tpcds_store_sales_table(
     Ok(())
 }
 
-async fn write_tpcds_store_sales_table_from_duckdb(
-    table_url: Url,
-    scale: &str,
-    storage: &StorageConfig,
-) -> BenchResult<()> {
+async fn prepare_tpcds_duckdb_source(scale: &str) -> BenchResult<PreparedTpcdsDuckdbSource> {
     let runtime = TpcdsDuckdbRuntime::from_env()?;
     let temp_dir = tempfile::tempdir()?;
     let csv_path = temp_dir.path().join("store_sales.csv");
 
     run_tpcds_duckdb_generator(scale, &runtime, &csv_path).await?;
-    write_tpcds_store_sales_csv_table(table_url, csv_path.as_path(), storage).await?;
-    Ok(())
+    let source_hash = hash_bytes(&fs::read(&csv_path)?);
+
+    Ok(PreparedTpcdsDuckdbSource {
+        _temp_dir: temp_dir,
+        csv_path,
+        source_hash,
+    })
 }
 
 async fn run_tpcds_duckdb_generator(

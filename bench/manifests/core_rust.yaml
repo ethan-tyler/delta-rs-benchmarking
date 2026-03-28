@@ -73,6 +73,42 @@ cases:
     value: sha256:283ac5ae489de751232be09966aa64107de00fdabe4b6b028e3ef9b3d4cc7930
   - type: schema_hash
     value: sha256:3e77d4cdeb1deaa1edf85c74c4c3a268ae7cdfd25a3f2ab4e691cff24c21a8c7
+- id: write_perf_partitioned_1m_parts_010
+  target: write_perf
+  runner: rust
+  enabled: true
+  assertions:
+  - type: exact_result_hash
+    value: sha256:95c83aeccfac6b8c7aa563313b9cbdfdc8693f4f83292ae9fe34f0ed8863bda1
+  - type: schema_hash
+    value: sha256:53b2020e5a1a08c4d98846e8bf22047d417066f70fb925a793cf9dd358c45749
+- id: write_perf_partitioned_1m_parts_100
+  target: write_perf
+  runner: rust
+  enabled: true
+  assertions:
+  - type: exact_result_hash
+    value: sha256:b115da64f8d9204c9ed94597f6ac4ed7055979f32adab18c9a0925f337b35059
+  - type: schema_hash
+    value: sha256:53b2020e5a1a08c4d98846e8bf22047d417066f70fb925a793cf9dd358c45749
+- id: write_perf_partitioned_5m_parts_010
+  target: write_perf
+  runner: rust
+  enabled: true
+  assertions:
+  - type: exact_result_hash
+    value: sha256:d4e8042f9e6d7f6ef38fd84a3b08b9a78cb551cbdf62c52e6881f75e2fe1f27a
+  - type: schema_hash
+    value: sha256:53b2020e5a1a08c4d98846e8bf22047d417066f70fb925a793cf9dd358c45749
+- id: write_perf_unpartitioned_1m
+  target: write_perf
+  runner: rust
+  enabled: true
+  assertions:
+  - type: exact_result_hash
+    value: sha256:cca3313008b2be9e76f6acdb87ae5c2456d242c5d55d3002cae0a50cee44d5c2
+  - type: schema_hash
+    value: sha256:53b2020e5a1a08c4d98846e8bf22047d417066f70fb925a793cf9dd358c45749
 - id: delete_1pct_localized
   target: delete_update
   runner: rust

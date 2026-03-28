@@ -59,9 +59,11 @@ Run command options:
   ./scripts/bench.sh run [options]
     --scale <sf1>
     --dataset-id <tiny_smoke|medium_selective|small_files|many_versions|tpcds_duckdb>
-    --suite <scan|write|delete_update|merge|metadata|optimize_vacuum|tpcds|interop_py|all>
+    --suite <scan|write|write_perf|delete_update|merge|metadata|optimize_vacuum|tpcds|interop_py|all>
     --case-filter <SUBSTR>
     --runner <rust|python|all>
+    --mode <perf|assert>
+    --timing-phase <load|plan|execute|validate>
     --warmup <N>
     --iters <N>
     --no-summary-table
@@ -144,6 +146,8 @@ case "${cmd}" in
     suite="all"
     case_filter=""
     runner="all"
+    benchmark_mode="perf"
+    timing_phase="execute"
     warmup="1"
     iters="5"
     no_summary_table=0
@@ -157,6 +161,8 @@ case "${cmd}" in
         --suite) suite="$2"; shift 2 ;;
         --case-filter) case_filter="$2"; shift 2 ;;
         --runner) runner="$2"; shift 2 ;;
+        --mode) benchmark_mode="$2"; shift 2 ;;
+        --timing-phase) timing_phase="$2"; shift 2 ;;
         --warmup) warmup="$2"; shift 2 ;;
         --iters) iters="$2"; shift 2 ;;
         --no-summary-table) no_summary_table=1; shift 1 ;;
@@ -186,7 +192,7 @@ case "${cmd}" in
       done
     fi
 
-    run_args=(--scale "${scale}" --target "${suite}" --runner "${runner}" --warmup "${warmup}" --iterations "${iters}")
+    run_args=(--scale "${scale}" --target "${suite}" --runner "${runner}" --mode "${benchmark_mode}" --timing-phase "${timing_phase}" --warmup "${warmup}" --iterations "${iters}")
     if [[ -n "${dataset_id}" ]]; then
       run_args+=(--dataset-id "${dataset_id}")
     fi

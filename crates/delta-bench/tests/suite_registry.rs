@@ -33,6 +33,14 @@ fn list_targets_includes_interop_py() {
 }
 
 #[test]
+fn list_targets_includes_write_perf() {
+    assert!(
+        list_targets().contains(&"write_perf"),
+        "write_perf target missing from list_targets"
+    );
+}
+
+#[test]
 fn optimize_vacuum_case_list_is_exact() {
     let cases = list_cases_for_target("optimize_vacuum").expect("known target should work");
     assert_eq!(
@@ -43,6 +51,20 @@ fn optimize_vacuum_case_list_is_exact() {
             "optimize_heavy_compaction".to_string(),
             "vacuum_dry_run_lite".to_string(),
             "vacuum_execute_lite".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn write_perf_case_list_is_exact() {
+    let cases = list_cases_for_target("write_perf").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "write_perf_partitioned_1m_parts_010".to_string(),
+            "write_perf_partitioned_1m_parts_100".to_string(),
+            "write_perf_partitioned_5m_parts_010".to_string(),
+            "write_perf_unpartitioned_1m".to_string(),
         ]
     );
 }
@@ -112,6 +134,15 @@ fn all_case_list_includes_interop_py_cases() {
     assert!(
         cases.iter().any(|case| case == "pandas_roundtrip_smoke"),
         "all target should include interop_py cases"
+    );
+}
+
+#[test]
+fn all_case_list_excludes_write_perf_cases() {
+    let cases = list_cases_for_target("all").expect("known target should work");
+    assert!(
+        cases.iter().all(|case| !case.starts_with("write_perf_")),
+        "all target should exclude opt-in write_perf cases"
     );
 }
 

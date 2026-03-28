@@ -13,7 +13,7 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 - [Longitudinal State and Store](#longitudinal-state-and-store)
 - [Datasets and Scales](#datasets-and-scales)
 - [Fixture Tables](#fixture-tables)
-- [Result Schema v2](#result-schema-v2)
+- [Result Schema v3](#result-schema-v3)
 - [Manifest Format](#manifest-format)
 - [Backend Profiles](#backend-profiles)
 
@@ -65,7 +65,7 @@ Read operations testing full scans, projections, filters, and partition pruning.
 | `scan_pruning_hit` | Scan with a filter that prunes most partitions (high selectivity) | files_scanned, files_pruned, scan_time_ms |
 | `scan_pruning_miss` | Scan with a filter that prunes no partitions (low selectivity) | files_scanned, files_pruned, scan_time_ms |
 
-`delta-bench run` also supports `--timing-phase execute|plan`. This keeps the same case IDs and result assertions while switching whether `elapsed_ms` reflects planning or execution time for phase-aware suites.
+`delta-bench run` also supports `--timing-phase load|plan|execute|validate`. This keeps the same case IDs while switching which isolated phase populates `elapsed_ms` for phase-aware suites.
 
 ### write (3 cases)
 
@@ -243,7 +243,8 @@ These apply to all `delta-bench` subcommands and are passed through `bench.sh`:
 | `--target` | `all` | Suite to run (or `all`) |
 | `--case-filter` | — | Substring filter for case names |
 | `--runner` | `all` | Runner mode: `rust`, `python`, or `all` |
-| `--timing-phase` | `execute` | For phase-aware suites, record either execution time or planning time in `elapsed_ms` |
+| `--mode` | `perf` | Benchmark mode: `perf` records compareable timings; `assert` validates workload correctness only |
+| `--timing-phase` | `execute` | For phase-aware suites, isolate and record `load`, `plan`, `execute`, or `validate` time in `elapsed_ms` |
 | `--warmup` | `1` | Warmup iterations per case (not measured) |
 | `--iterations` | `5` | Measured iterations per case |
 | `--no-summary-table` | `false` | Suppress terminal summary table |
@@ -284,6 +285,9 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--require-egress-policy` | — | Require network egress policy |
 | `--backend-profile` | — | Backend profile name |
 | `--runner` | — | Runner mode: `rust`, `python`, `all` |
+| `--mode` | `perf` | Benchmark mode forwarded to `bench.sh run` |
+| `--dataset-id` | — | Dataset id forwarded to fixture generation and benchmark runs |
+| `--timing-phase` | `execute` | Timing phase forwarded to `bench.sh run` |
 
 ### `longitudinal_bench.sh` — Longitudinal pipeline
 
@@ -360,6 +364,7 @@ These commands are the current repo-wide baseline for code, dependency, and self
 | `BENCH_STORAGE_OPTIONS` | — | Multi-line `KEY=VALUE` storage options |
 | `BENCH_BACKEND_PROFILE` | — | Backend profile for script-level workflows |
 | `BENCH_RUNNER_MODE` | — | Runner mode for script-level workflows (`rust`, `python`, `all`) |
+| `BENCH_BENCHMARK_MODE` | `perf` | Benchmark mode for script-level workflows (`perf`, `assert`) |
 
 ### Fidelity and hardening
 
@@ -436,13 +441,13 @@ Additional fixture artifacts:
 - `rows.jsonl` — JSON-lines snapshot of the source row data
 - `manifest.json` — Fixture generation metadata (schema version, seed, scale, fingerprint)
 
-## Result Schema v2
+## Result Schema v3
 
 ### Top-level structure
 
 | Field | Type | Description |
 |---|---|---|
-| `schema_version` | u32 | Format version (currently 2) |
+| `schema_version` | u32 | Format version (currently 3) |
 | `context` | object | Host, run configuration, and fidelity metadata |
 | `cases` | array | Array of benchmark case results |
 
@@ -458,10 +463,12 @@ Additional fixture artifacts:
 | `scale` | string | yes | Scale factor |
 | `iterations` | u32 | yes | Measured iterations per case |
 | `warmup` | u32 | yes | Warmup iterations per case |
-| `timing_phase` | string | no | Selected timing phase (`execute` or `plan`) for phase-aware suites |
+| `timing_phase` | string | no | Selected timing phase (`load`, `plan`, `execute`, or `validate`) for phase-aware suites |
 | `dataset_id` | string | no | Dataset identifier |
 | `dataset_fingerprint` | string | no | Hash of the fixture data |
 | `runner` | string | no | Runner mode (rust/python) |
+| `storage_backend` | string | no | Storage backend used for the run (`local` or `s3`) |
+| `benchmark_mode` | string | no | Benchmark mode for the artifact (`perf` or `assert`) |
 | `backend_profile` | string | no | Backend profile name |
 
 ### Fidelity and security context fields
@@ -487,12 +494,15 @@ These are populated when running on cloud/hardened infrastructure.
 
 | Field | Type | Description |
 |---|---|---|
-| `name` | string | Case name (e.g., `scan_full_narrow`) |
-| `success` | bool | Whether the case completed without error |
+| `case` | string | Case name (e.g., `scan_full_narrow`) |
+| `success` | bool | Whether the case satisfied workload validation |
+| `validation_passed` | bool | Whether correctness/assertion validation passed |
+| `perf_valid` | bool | Whether the case is valid for performance comparison |
 | `classification` | string | `supported` or `expected_failure` |
 | `samples` | array | Per-iteration timing and metrics |
+| `failure_kind` | string | Failure class such as `execution_error`, `assertion_mismatch`, `context_mismatch`, or `unsupported` |
 | `failure` | string | Error message if the case failed |
-| `elapsed_stats` | object | Timing statistics across samples (see [Elapsed statistics](#elapsed-statistics)) |
+| `elapsed_stats` | object | Timing statistics across samples when `perf_valid=true` (see [Elapsed statistics](#elapsed-statistics)) |
 
 ### Sample-level fields
 
@@ -500,12 +510,12 @@ Each sample represents one measured iteration.
 
 | Field | Type | Description |
 |---|---|---|
-| `elapsed_ms` | f64 | Timed duration for this iteration; on phase-aware suites this reflects the selected `timing_phase` |
+| `elapsed_ms` | f64 | Timed duration for this iteration; on phase-aware suites this reflects the selected isolated `timing_phase` |
 | `metrics` | object | Metric fields (see [Metrics Reference](#metrics-reference)) |
 
 ## Manifest Format
 
-Benchmark manifests declare which cases to execute and what assertions to validate. Core manifests live in `bench/manifests/`.
+Benchmark manifests declare which cases to execute and what assertions to validate. Core manifests live in `bench/manifests/`. Assertions are interpreted against the run's `dataset_id` and `dataset_fingerprint`; if the workload context drifts, the artifact is validation-only and cannot be compared as perf.
 
 | Manifest | Runner | Description |
 |---|---|---|

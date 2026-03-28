@@ -13,6 +13,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPARE_BRANCH = REPO_ROOT / "scripts" / "compare_branch.sh"
+BENCH_SH = REPO_ROOT / "scripts" / "bench.sh"
 PREPARE_DELTA_RS = REPO_ROOT / "scripts" / "prepare_delta_rs.sh"
 LOCAL_CLEANUP = REPO_ROOT / "scripts" / "cleanup_local.sh"
 GITIGNORE = REPO_ROOT / ".gitignore"
@@ -58,6 +59,11 @@ def test_compare_branch_sanitizes_branch_labels_for_cli() -> None:
     assert re.search(
         r"cand_label=\"cand-\$\(sanitize_label \"\$\{candidate_ref\}\"\)\"", script
     )
+
+
+def test_bench_sh_usage_lists_write_perf_suite() -> None:
+    script = BENCH_SH.read_text(encoding="utf-8")
+    assert "--suite <scan|write|write_perf|" in script
 
 
 def test_compare_branch_label_contract_matches_shared_fixture() -> None:
@@ -156,17 +162,30 @@ def test_compare_branch_supports_storage_backend_passthrough() -> None:
         r"storage_args=\(--storage-backend \"\$\{STORAGE_BACKEND\}\"\)", script
     )
     assert re.search(r"storage_args\+=\(--storage-option \"\$\{option\}\"\)", script)
-    assert re.search(r"\./scripts/bench\.sh data .*\"\$\{storage_args\[@\]\}\"", script)
+    assert re.search(r"data_cmd=\(\./scripts/bench\.sh data --scale sf1 --seed 42\)", script)
+    assert re.search(r"data_cmd\+=\(\"\\?\$\{storage_args\[@\]\}\"\)", script)
     assert re.search(r"run_cmd\+=\(\"\\?\$\{storage_args\[@\]\}\"\)", script)
+
+
+def test_compare_branch_supports_dataset_and_timing_phase_passthrough() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "--mode <perf|assert>" in script
+    assert "--dataset-id <id>" in script
+    assert "--timing-phase <phase>" in script
+    assert re.search(r'BENCHMARK_MODE="\$\{BENCH_BENCHMARK_MODE:-perf\}"', script)
+    assert re.search(r'DATASET_ID="\$\{BENCH_DATASET_ID:-\}"', script)
+    assert re.search(r'TIMING_PHASE="\$\{BENCH_TIMING_PHASE:-execute\}"', script)
+    assert re.search(r'--mode "\$\{BENCHMARK_MODE\}"', script)
+    assert re.search(r'run_cmd\+=\(--dataset-id "\$\{DATASET_ID\}"\)', script)
+    assert re.search(r'run_cmd\+=\(--timing-phase "\$\{TIMING_PHASE\}"\)', script)
+    assert re.search(r'data_cmd\+=\(--dataset-id "\$\{DATASET_ID\}"\)', script)
 
 
 def test_compare_branch_does_not_retry_benchmark_producing_steps() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "run_step_no_retry()" in script
-    assert re.search(
-        r"run_step_no_retry env .*?/scripts/bench\.sh data --scale sf1 --seed 42",
-        script,
-    )
+    assert 'data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)' in script
+    assert re.search(r'run_step_no_retry env .*?"\$\{data_cmd\[@\]\}"', script)
     assert "run_benchmark_suite_for_ref" in script
     assert "./scripts/bench.sh run --scale sf1" in script
 
@@ -542,6 +561,7 @@ exit 99
 
 def test_gitignore_ignores_checkout_lock_artifacts() -> None:
     gitignore = GITIGNORE.read_text(encoding="utf-8")
+    assert ".DS_Store" in gitignore
     assert "*.delta_bench_checkout.lock" in gitignore
     assert "*.delta_bench_checkout.lock.dir/" in gitignore
     assert "Best-in-Class Benchmark Suite" not in gitignore

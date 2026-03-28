@@ -69,9 +69,9 @@ def _make_fake_executor(
         out_dir = results_dir / label
         out_dir.mkdir(parents=True, exist_ok=True)
         result = {
-            "schema_version": 2,
+            "schema_version": 3,
             "context": {
-                "schema_version": 2,
+                "schema_version": 3,
                 "label": label,
                 "git_sha": artifact.revision,
                 "created_at": "2026-02-02T00:00:00+00:00",
@@ -86,6 +86,8 @@ def _make_fake_executor(
                     "case": "scan_all",
                     "classification": "supported",
                     "success": True,
+                    "validation_passed": True,
+                    "perf_valid": True,
                     "samples": [{"elapsed_ms": 100.0}],
                     "failure": None,
                 }

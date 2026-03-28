@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import math
+import random
+import statistics
 from pathlib import Path
 
 from .formatting import (
@@ -9,9 +11,15 @@ from .formatting import (
     render_text_report,
 )
 from .model import Comparison, ComparisonRow, SampleMetricSnapshot, Summary
-from .schema import case_classification, load_benchmark_payload
+from .schema import (
+    case_classification,
+    ensure_matching_contexts,
+    invalid_perf_case_names,
+    load_benchmark_payload,
+)
 
 VALID_AGGREGATIONS = {"min", "median", "p95"}
+VALID_COMPARE_MODES = {"exploratory", "decision"}
 
 
 def representative_sample(case: dict, aggregation: str = "median") -> dict | None:
@@ -87,19 +95,103 @@ def format_change(baseline_ms: float, candidate_ms: float, threshold: float) -> 
     return f"{1 / ratio:.2f}x slower"
 
 
+def _case_run_summaries(case: dict) -> list[dict]:
+    summaries = case.get("run_summaries")
+    if isinstance(summaries, list) and summaries:
+        return [summary for summary in summaries if isinstance(summary, dict)]
+    summary = case.get("run_summary")
+    if isinstance(summary, dict):
+        return [summary]
+    return []
+
+
+def _run_metric_values(case: dict, metric: str) -> list[float]:
+    values = []
+    for summary in _case_run_summaries(case):
+        value = summary.get(f"{metric}_ms")
+        if value is None and metric == "median":
+            value = summary.get("median_ms")
+        if value is None:
+            continue
+        values.append(float(value))
+    return values
+
+
+def _bootstrap_relative_change_ci(
+    baseline_values: list[float],
+    candidate_values: list[float],
+    *,
+    iterations: int = 5000,
+    seed: int = 0,
+) -> tuple[float, float]:
+    rng = random.Random(seed)
+    changes: list[float] = []
+    for _ in range(iterations):
+        baseline_sample = [
+            baseline_values[rng.randrange(len(baseline_values))]
+            for _ in range(len(baseline_values))
+        ]
+        candidate_sample = [
+            candidate_values[rng.randrange(len(candidate_values))]
+            for _ in range(len(candidate_values))
+        ]
+        baseline_metric = statistics.median(baseline_sample)
+        candidate_metric = statistics.median(candidate_sample)
+        if baseline_metric <= 0.0:
+            continue
+        changes.append((candidate_metric - baseline_metric) / baseline_metric)
+    if not changes:
+        return float("nan"), float("nan")
+    changes.sort()
+    low_idx = max(0, int(0.025 * len(changes)) - 1)
+    high_idx = min(len(changes) - 1, int(0.975 * len(changes)))
+    return changes[low_idx], changes[high_idx]
+
+
+def _decision_change(case: dict, baseline: list[float], candidate: list[float]) -> str:
+    required_runs = int(case.get("required_runs") or 5)
+    if len(baseline) < required_runs or len(candidate) < required_runs:
+        return "inconclusive"
+    threshold_pct = float(case.get("decision_threshold_pct") or 5.0)
+    threshold = threshold_pct / 100.0
+    low, high = _bootstrap_relative_change_ci(baseline, candidate)
+    if math.isnan(low) or math.isnan(high):
+        return "inconclusive"
+    if low > threshold:
+        return "regression"
+    if high < -threshold:
+        return "improvement"
+    if -threshold <= low and high <= threshold:
+        return "no change"
+    return "inconclusive"
+
+
 def compare_runs(
     baseline: dict,
     candidate: dict,
     threshold: float = 0.05,
     aggregation: str = "median",
+    mode: str = "exploratory",
 ) -> Comparison:
+    if mode not in VALID_COMPARE_MODES:
+        raise ValueError(
+            f"unknown compare mode '{mode}'; expected one of: exploratory, decision"
+        )
     if aggregation not in VALID_AGGREGATIONS:
         raise ValueError(
             f"unknown aggregation '{aggregation}'; expected one of: min, median, p95"
         )
 
+    ensure_matching_contexts(baseline, candidate)
+
     baseline_cases = {c["case"]: c for c in baseline.get("cases", [])}
     candidate_cases = {c["case"]: c for c in candidate.get("cases", [])}
+    invalid_cases = invalid_perf_case_names((baseline, candidate))
+    if invalid_cases:
+        raise ValueError(
+            "compare requires perf-valid inputs; invalid cases present: "
+            + ", ".join(invalid_cases)
+        )
     names = sorted(set(baseline_cases) | set(candidate_cases))
 
     rows: list[ComparisonRow] = []
@@ -159,6 +251,41 @@ def compare_runs(
                     candidate_classification=candidate_classification,
                     baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
                     candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+                )
+            )
+            continue
+
+        if mode == "decision":
+            if baseline.get("schema_version") != 4 or candidate.get("schema_version") != 4:
+                raise ValueError("decision mode requires schema v4 inputs")
+            if b.get("compatibility_key") != c.get("compatibility_key"):
+                raise ValueError(
+                    f"compatibility mismatch for case '{name}': {b.get('compatibility_key')!r}!={c.get('compatibility_key')!r}"
+                )
+            metric = str(c.get("decision_metric") or "median")
+            baseline_values = _run_metric_values(b, metric)
+            candidate_values = _run_metric_values(c, metric)
+            base_ms = statistics.median(baseline_values) if baseline_values else None
+            cand_ms = statistics.median(candidate_values) if candidate_values else None
+            change = _decision_change(c, baseline_values, candidate_values)
+            if change == "improvement":
+                faster += 1
+            elif change == "regression":
+                slower += 1
+            elif change == "no change":
+                no_change += 1
+            else:
+                incomparable += 1
+            rows.append(
+                ComparisonRow(
+                    name,
+                    base_ms,
+                    cand_ms,
+                    change,
+                    baseline_classification=baseline_classification,
+                    candidate_classification=candidate_classification,
+                    baseline_metrics=None,
+                    candidate_metrics=None,
                 )
             )
             continue
@@ -230,6 +357,9 @@ def main() -> None:
     parser.add_argument("candidate", type=Path)
     parser.add_argument("--noise-threshold", type=float, default=0.05)
     parser.add_argument(
+        "--mode", choices=["exploratory", "decision"], default="exploratory"
+    )
+    parser.add_argument(
         "--aggregation", choices=["min", "median", "p95"], default="median"
     )
     parser.add_argument("--format", choices=["text", "markdown"], default="text")
@@ -252,6 +382,7 @@ def main() -> None:
         _load(args.candidate),
         threshold=args.noise_threshold,
         aggregation=args.aggregation,
+        mode=args.mode,
     )
     output = (
         render_markdown(comparison, include_metrics=args.include_metrics)

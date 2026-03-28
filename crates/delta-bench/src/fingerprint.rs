@@ -14,7 +14,7 @@ pub fn hash_display(value: impl std::fmt::Display) -> String {
     hash_bytes(value.to_string().as_bytes())
 }
 
-pub fn hash_json<T: Serialize>(value: &T) -> BenchResult<String> {
+pub fn hash_json<T: Serialize + ?Sized>(value: &T) -> BenchResult<String> {
     let encoded = serde_json::to_vec(value)?;
     Ok(hash_bytes(&encoded))
 }

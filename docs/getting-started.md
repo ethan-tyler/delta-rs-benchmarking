@@ -112,12 +112,18 @@ This creates Delta tables under `fixtures/sf1/` including narrow sales tables, p
 
 This runs every benchmark suite (scan, write, merge, delete_update, metadata, optimize_vacuum, tpcds, interop_py) using both Rust and Python runners. Each case gets 1 warmup iteration (not measured) followed by 5 measured iterations.
 
+If you want to validate workload correctness without producing compareable perf output, switch to validation-only mode:
+
+```bash
+./scripts/bench.sh run --suite scan --dataset-id tiny_smoke --mode assert --label assert-smoke
+```
+
 ### Step 3: Read the output
 
 You should see two things:
 
 1. **Terminal summary table** showing each case with its median time, status, and key metrics.
-2. **JSON result files** at `results/local/<suite>.json` containing full schema v2 results with per-sample timings and metrics.
+2. **JSON result files** at `results/local/<suite>.json` containing full schema v3 results with per-sample timings and metrics.
 
 The JSON files are the primary output. They include context metadata (host, git SHA, timestamp), per-case outcomes, and per-sample metrics like `rows_processed`, `bytes_processed`, and timing statistics. See [reference.md](reference.md) for the complete schema.
 

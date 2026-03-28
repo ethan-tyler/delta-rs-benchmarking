@@ -1,16 +1,22 @@
 use chrono::{DateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
 
-fn deserialize_schema_version_v2<'de, D>(deserializer: D) -> Result<u32, D::Error>
+pub const RESULT_SCHEMA_VERSION: u32 = 4;
+pub const FAILURE_KIND_EXECUTION_ERROR: &str = "execution_error";
+pub const FAILURE_KIND_ASSERTION_MISMATCH: &str = "assertion_mismatch";
+pub const FAILURE_KIND_CONTEXT_MISMATCH: &str = "context_mismatch";
+pub const FAILURE_KIND_UNSUPPORTED: &str = "unsupported";
+
+fn deserialize_supported_schema_version<'de, D>(deserializer: D) -> Result<u32, D::Error>
 where
     D: Deserializer<'de>,
 {
     let value = u32::deserialize(deserializer)?;
-    if value == 2 {
+    if matches!(value, 3 | RESULT_SCHEMA_VERSION) {
         Ok(value)
     } else {
         Err(de::Error::custom(format!(
-            "schema_version must be 2 (found {value})"
+            "schema_version must be one of: 3, {RESULT_SCHEMA_VERSION} (found {value})"
         )))
     }
 }
@@ -51,7 +57,8 @@ fn colorize(text: &str, code: &str) -> String {
 fn colorize_status(status: &str) -> String {
     match status {
         "ok" => colorize(status, "32"),
-        "failed" => colorize(status, "31"),
+        "validated" => colorize(status, "36"),
+        "invalid" => colorize(status, "31"),
         "expected_failure" => colorize(status, "33"),
         _ => status.to_string(),
     }
@@ -72,12 +79,21 @@ pub fn render_run_summary_table(cases: &[CaseResult]) -> String {
 
     let mut rows = Vec::with_capacity(cases.len());
     for case in cases {
-        let status = match (case.success, case.classification.as_str()) {
-            (true, "expected_failure") => "expected_failure",
-            (true, _) => "ok",
-            (false, _) => "failed",
+        let status = match (
+            case.classification.as_str(),
+            case.perf_valid,
+            case.validation_passed,
+        ) {
+            ("expected_failure", _, _) => "expected_failure",
+            (_, true, _) => "ok",
+            (_, false, true) => "validated",
+            _ => "invalid",
         };
-        let stats = case.elapsed_stats.as_ref();
+        let stats = if case.perf_valid {
+            case.elapsed_stats.as_ref()
+        } else {
+            None
+        };
         rows.push(vec![
             case.case.clone(),
             status.to_string(),
@@ -190,7 +206,7 @@ fn render_table_row_colored(
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BenchContext {
-    #[serde(deserialize_with = "deserialize_schema_version_v2")]
+    #[serde(deserialize_with = "deserialize_supported_schema_version")]
     pub schema_version: u32,
     pub label: String,
     pub git_sha: Option<String>,
@@ -208,6 +224,24 @@ pub struct BenchContext {
     pub dataset_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_backend: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub benchmark_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub harness_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixture_recipe_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fidelity_fingerprint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_profile: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -270,6 +304,10 @@ pub struct SampleMetrics {
     pub result_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub semantic_state_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validation_summary: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -292,6 +330,8 @@ pub struct RuntimeIOMetrics {
     pub spill_bytes: Option<u64>,
     pub result_hash: Option<String>,
     pub schema_hash: Option<String>,
+    pub semantic_state_digest: Option<String>,
+    pub validation_summary: Option<String>,
 }
 
 impl SampleMetrics {
@@ -320,6 +360,8 @@ impl SampleMetrics {
             spill_bytes: None,
             result_hash: None,
             schema_hash: None,
+            semantic_state_digest: None,
+            validation_summary: None,
         }
     }
 
@@ -359,6 +401,8 @@ impl SampleMetrics {
         self.spill_bytes = metrics.spill_bytes;
         self.result_hash = metrics.result_hash;
         self.schema_hash = metrics.schema_hash;
+        self.semantic_state_digest = metrics.semantic_state_digest;
+        self.validation_summary = metrics.validation_summary;
         self
     }
 
@@ -375,6 +419,8 @@ impl SampleMetrics {
         spill_bytes: Option<u64>,
         result_hash: Option<String>,
         schema_hash: Option<String>,
+        semantic_state_digest: Option<String>,
+        validation_summary: Option<String>,
     ) -> Self {
         self.with_runtime_io(RuntimeIOMetrics {
             peak_rss_mb,
@@ -386,6 +432,8 @@ impl SampleMetrics {
             spill_bytes,
             result_hash,
             schema_hash,
+            semantic_state_digest,
+            validation_summary,
         })
     }
 }
@@ -421,34 +469,129 @@ pub struct ElapsedStats {
     pub cv_pct: Option<f64>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RunSummary {
+    pub sample_count: u32,
+    #[serde(default)]
+    pub invalid_sample_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mean_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub median_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p95_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fidelity_fingerprint: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CaseResult {
     pub case: String,
     pub success: bool,
+    #[serde(default = "default_true")]
+    pub validation_passed: bool,
+    #[serde(default = "default_true")]
+    pub perf_valid: bool,
     #[serde(deserialize_with = "deserialize_case_classification")]
     pub classification: String,
     pub samples: Vec<IterationSample>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed_stats: Option<ElapsedStats>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_summary: Option<RunSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_summaries: Option<Vec<RunSummary>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suite_manifest_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub case_definition_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compatibility_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_decision: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required_runs: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_threshold_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decision_metric: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_kind: Option<String>,
     pub failure: Option<CaseFailure>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BenchRunResult {
-    #[serde(deserialize_with = "deserialize_schema_version_v2")]
+    #[serde(deserialize_with = "deserialize_supported_schema_version")]
     pub schema_version: u32,
     pub context: BenchContext,
     pub cases: Vec<CaseResult>,
 }
 
+const fn default_true() -> bool {
+    true
+}
+
+pub fn build_run_summary(
+    samples: &[IterationSample],
+    host_label: Option<&str>,
+    fidelity_fingerprint: Option<&str>,
+) -> RunSummary {
+    let mut elapsed = samples
+        .iter()
+        .map(|sample| sample.elapsed_ms)
+        .filter(|value| value.is_finite() && *value >= 0.0)
+        .collect::<Vec<_>>();
+    elapsed.sort_by(|left, right| left.total_cmp(right));
+    let sample_count = elapsed.len() as u32;
+    let (min_ms, max_ms, mean_ms, median_ms, p95_ms) = if elapsed.is_empty() {
+        (None, None, None, None, None)
+    } else {
+        let min_ms = Some(elapsed[0]);
+        let max_ms = Some(*elapsed.last().expect("non-empty elapsed"));
+        let mean_ms = Some(elapsed.iter().sum::<f64>() / elapsed.len() as f64);
+        let median_ms = if elapsed.len() % 2 == 0 {
+            Some((elapsed[elapsed.len() / 2 - 1] + elapsed[elapsed.len() / 2]) / 2.0)
+        } else {
+            Some(elapsed[elapsed.len() / 2])
+        };
+        let p95_idx = ((elapsed.len() as f64) * 0.95).ceil() as usize;
+        let p95_ms = Some(elapsed[p95_idx.saturating_sub(1).min(elapsed.len() - 1)]);
+        (min_ms, max_ms, mean_ms, median_ms, p95_ms)
+    };
+
+    RunSummary {
+        sample_count,
+        invalid_sample_count: samples.len().saturating_sub(sample_count as usize) as u32,
+        min_ms,
+        max_ms,
+        mean_ms,
+        median_ms,
+        p95_ms,
+        host_label: host_label.map(ToOwned::to_owned),
+        fidelity_fingerprint: fidelity_fingerprint.map(ToOwned::to_owned),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{render_run_summary_table, CaseFailure, CaseResult, ElapsedStats};
+    use super::{
+        render_run_summary_table, CaseFailure, CaseResult, ElapsedStats,
+        FAILURE_KIND_EXECUTION_ERROR,
+    };
 
     fn success_case(name: &str, mean_ms: f64, cv_pct: Option<f64>) -> CaseResult {
         CaseResult {
             case: name.to_string(),
             success: true,
+            validation_passed: true,
+            perf_valid: true,
             classification: "supported".to_string(),
             samples: Vec::new(),
             elapsed_stats: Some(ElapsedStats {
@@ -459,6 +602,16 @@ mod tests {
                 stddev_ms: 0.2,
                 cv_pct,
             }),
+            run_summary: None,
+            run_summaries: None,
+            suite_manifest_hash: None,
+            case_definition_hash: None,
+            compatibility_key: None,
+            supports_decision: None,
+            required_runs: None,
+            decision_threshold_pct: None,
+            decision_metric: None,
+            failure_kind: None,
             failure: None,
         }
     }
@@ -481,16 +634,55 @@ mod tests {
         let output = render_run_summary_table(&[CaseResult {
             case: "merge_upsert_10pct".to_string(),
             success: false,
+            validation_passed: false,
+            perf_valid: false,
             classification: "supported".to_string(),
             samples: Vec::new(),
             elapsed_stats: None,
+            run_summary: None,
+            run_summaries: None,
+            suite_manifest_hash: None,
+            case_definition_hash: None,
+            compatibility_key: None,
+            supports_decision: None,
+            required_runs: None,
+            decision_threshold_pct: None,
+            decision_metric: None,
+            failure_kind: Some(FAILURE_KIND_EXECUTION_ERROR.to_string()),
             failure: Some(CaseFailure {
                 message: "boom".to_string(),
             }),
         }]);
 
         assert!(output.contains("merge_upsert_10pct"));
-        assert!(output.contains("failed"));
+        assert!(output.contains("invalid"));
         assert!(output.contains(" - "));
+    }
+
+    #[test]
+    fn run_summary_table_marks_validation_only_cases_as_validated() {
+        let output = render_run_summary_table(&[CaseResult {
+            case: "scan_filter_flag".to_string(),
+            success: true,
+            validation_passed: true,
+            perf_valid: false,
+            classification: "supported".to_string(),
+            samples: Vec::new(),
+            elapsed_stats: None,
+            run_summary: None,
+            run_summaries: None,
+            suite_manifest_hash: None,
+            case_definition_hash: None,
+            compatibility_key: None,
+            supports_decision: None,
+            required_runs: None,
+            decision_threshold_pct: None,
+            decision_metric: None,
+            failure_kind: None,
+            failure: None,
+        }]);
+
+        assert!(output.contains("validated"));
+        assert!(output.contains("scan_filter_flag"));
     }
 }

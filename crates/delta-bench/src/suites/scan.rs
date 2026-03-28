@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use deltalake_core::arrow::record_batch::RecordBatch;
 use deltalake_core::datafusion::execution::context::TaskContext;
 use deltalake_core::datafusion::physical_plan::collect;
 use deltalake_core::datafusion::physical_plan::ExecutionPlan;
@@ -28,10 +29,32 @@ pub fn case_names() -> Vec<String> {
     ]
 }
 
-struct PreparedSqlQuery {
+#[doc(hidden)]
+#[derive(Clone)]
+pub struct ScanCaseSpec {
+    table_url: Url,
+    sql: &'static str,
+}
+
+#[doc(hidden)]
+pub struct LoadedSqlQuery {
+    ctx: SessionContext,
+    total_active_files: Option<u64>,
+}
+
+#[doc(hidden)]
+pub struct PreparedSqlQuery {
     plan: Arc<dyn ExecutionPlan>,
     task_ctx: Arc<TaskContext>,
     total_active_files: Option<u64>,
+}
+
+#[doc(hidden)]
+pub struct ExecutedSqlQuery {
+    plan: Arc<dyn ExecutionPlan>,
+    batches: Vec<RecordBatch>,
+    total_active_files: Option<u64>,
+    execution_elapsed_ms: f64,
 }
 
 pub async fn run(
@@ -110,6 +133,96 @@ pub async fn run(
     Ok(results)
 }
 
+pub async fn run_single_case(
+    fixtures_dir: &Path,
+    scale: &str,
+    case_name: &str,
+    timing_phase: TimingPhase,
+    storage: &StorageConfig,
+) -> BenchResult<CaseResult> {
+    let (table_url, sql) = resolve_case_spec(fixtures_dir, scale, case_name, storage)?;
+
+    Ok(into_case_result(
+        run_query_case(case_name, timing_phase, 0, 1, storage, table_url, sql).await,
+    ))
+}
+
+#[doc(hidden)]
+pub fn benchmark_case_spec(
+    fixtures_dir: &Path,
+    scale: &str,
+    case_name: &str,
+    storage: &StorageConfig,
+) -> BenchResult<ScanCaseSpec> {
+    let (table_url, sql) = resolve_case_spec(fixtures_dir, scale, case_name, storage)?;
+    Ok(ScanCaseSpec { table_url, sql })
+}
+
+#[doc(hidden)]
+pub async fn benchmark_load_case(
+    storage: &StorageConfig,
+    spec: ScanCaseSpec,
+) -> BenchResult<LoadedSqlQuery> {
+    load_sql_query_context(storage, spec.table_url).await
+}
+
+#[doc(hidden)]
+pub async fn benchmark_plan_case(
+    loaded: LoadedSqlQuery,
+    sql: &'static str,
+) -> BenchResult<PreparedSqlQuery> {
+    plan_loaded_sql_query(loaded, sql).await
+}
+
+#[doc(hidden)]
+pub async fn benchmark_execute_case(prepared: PreparedSqlQuery) -> BenchResult<ExecutedSqlQuery> {
+    execute_prepared_query(prepared).await
+}
+
+#[doc(hidden)]
+pub async fn benchmark_validate_case(executed: ExecutedSqlQuery) -> BenchResult<SampleMetrics> {
+    let (metrics, _) = validate_executed_query(executed).await?;
+    Ok(metrics)
+}
+
+#[doc(hidden)]
+pub fn benchmark_case_sql(spec: &ScanCaseSpec) -> &'static str {
+    spec.sql
+}
+
+fn resolve_case_spec(
+    fixtures_dir: &Path,
+    scale: &str,
+    case_name: &str,
+    storage: &StorageConfig,
+) -> BenchResult<(Url, &'static str)> {
+    match case_name {
+        "scan_full_narrow" => Ok((
+            narrow_sales_table_url(fixtures_dir, scale, storage)?,
+            "SELECT COUNT(*) FROM bench",
+        )),
+        "scan_projection_region" => Ok((
+            narrow_sales_table_url(fixtures_dir, scale, storage)?,
+            "SELECT region, SUM(value_i64) FROM bench GROUP BY region",
+        )),
+        "scan_filter_flag" => Ok((
+            narrow_sales_table_url(fixtures_dir, scale, storage)?,
+            "SELECT COUNT(*) FROM bench WHERE flag = true AND value_i64 > 0",
+        )),
+        "scan_pruning_hit" => Ok((
+            read_partitioned_table_url(fixtures_dir, scale, storage)?,
+            "SELECT COUNT(*) FROM bench WHERE region = 'us'",
+        )),
+        "scan_pruning_miss" => Ok((
+            read_partitioned_table_url(fixtures_dir, scale, storage)?,
+            "SELECT COUNT(*) FROM bench",
+        )),
+        other => Err(crate::error::BenchError::InvalidArgument(format!(
+            "unknown scan case '{other}'"
+        ))),
+    }
+}
+
 async fn run_query_case(
     case_name: &str,
     timing_phase: TimingPhase,
@@ -123,30 +236,43 @@ async fn run_query_case(
         let storage = storage.clone();
         let table_url = table_url.clone();
         async move {
+            let load_start = std::time::Instant::now();
+            let loaded = load_sql_query_context(&storage, table_url)
+                .await
+                .map_err(|e| e.to_string())?;
+            let load_elapsed_ms = load_start.elapsed().as_secs_f64() * 1000.0;
+
             let planning_start = std::time::Instant::now();
-            let prepared = prepare_sql_query(&storage, table_url, sql)
+            let prepared = plan_loaded_sql_query(loaded, sql)
                 .await
                 .map_err(|e| e.to_string())?;
             let planning_elapsed_ms = planning_start.elapsed().as_secs_f64() * 1000.0;
-            let (metrics, execution_elapsed_ms) = execute_prepared_query(prepared)
+
+            let executed = execute_prepared_query(prepared)
+                .await
+                .map_err(|e| e.to_string())?;
+            let execution_elapsed_ms = executed.execution_elapsed_ms;
+
+            let (metrics, validate_elapsed_ms) = validate_executed_query(executed)
                 .await
                 .map_err(|e| e.to_string())?;
             Ok::<TimedSample<SampleMetrics>, String>(TimedSample::new(
                 metrics,
                 PhaseTiming::default()
+                    .with_load_ms(load_elapsed_ms)
                     .with_plan_ms(planning_elapsed_ms)
-                    .with_execute_ms(execution_elapsed_ms),
+                    .with_execute_ms(execution_elapsed_ms)
+                    .with_validate_ms(validate_elapsed_ms),
             ))
         }
     })
     .await
 }
 
-async fn prepare_sql_query(
+async fn load_sql_query_context(
     storage: &StorageConfig,
     table_url: Url,
-    sql: &str,
-) -> BenchResult<PreparedSqlQuery> {
+) -> BenchResult<LoadedSqlQuery> {
     let table = storage.open_table(table_url).await?;
     let total_active_files = table
         .snapshot()
@@ -154,37 +280,66 @@ async fn prepare_sql_query(
         .map(|snapshot| snapshot.log_data().num_files() as u64);
     let ctx = SessionContext::new();
     ctx.register_table("bench", table.table_provider().await?)?;
-    let df = ctx.sql(sql).await?;
+
+    Ok(LoadedSqlQuery {
+        ctx,
+        total_active_files,
+    })
+}
+
+async fn plan_loaded_sql_query(loaded: LoadedSqlQuery, sql: &str) -> BenchResult<PreparedSqlQuery> {
+    let df = loaded.ctx.sql(sql).await?;
     let task_ctx = Arc::new(df.task_ctx());
     let plan = df.create_physical_plan().await?;
 
     Ok(PreparedSqlQuery {
         plan,
         task_ctx,
-        total_active_files,
+        total_active_files: loaded.total_active_files,
     })
 }
 
-async fn execute_prepared_query(prepared: PreparedSqlQuery) -> BenchResult<(SampleMetrics, f64)> {
+async fn execute_prepared_query(prepared: PreparedSqlQuery) -> BenchResult<ExecutedSqlQuery> {
     let query_start = std::time::Instant::now();
     let batches = collect(prepared.plan.clone(), prepared.task_ctx).await?;
     let query_elapsed_ms = query_start.elapsed().as_secs_f64() * 1000.0;
-    let rows_processed = batches.iter().map(|b| b.num_rows() as u64).sum::<u64>();
-    let scan_metrics = extract_scan_metrics(&prepared.plan);
-    let files_pruned = scan_metrics.files_pruned.or_else(|| {
-        prepared.total_active_files.and_then(|total| {
+
+    Ok(ExecutedSqlQuery {
+        plan: prepared.plan,
+        batches,
+        total_active_files: prepared.total_active_files,
+        execution_elapsed_ms: query_elapsed_ms,
+    })
+}
+
+async fn validate_executed_query(executed: ExecutedSqlQuery) -> BenchResult<(SampleMetrics, f64)> {
+    let validate_start = std::time::Instant::now();
+    let rows_processed = executed
+        .batches
+        .iter()
+        .map(|b| b.num_rows() as u64)
+        .sum::<u64>();
+    let scan_metrics = extract_scan_metrics(&executed.plan);
+    let files_scanned = scan_metrics.files_scanned.or_else(|| {
+        executed.total_active_files.and_then(|total| {
             scan_metrics
-                .files_scanned
-                .and_then(|scanned| total.checked_sub(scanned))
+                .files_pruned
+                .and_then(|pruned| total.checked_sub(pruned))
         })
     });
-    let result_hash = hash_record_batches_unordered(&batches)?;
-    let schema_hash = hash_arrow_schema(prepared.plan.schema().as_ref())?;
+    let files_pruned = scan_metrics.files_pruned.or_else(|| {
+        executed
+            .total_active_files
+            .and_then(|total| files_scanned.and_then(|scanned| total.checked_sub(scanned)))
+    });
+    let result_hash = hash_record_batches_unordered(&executed.batches)?;
+    let schema_hash = hash_arrow_schema(executed.plan.schema().as_ref())?;
+    let validate_elapsed_ms = validate_start.elapsed().as_secs_f64() * 1000.0;
 
     Ok((
         SampleMetrics::base(Some(rows_processed), None, None, None)
             .with_scan_rewrite(ScanRewriteMetrics {
-                files_scanned: scan_metrics.files_scanned,
+                files_scanned,
                 files_pruned,
                 bytes_scanned: scan_metrics.bytes_scanned,
                 scan_time_ms: scan_metrics.scan_time_ms,
@@ -200,8 +355,10 @@ async fn execute_prepared_query(prepared: PreparedSqlQuery) -> BenchResult<(Samp
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest: None,
+                validation_summary: None,
             }),
-        query_elapsed_ms,
+        validate_elapsed_ms,
     ))
 }
 

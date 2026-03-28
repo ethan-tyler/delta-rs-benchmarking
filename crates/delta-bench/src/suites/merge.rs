@@ -328,6 +328,8 @@ async fn run_merge_case(
                 spill_bytes: None,
                 result_hash: Some(result_hash),
                 schema_hash: Some(schema_hash),
+                semantic_state_digest: None,
+                validation_summary: None,
             }),
     )
 }

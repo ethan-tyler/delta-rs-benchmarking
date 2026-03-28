@@ -1,3 +1,4 @@
+use std::num::NonZeroU64;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -363,7 +364,10 @@ pub async fn run(
 }
 
 async fn run_optimize_case(table: DeltaTable, target_size: u64) -> BenchResult<SampleMetrics> {
-    let (table, metrics) = table.optimize().with_target_size(target_size).await?;
+    let (table, metrics) = table
+        .optimize()
+        .with_target_size(normalize_target_size(target_size)?)
+        .await?;
     let table_version = table.version().map(|v| v as u64);
     let result_hash = hash_json(&json!({
         "operation": "optimize",
@@ -406,7 +410,15 @@ async fn run_optimize_case(table: DeltaTable, target_size: u64) -> BenchResult<S
         spill_bytes: None,
         result_hash: Some(result_hash),
         schema_hash: Some(schema_hash),
+        semantic_state_digest: None,
+        validation_summary: None,
     }))
+}
+
+fn normalize_target_size(target_size: u64) -> BenchResult<NonZeroU64> {
+    NonZeroU64::new(target_size).ok_or_else(|| {
+        BenchError::InvalidArgument("target size must be greater than zero".to_string())
+    })
 }
 
 async fn run_vacuum_case(table: DeltaTable, dry_run: bool) -> BenchResult<SampleMetrics> {
@@ -445,7 +457,30 @@ async fn run_vacuum_case(table: DeltaTable, dry_run: bool) -> BenchResult<Sample
         spill_bytes: None,
         result_hash: Some(result_hash),
         schema_hash: Some(schema_hash),
+        semantic_state_digest: None,
+        validation_summary: None,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_target_size;
+    use crate::error::BenchError;
+
+    #[test]
+    fn normalize_target_size_accepts_positive_values() {
+        let target = normalize_target_size(64_000).expect("positive target size should work");
+        assert_eq!(target.get(), 64_000);
+    }
+
+    #[test]
+    fn normalize_target_size_rejects_zero() {
+        let err = normalize_target_size(0).expect_err("zero target size should fail");
+        assert!(matches!(
+            err,
+            BenchError::InvalidArgument(message) if message.contains("target size must be greater than zero")
+        ));
+    }
 }
 
 async fn prepare_iteration(

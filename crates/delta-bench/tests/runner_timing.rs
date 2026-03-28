@@ -87,7 +87,7 @@ async fn successful_case_includes_elapsed_stats() {
 }
 
 #[test]
-fn partial_failure_case_includes_elapsed_stats_for_collected_samples() {
+fn partial_failure_case_does_not_expose_perf_stats_for_collected_samples() {
     let mut attempts = 0_u32;
     let result = run_case("timing_case_failure_stats", 0, 3, || {
         attempts += 1;
@@ -104,8 +104,8 @@ fn partial_failure_case_includes_elapsed_stats_for_collected_samples() {
     };
     assert_eq!(case.samples.len(), 2);
     assert!(
-        case.elapsed_stats.is_some(),
-        "failure case should retain elapsed stats for collected samples"
+        case.elapsed_stats.is_none(),
+        "failure case should not expose perf stats for collected samples"
     );
 }
 
@@ -293,13 +293,27 @@ async fn custom_timing_override_controls_elapsed_for_async_setup_case() {
 
 #[tokio::test]
 async fn runner_selects_requested_timing_phase() {
+    let load_result =
+        run_case_async_with_timing_phase("timing_phase_load", 0, 1, TimingPhase::Load, || async {
+            Ok::<TimedSample<u64>, String>(TimedSample::new(
+                1,
+                PhaseTiming::default()
+                    .with_load_ms(0.75)
+                    .with_plan_ms(1.25)
+                    .with_execute_ms(9.75)
+                    .with_validate_ms(3.5),
+            ))
+        })
+        .await;
     let plan_result =
         run_case_async_with_timing_phase("timing_phase_plan", 0, 1, TimingPhase::Plan, || async {
             Ok::<TimedSample<u64>, String>(TimedSample::new(
                 1,
                 PhaseTiming::default()
+                    .with_load_ms(0.75)
                     .with_plan_ms(1.25)
-                    .with_execute_ms(9.75),
+                    .with_execute_ms(9.75)
+                    .with_validate_ms(3.5),
             ))
         })
         .await;
@@ -313,13 +327,36 @@ async fn runner_selects_requested_timing_phase() {
             Ok::<TimedSample<u64>, String>(TimedSample::new(
                 1,
                 PhaseTiming::default()
+                    .with_load_ms(0.75)
                     .with_plan_ms(1.25)
-                    .with_execute_ms(9.75),
+                    .with_execute_ms(9.75)
+                    .with_validate_ms(3.5),
+            ))
+        },
+    )
+    .await;
+    let validate_result = run_case_async_with_timing_phase(
+        "timing_phase_validate",
+        0,
+        1,
+        TimingPhase::Validate,
+        || async {
+            Ok::<TimedSample<u64>, String>(TimedSample::new(
+                1,
+                PhaseTiming::default()
+                    .with_load_ms(0.75)
+                    .with_plan_ms(1.25)
+                    .with_execute_ms(9.75)
+                    .with_validate_ms(3.5),
             ))
         },
     )
     .await;
 
+    let load_case = match load_result {
+        CaseExecutionResult::Success(case) => case,
+        CaseExecutionResult::Failure(case) => panic!("unexpected failure: {:?}", case.failure),
+    };
     let plan_case = match plan_result {
         CaseExecutionResult::Success(case) => case,
         CaseExecutionResult::Failure(case) => panic!("unexpected failure: {:?}", case.failure),
@@ -328,7 +365,16 @@ async fn runner_selects_requested_timing_phase() {
         CaseExecutionResult::Success(case) => case,
         CaseExecutionResult::Failure(case) => panic!("unexpected failure: {:?}", case.failure),
     };
+    let validate_case = match validate_result {
+        CaseExecutionResult::Success(case) => case,
+        CaseExecutionResult::Failure(case) => panic!("unexpected failure: {:?}", case.failure),
+    };
 
+    assert!(
+        (load_case.samples[0].elapsed_ms - 0.75).abs() < 0.001,
+        "expected load timing to drive elapsed_ms, got {} ms",
+        load_case.samples[0].elapsed_ms
+    );
     assert!(
         (plan_case.samples[0].elapsed_ms - 1.25).abs() < 0.001,
         "expected plan timing to drive elapsed_ms, got {} ms",
@@ -339,6 +385,11 @@ async fn runner_selects_requested_timing_phase() {
         "expected execute timing to drive elapsed_ms, got {} ms",
         execute_case.samples[0].elapsed_ms
     );
+    assert!(
+        (validate_case.samples[0].elapsed_ms - 3.5).abs() < 0.001,
+        "expected validate timing to drive elapsed_ms, got {} ms",
+        validate_case.samples[0].elapsed_ms
+    );
 }
 
 #[tokio::test]
@@ -347,7 +398,7 @@ async fn missing_requested_timing_phase_fails_case() {
         "timing_phase_missing",
         0,
         1,
-        TimingPhase::Plan,
+        TimingPhase::Validate,
         || async {
             Ok::<TimedSample<u64>, String>(TimedSample::new(
                 1,
@@ -366,8 +417,8 @@ async fn missing_requested_timing_phase_fails_case() {
         .as_ref()
         .expect("missing phase should include failure payload");
     assert!(
-        failure.message.contains("plan"),
-        "failure should mention missing plan timing: {}",
+        failure.message.contains("validate"),
+        "failure should mention missing validate timing: {}",
         failure.message
     );
 }

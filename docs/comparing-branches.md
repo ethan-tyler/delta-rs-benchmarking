@@ -27,7 +27,7 @@ The fastest way to compare your current checkout against upstream `main`:
 ./scripts/compare_branch.sh --current-vs-main all
 ```
 
-This builds and benchmarks both your current checkout and the latest remote `main`, then prints a grouped report showing regressions, improvements, and stable cases. The defaults (2 warmup, 9 measured iterations, 3 runs per ref, alternating order) are tuned for decision-grade results.
+This builds and benchmarks both your current checkout and the latest remote `main`, then prints a grouped report showing regressions, improvements, and stable cases. The compare pipeline always runs in `--mode perf`; use `./scripts/bench.sh run --mode assert ...` when you want workload validation without perf conclusions. The defaults (2 warmup, 9 measured iterations, 3 runs per ref, alternating order) are tuned for repeatable same-machine comparisons, not automatic decision-grade conclusions.
 
 ## Comparison Methods
 
@@ -78,7 +78,7 @@ When you run a comparison, the script executes these steps in order:
 4. **Runs prewarm iterations** (optional) -- executes unreported warmup iterations for both refs to prime caches and stabilize thermal state.
 5. **Runs measured iterations** -- executes the configured number of measured benchmark runs for base and candidate in the configured order (alternating by default).
 6. **Aggregates results** -- combines all measured runs for each side into a single JSON payload using the configured aggregation method (median by default).
-7. **Prints the report** -- classifies each case and prints grouped output: Regressions, Improvements, Stable, and Needs Attention.
+7. **Prints the report** -- classifies each case and prints grouped output for valid perf comparisons only. Invalid or mismatched inputs fail closed before comparison.
 
 ## Tuning Your Comparison
 
@@ -95,6 +95,9 @@ These flags control the measurement itself:
 | `--measure-order` | `alternate` | Run interleaving: `base-first`, `candidate-first`, or `alternate`. |
 | `--aggregation` | `median` | How to pick the representative sample: `min`, `median`, or `p95`. |
 | `--noise-threshold` | `0.05` | Minimum relative change to classify as regression or improvement. |
+| `--mode` | `perf` | Benchmark mode forwarded to `bench.sh run`. Branch comparison should stay on `perf`. |
+| `--dataset-id` | — | Dataset id forwarded to fixture generation and benchmark runs. |
+| `--timing-phase` | `execute` | Isolated timing phase for phase-aware suites. |
 
 ### Environment variables
 
@@ -147,7 +150,7 @@ The comparison report groups benchmark cases into four sections:
 | **Regressions** | Cases where the candidate is slower than the base beyond the noise threshold. Investigate before merging. |
 | **Improvements** | Cases where the candidate is faster than the base beyond the noise threshold. |
 | **Stable** | Cases where performance is within the noise threshold. No action needed. |
-| **Needs Attention** | Cases with high variability (`cv_pct > 10`) or other anomalies. Results may not be reliable -- consider rerunning with more iterations. |
+| **Comparison aborted** | Any invalid workload or mismatched benchmark context. Compare fails closed instead of producing a perf claim. |
 
 Key metrics to look at:
 
@@ -161,4 +164,4 @@ For the complete list of metrics that may appear in the report, see [Reference](
 
 - **Track trends over time** -- see [Longitudinal Benchmarking](longitudinal.md) for regression detection across many revisions.
 - **Run on dedicated hardware** -- see [Cloud Runner](cloud-runner.md) for noise-isolated benchmarks on hardened infrastructure.
-- **Understand the result format** -- see [Reference](reference.md#result-schema-v2) for the complete schema v2 field listing.
+- **Understand the result format** -- see [Reference](reference.md#result-schema-v3) for the complete schema v3 field listing.

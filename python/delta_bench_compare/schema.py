@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 VALID_CLASSIFICATIONS = {"supported", "expected_failure"}
+V2_COMPARISON_CONTEXT_KEYS: tuple[str, ...] = ()
+V2_REQUIRED_COMPARISON_CONTEXT_KEYS: tuple[str, ...] = ()
 V3_COMPARISON_CONTEXT_KEYS = (
     "suite",
     "runner",
@@ -60,19 +62,21 @@ def _schema_version(payload: dict) -> int:
 
 
 def _comparison_context_keys(payload: dict) -> tuple[str, ...]:
-    return (
-        V4_COMPARISON_CONTEXT_KEYS
-        if _schema_version(payload) >= 4
-        else V3_COMPARISON_CONTEXT_KEYS
-    )
+    version = _schema_version(payload)
+    if version >= 4:
+        return V4_COMPARISON_CONTEXT_KEYS
+    if version == 3:
+        return V3_COMPARISON_CONTEXT_KEYS
+    return V2_COMPARISON_CONTEXT_KEYS
 
 
 def _required_comparison_context_keys(payload: dict) -> tuple[str, ...]:
-    return (
-        V4_REQUIRED_COMPARISON_CONTEXT_KEYS
-        if _schema_version(payload) >= 4
-        else V3_REQUIRED_COMPARISON_CONTEXT_KEYS
-    )
+    version = _schema_version(payload)
+    if version >= 4:
+        return V4_REQUIRED_COMPARISON_CONTEXT_KEYS
+    if version == 3:
+        return V3_REQUIRED_COMPARISON_CONTEXT_KEYS
+    return V2_REQUIRED_COMPARISON_CONTEXT_KEYS
 
 
 def case_classification(case: dict | None) -> str | None:
@@ -109,7 +113,7 @@ def invalid_perf_case_names(payloads: tuple[dict, ...] | list[dict]) -> list[str
             case["case"]
             for payload in payloads
             for case in payload.get("cases", [])
-            if not case_perf_valid(case)
+            if _schema_version(payload) >= 3 and not case_perf_valid(case)
         }
     )
 
@@ -168,16 +172,16 @@ def load_benchmark_payload(path: Path) -> dict:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ValueError(f"{path}: invalid JSON ({exc.msg})") from exc
-    if payload.get("schema_version") not in {3, 4}:
+    if payload.get("schema_version") not in {2, 3, 4}:
         raise ValueError(
-            f"{path}: top-level schema_version must be 3 or 4 (found {payload.get('schema_version')!r})"
+            f"{path}: top-level schema_version must be 2, 3, or 4 (found {payload.get('schema_version')!r})"
         )
     context = payload.get("context")
     if not isinstance(context, dict):
         raise ValueError(f"{path}: context must be an object")
-    if context.get("schema_version") not in {3, 4}:
+    if context.get("schema_version") not in {2, 3, 4}:
         raise ValueError(
-            f"{path}: context.schema_version must be 3 or 4 (found {context.get('schema_version')!r})"
+            f"{path}: context.schema_version must be 2, 3, or 4 (found {context.get('schema_version')!r})"
         )
     cases = payload.get("cases")
     if not isinstance(cases, list):
@@ -195,5 +199,6 @@ def load_benchmark_payload(path: Path) -> dict:
             raise ValueError(f"{path}: duplicate case id '{case_name}' in cases array")
         seen_case_names.add(case_name)
         case_classification(case)
-        case_perf_valid(case)
+        if _schema_version(payload) >= 3:
+            case_perf_valid(case)
     return payload

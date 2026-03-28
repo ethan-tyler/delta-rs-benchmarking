@@ -133,9 +133,9 @@ def test_heading_levels_do_not_jump() -> None:
         for hashes, text in headings:
             level = len(hashes)
             if prev_level != 0:
-                assert level <= prev_level + 1, (
-                    f"heading level jumps in {doc_file} at heading: {text}"
-                )
+                assert (
+                    level <= prev_level + 1
+                ), f"heading level jumps in {doc_file} at heading: {text}"
             prev_level = level
 
 

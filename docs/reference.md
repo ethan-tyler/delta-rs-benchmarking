@@ -495,7 +495,6 @@ Additional fixture artifacts:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `schema_version` | u32 | yes | Context schema version (always `2`) |
 | `host` | string | yes | Machine hostname |
 | `label` | string | yes | Run label identifier |
 | `git_sha` | string | no | Git SHA of the revision under test |
@@ -544,7 +543,6 @@ These are populated when running on cloud/hardened infrastructure.
 |---|---|---|
 | `case` | string | Case name (e.g., `scan_full_narrow`) |
 | `success` | bool | Whether the case satisfied workload validation |
-| `case` | string | Case name (e.g., `scan_full_narrow`) |
 | `validation_passed` | bool | Whether correctness/assertion validation passed |
 | `perf_valid` | bool | Whether the case is valid for performance comparison. Smoke, correctness, assert, and correctness-tagged macro runs emit `false`. |
 | `classification` | string | `supported` or `expected_failure` |
@@ -559,7 +557,7 @@ These are populated when running on cloud/hardened infrastructure.
 | `decision_threshold_pct` | f64 | Regression threshold for decision mode |
 | `decision_metric` | string | Run summary metric used for decision mode |
 | `failure_kind` | string | Failure class such as `execution_error`, `assertion_mismatch`, `context_mismatch`, or `unsupported` |
-| `failure` | object | Failure payload with a `message` field when the case failed |
+| `failure` | string | Error message if the case failed |
 | `elapsed_stats` | object | Timing statistics across samples when `perf_valid=true` (see [Elapsed statistics](#elapsed-statistics)) |
 
 ### Sample-level fields
@@ -568,10 +566,8 @@ Each sample represents one measured iteration.
 
 | Field | Type | Description |
 |---|---|---|
-| `elapsed_ms` | f64 | Timed duration for this iteration; on phase-aware suites this reflects the selected `timing_phase` |
-| `rows` | u64 | Optional row count captured directly on the sample |
-| `bytes` | u64 | Optional byte count captured directly on the sample |
-| `metrics` | object | Optional flat and nested metric fields (see [Metrics Reference](#metrics-reference)) |
+| `elapsed_ms` | f64 | Timed duration for this iteration; on phase-aware suites this reflects the selected isolated `timing_phase` |
+| `metrics` | object | Metric fields (see [Metrics Reference](#metrics-reference)) |
 | `metrics.contention` | object | Optional nested contention metrics domain emitted by `concurrency` |
 
 Schema v3 artifacts are still readable for exploratory analysis, but decision mode and authoritative longitudinal workflows require schema v4 with complete identity fields. Automated GitHub Actions perf workflows are currently macro-only and curated to `scan`.

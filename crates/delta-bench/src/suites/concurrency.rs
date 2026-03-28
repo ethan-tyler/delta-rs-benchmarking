@@ -1,4 +1,5 @@
 use std::future::Future;
+use std::num::NonZeroU64;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -40,6 +41,10 @@ fn update_vs_compaction_predicate() -> &'static str {
 
 fn delete_vs_compaction_predicate() -> &'static str {
     "id % 20 = 0"
+}
+
+fn contended_optimize_target_size() -> NonZeroU64 {
+    NonZeroU64::new(CONTENDED_OPTIMIZE_TARGET_SIZE).expect("target size must be non-zero")
 }
 
 pub fn case_names() -> Vec<String> {
@@ -381,7 +386,7 @@ async fn execute_update_vs_compaction(setup: ContendedSampleSetup) -> BenchResul
                         Worker::Compact(table) => classify_table_version_result(
                             table
                                 .optimize()
-                                .with_target_size(CONTENDED_OPTIMIZE_TARGET_SIZE)
+                                .with_target_size(contended_optimize_target_size())
                                 .await
                                 .map(|(table, _)| table.version().map(|version| version as u64)),
                         ),
@@ -423,7 +428,7 @@ async fn execute_delete_vs_compaction(setup: ContendedSampleSetup) -> BenchResul
                         Worker::Compact(table) => classify_table_version_result(
                             table
                                 .optimize()
-                                .with_target_size(CONTENDED_OPTIMIZE_TARGET_SIZE)
+                                .with_target_size(contended_optimize_target_size())
                                 .await
                                 .map(|(table, _)| table.version().map(|version| version as u64)),
                         ),
@@ -454,7 +459,7 @@ async fn execute_optimize_vs_optimize_overlap(
                     classify_table_version_result(
                         table
                             .optimize()
-                            .with_target_size(CONTENDED_OPTIMIZE_TARGET_SIZE)
+                            .with_target_size(contended_optimize_target_size())
                             .await
                             .map(|(table, _)| table.version().map(|version| version as u64)),
                     )
@@ -646,6 +651,8 @@ fn attach_concurrency_schema_hash(mut sample: SampleExecution) -> BenchResult<Sa
         spill_bytes: None,
         result_hash: None,
         schema_hash: Some(schema_hash),
+        semantic_state_digest: None,
+        validation_summary: None,
     });
     Ok(sample)
 }
@@ -743,9 +750,21 @@ fn success_case_result(name: &str, samples: Vec<IterationSample>) -> CaseResult 
     CaseResult {
         case: name.to_string(),
         success: true,
+        validation_passed: true,
+        perf_valid: true,
         classification: "supported".to_string(),
         elapsed_stats: elapsed_stats_from_samples(&samples),
+        run_summary: None,
+        run_summaries: None,
+        suite_manifest_hash: None,
+        case_definition_hash: None,
+        compatibility_key: None,
+        supports_decision: None,
+        required_runs: None,
+        decision_threshold_pct: None,
+        decision_metric: None,
         samples,
+        failure_kind: None,
         failure: None,
     }
 }
@@ -754,9 +773,21 @@ fn failure_case_result(name: &str, samples: Vec<IterationSample>, message: Strin
     CaseResult {
         case: name.to_string(),
         success: false,
+        validation_passed: false,
+        perf_valid: false,
         classification: "supported".to_string(),
         elapsed_stats: elapsed_stats_from_samples(&samples),
+        run_summary: None,
+        run_summaries: None,
+        suite_manifest_hash: None,
+        case_definition_hash: None,
+        compatibility_key: None,
+        supports_decision: None,
+        required_runs: None,
+        decision_threshold_pct: None,
+        decision_metric: None,
         samples,
+        failure_kind: Some("execution_error".to_string()),
         failure: Some(CaseFailure { message }),
     }
 }

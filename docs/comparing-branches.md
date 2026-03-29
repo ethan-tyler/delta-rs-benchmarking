@@ -27,16 +27,13 @@ The fastest way to compare your current checkout against upstream `main`:
 ./scripts/compare_branch.sh --current-vs-main scan
 ```
 
-This builds and benchmarks both your current checkout and the latest remote `main`, then prints a grouped report showing regressions, improvements, stable cases, and inconclusive cases. The compare pipeline always runs the macro lane in `--mode perf`. `compare_branch.sh` defaults to `--compare-mode exploratory`, which is suitable for same-machine investigation but not for automatic pass/fail decisions. Decision mode is explicit and requires schema v4 payloads with complete compatibility identity.
+This builds and benchmarks both your current checkout and the latest remote `main`, then prints a grouped report showing regressions, improvements, stable cases, and inconclusive results.
 
-Automation policy is narrower than local experimentation:
-- PR comments support `run benchmark scan` for exploratory output and `run benchmark decision scan` for decision-grade automation.
-- GitHub-hosted CI stays on smoke and correctness validation lanes only.
-- Self-hosted PR and nightly perf workflows are currently curated to `scan` only.
-- The authoritative scan decision set is currently `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` remains available for exploratory diagnostics but is disabled in `core_rust.yaml` until its exact-result contract is requalified.
-- Stateful Rust suites remain correctness-trusted workloads. If you force them through macro lane, the result is operational but not perf-valid.
+The compare pipeline runs the macro lane in `--mode perf`. By default `compare_branch.sh` uses `--compare-mode exploratory`, which works for same-machine investigation but not automatic pass/fail decisions. Decision mode requires schema v4 payloads with complete compatibility identity.
 
-Before treating a machine or workflow as trustworthy for perf claims, rerun the contract checks with `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
+Before treating a machine or workflow as trustworthy for perf claims, rerun `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
+
+> **Automation scope.** PR comments support `run benchmark scan` (exploratory) and `run benchmark decision scan` (decision-grade). Automated macro perf is curated to `scan` only — specifically `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` is disabled until requalified. Stateful Rust suites are correctness-trusted; forcing them through macro lane produces operational but not perf-valid results. GitHub-hosted CI stays on smoke and correctness lanes.
 
 ## Comparison Methods
 
@@ -48,7 +45,7 @@ The simplest option. Compares whatever commit is checked out in `.delta-rs-under
 ./scripts/compare_branch.sh --current-vs-main scan
 ```
 
-Use this when you are working on a branch and want to check your changes against main without specifying exact SHAs.
+Use this when you want to check your branch against main without specifying exact SHAs.
 
 ### Named branch-to-branch
 
@@ -95,30 +92,30 @@ When you run a comparison, the script executes these steps in order:
 
 These flags control the measurement itself:
 
-| Flag | Default | Description |
-|---|---|---|
-| `--warmup` | `2` | Warmup iterations per case (not measured). |
-| `--iters` | `9` | Measured iterations per case per run. |
-| `--prewarm-iters` | `1` | Unreported warmup iterations per ref (run before any measured iterations). |
-| `--compare-runs` | `3` | Number of independent measured runs per ref before aggregation. Exploratory mode can use this default; decision mode should use at least `5`. |
-| `--measure-order` | `alternate` | Run interleaving: `base-first`, `candidate-first`, or `alternate`. |
-| `--aggregation` | `median` | How to pick the representative sample: `min`, `median`, or `p95`. |
-| `--noise-threshold` | `0.05` | Minimum relative change to classify as regression or improvement. |
-| `--compare-mode` | `exploratory` | Comparison policy: `exploratory` for investigation, `decision` for run-level bootstrap classification on schema v4 payloads. |
-| `--fail-on` | — | Comma-separated compare statuses that should exit non-zero after rendering (used by decision automation). |
-| `--mode` | `perf` | Benchmark mode forwarded to `bench.sh run`. Branch comparison should stay on `perf`. |
-| `--dataset-id` | — | Dataset id forwarded to fixture generation and benchmark runs. |
-| `--timing-phase` | `execute` | Isolated timing phase for phase-aware suites. |
+| Flag                | Default       | Description                                                                                                                                   |
+| ------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--warmup`          | `2`           | Warmup iterations per case (not measured).                                                                                                    |
+| `--iters`           | `9`           | Measured iterations per case per run.                                                                                                         |
+| `--prewarm-iters`   | `1`           | Unreported warmup iterations per ref (run before any measured iterations).                                                                    |
+| `--compare-runs`    | `3`           | Number of independent measured runs per ref before aggregation. Exploratory mode can use this default; decision mode should use at least `5`. |
+| `--measure-order`   | `alternate`   | Run interleaving: `base-first`, `candidate-first`, or `alternate`.                                                                            |
+| `--aggregation`     | `median`      | How to pick the representative sample: `min`, `median`, or `p95`.                                                                             |
+| `--noise-threshold` | `0.05`        | Minimum relative change to classify as regression or improvement.                                                                             |
+| `--compare-mode`    | `exploratory` | Comparison policy: `exploratory` for investigation, `decision` for run-level bootstrap classification on schema v4 payloads.                  |
+| `--fail-on`         | —             | Comma-separated compare statuses that should exit non-zero after rendering (used by decision automation).                                     |
+| `--mode`            | `perf`        | Benchmark mode forwarded to `bench.sh run`. Branch comparison should stay on `perf`.                                                          |
+| `--dataset-id`      | —             | Dataset id forwarded to fixture generation and benchmark runs.                                                                                |
+| `--timing-phase`    | `execute`     | Isolated timing phase for phase-aware suites.                                                                                                 |
 
 ### Environment variables
 
 These control execution behavior at the script level:
 
-| Variable | Default | Description |
-|---|---|---|
-| `BENCH_TIMEOUT_SECONDS` | `3600` | Maximum time per benchmark step before timeout. |
-| `BENCH_RETRY_ATTEMPTS` | `2` | Number of retries for transient failures. |
-| `BENCH_RETRY_DELAY_SECONDS` | `5` | Delay between retries. |
+| Variable                    | Default | Description                                     |
+| --------------------------- | ------- | ----------------------------------------------- |
+| `BENCH_TIMEOUT_SECONDS`     | `3600`  | Maximum time per benchmark step before timeout. |
+| `BENCH_RETRY_ATTEMPTS`      | `2`     | Number of retries for transient failures.       |
+| `BENCH_RETRY_DELAY_SECONDS` | `5`     | Delay between retries.                          |
 
 ### Adding metric columns to the report
 
@@ -188,11 +185,11 @@ Freshness rules for trustworthy compare output:
 
 The comparison report groups benchmark cases into four sections:
 
-| Section | Meaning |
-|---|---|
-| **Regressions** | Cases where the candidate is slower than the base beyond the noise threshold. Investigate before merging. |
-| **Improvements** | Cases where the candidate is faster than the base beyond the noise threshold. |
-| **Stable** | Cases where performance is within the noise threshold. No action needed. |
+| Section                | Meaning                                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **Regressions**        | Cases where the candidate is slower than the base beyond the noise threshold. Investigate before merging.     |
+| **Improvements**       | Cases where the candidate is faster than the base beyond the noise threshold.                                 |
+| **Stable**             | Cases where performance is within the noise threshold. No action needed.                                      |
 | **Comparison aborted** | Any invalid workload or mismatched benchmark context. Compare fails closed instead of producing a perf claim. |
 
 Key metrics to look at:

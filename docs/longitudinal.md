@@ -18,9 +18,9 @@ This guide covers tracking delta-rs performance across many revisions over time,
 
 ## When to Use Longitudinal Benchmarking
 
-Branch comparison gives you a two-point snapshot: is revision B faster or slower than revision A? Longitudinal benchmarking gives you a time series across many revisions, letting you catch gradual regressions, validate that a performance fix holds over subsequent commits, and build release baselines.
+Branch comparison gives you a two-point snapshot: is revision B faster or slower than revision A? Longitudinal benchmarking tracks performance across many revisions, letting you catch gradual regressions, confirm that a fix holds over subsequent commits, and build release baselines.
 
-Use it for nightly regression detection, release history analysis, or any situation where you need to see how performance trends over a range of commits or tags.
+Use it for nightly regression detection, release history analysis, or any situation where you need to see how performance changes across a range of commits or tags.
 
 ## Prerequisites
 
@@ -32,14 +32,14 @@ Use it for nightly regression detection, release history analysis, or any situat
 
 The longitudinal pipeline runs in six stages. Each stage is idempotent and can be rerun safely.
 
-| Stage | Command | Purpose |
-|---|---|---|
-| 1. Select | `select-revisions` | Pick which commits or tags to benchmark |
-| 2. Build | `build-artifacts` | Compile `delta-bench` for each revision |
-| 3. Run | `run-matrix` | Execute benchmark suites across the revision/scale matrix |
-| 4. Ingest | `ingest-results` | Normalize results into an append-safe time-series store |
-| 5. Report | `report` | Generate markdown and HTML trend reports |
-| 6. Prune | `prune` | Apply retention policies to old artifacts and data |
+| Stage     | Command            | Purpose                                                   |
+| --------- | ------------------ | --------------------------------------------------------- |
+| 1. Select | `select-revisions` | Pick which commits or tags to benchmark                   |
+| 2. Build  | `build-artifacts`  | Compile `delta-bench` for each revision                   |
+| 3. Run    | `run-matrix`       | Execute benchmark suites across the revision/scale matrix |
+| 4. Ingest | `ingest-results`   | Normalize results into an append-only time-series store   |
+| 5. Report | `report`           | Generate markdown and HTML trend reports                  |
+| 6. Prune  | `prune`            | Apply retention policies to old artifacts and data        |
 
 ## Quick Start: Your First Longitudinal Run
 
@@ -163,11 +163,11 @@ Use `orchestrate` when you want a hands-off run. Use the individual stages when 
 
 The `select-revisions` stage supports three strategies for choosing which commits to benchmark:
 
-| Strategy | Description | Use when |
-|---|---|---|
-| `one-per-day` | Latest commit per day in an inclusive date range | Nightly trend tracking |
-| `date-window` | All commits in an inclusive date range | Dense analysis of a specific period |
-| `release-tags` | Semantic version tags matching a pattern | Release history baselines |
+| Strategy       | Description                                      | Use when                            |
+| -------------- | ------------------------------------------------ | ----------------------------------- |
+| `one-per-day`  | Latest commit per day in an inclusive date range | Nightly trend tracking              |
+| `date-window`  | All commits in an inclusive date range           | Dense analysis of a specific period |
+| `release-tags` | Semantic version tags matching a pattern         | Release history baselines           |
 
 ### Release tag patterns
 
@@ -226,11 +226,11 @@ To include newly published tags, refresh the committed manifests:
 
 Control resource usage during matrix execution to avoid interference with other processes:
 
-| Flag | Description |
-|---|---|
-| `--max-parallel N` | Maximum concurrent revision benchmarks |
-| `--max-load-per-cpu X` | CPU load ceiling (e.g., `0.75`) before pausing new work |
-| `--load-check-interval-seconds N` | How often to re-check system load |
+| Flag                              | Description                                             |
+| --------------------------------- | ------------------------------------------------------- |
+| `--max-parallel N`                | Maximum concurrent revision benchmarks                  |
+| `--max-load-per-cpu X`            | CPU load ceiling (e.g., `0.75`) before pausing new work |
+| `--load-check-interval-seconds N` | How often to re-check system load                       |
 
 Start conservatively and increase only after confirming low interference.
 
@@ -238,10 +238,10 @@ Start conservatively and increase only after confirming low interference.
 
 Add statistical confidence labels to trend reports:
 
-| Flag | Default | Description |
-|---|---|---|
-| `--significance-method` | `none` | Statistical test: `none` or `mann-whitney` |
-| `--significance-alpha` | `0.05` | Significance level for the test |
+| Flag                    | Default | Description                                |
+| ----------------------- | ------- | ------------------------------------------ |
+| `--significance-method` | `none`  | Statistical test: `none` or `mann-whitney` |
+| `--significance-alpha`  | `0.05`  | Significance level for the test            |
 
 Threshold-based change classification still applies; significance adds confidence labels on top.
 
@@ -249,13 +249,13 @@ Threshold-based change classification still applies; significance adds confidenc
 
 Keep storage bounded with the `prune` stage:
 
-| Flag | Description |
-|---|---|
-| `--max-artifact-age-days <days>` | Remove artifacts older than this |
-| `--max-artifacts <count>` | Keep at most this many artifacts |
-| `--max-run-age-days <days>` | Remove run data older than this |
-| `--max-runs <count>` | Keep at most this many runs |
-| `--apply` | Execute deletions (dry-run without this flag) |
+| Flag                             | Description                                   |
+| -------------------------------- | --------------------------------------------- |
+| `--max-artifact-age-days <days>` | Remove artifacts older than this              |
+| `--max-artifacts <count>`        | Keep at most this many artifacts              |
+| `--max-run-age-days <days>`      | Remove run data older than this               |
+| `--max-runs <count>`             | Keep at most this many runs                   |
+| `--apply`                        | Execute deletions (dry-run without this flag) |
 
 ## Failure Recovery
 
@@ -295,7 +295,7 @@ Look at the `(revision, suite, scale)` keys with failure status and their `failu
 
 **Recover:** Fix the root cause (increase timeout for legitimately slow cases, or fix the underlying issue) and rerun `run-matrix` with the same manifest and state path. Successful cells are skipped; failed cells resume with bounded retry.
 
-If you intentionally change matrix configuration such as suites, scales, lane, warmup, iterations, fixtures directory, results directory, or label prefix, start with a new `--state-path` instead of reusing the old file. The runner now rejects configuration-mismatched state files to prevent partial resumes from mixing incompatible runs.
+If you change matrix configuration (suites, scales, lane, warmup, iterations, fixtures directory, results directory, or label prefix), use a fresh `--state-path`. The runner rejects configuration-mismatched state files to prevent partial resumes from mixing incompatible runs.
 
 ```bash
 ./scripts/longitudinal_bench.sh run-matrix \

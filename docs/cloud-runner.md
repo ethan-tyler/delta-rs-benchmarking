@@ -41,14 +41,14 @@ sudo ./scripts/security_mode.sh maintenance-mode
 
 The `compare_branch.sh` script can enforce security and environment checks as part of the comparison workflow. This ensures benchmarks only run when the runner is in the correct state.
 
-| Flag | Description |
-|---|---|
-| `--remote-runner <ssh-host>` | SSH target for remote execution |
-| `--remote-root <path>` | Remote working directory on the runner |
-| `--enforce-run-mode` | Require benchmark run mode to be active |
-| `--require-no-public-ipv4` | Require the runner has no public IPv4 address |
-| `--require-egress-policy` | Require a network egress policy is in place |
-| `--backend-profile <name>` | Use a specific backend profile from `backends/` |
+| Flag                         | Description                                     |
+| ---------------------------- | ----------------------------------------------- |
+| `--remote-runner <ssh-host>` | SSH target for remote execution                 |
+| `--remote-root <path>`       | Remote working directory on the runner          |
+| `--enforce-run-mode`         | Require benchmark run mode to be active         |
+| `--require-no-public-ipv4`   | Require the runner has no public IPv4 address   |
+| `--require-egress-policy`    | Require a network egress policy is in place     |
+| `--backend-profile <name>`   | Use a specific backend profile from `backends/` |
 
 Example with all preflight checks enabled:
 
@@ -64,7 +64,7 @@ Example with all preflight checks enabled:
   main <candidate_ref> all
 ```
 
-The self-hosted GitHub Actions workflows enforce the same contract:
+The self-hosted GitHub Actions workflows enforce the same preflight contract:
 
 - `benchmark.yml` passes `--enforce-run-mode`, `--require-no-public-ipv4`, and `--require-egress-policy` directly into `./scripts/compare_branch.sh`
 - `benchmark-prerelease.yml` passes the same hardening flags into `./scripts/compare_branch.sh`
@@ -91,12 +91,12 @@ Backend profiles store repeatable object-store and lock-table defaults in `backe
 
 The `scripts/provision_runner.sh` script wraps Terraform for runner provisioning with safety guardrails:
 
-| Guardrail | Detail |
-|---|---|
+| Guardrail           | Detail                                                                             |
+| ------------------- | ---------------------------------------------------------------------------------- |
 | CI context required | `rotate-runner` and `destroy` require `CI=true` unless breakglass override is used |
-| Dual approver | Two distinct approver IDs via environment variables |
-| Evidence file | `DELTA_BENCH_APPROVAL_EVIDENCE_FILE` must point to immutable approval evidence |
-| ACL allowlist | Must exclude `0.0.0.0/0` and `::/0` (no open access) |
+| Dual approver       | Two distinct approver IDs via environment variables                                |
+| Evidence file       | `DELTA_BENCH_APPROVAL_EVIDENCE_FILE` must point to immutable approval evidence     |
+| ACL allowlist       | Must exclude `0.0.0.0/0` and `::/0` (no open access)                               |
 
 ## Result Integrity Metadata
 

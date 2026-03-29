@@ -1537,6 +1537,7 @@ print("remote hash policy ok")
         write_executable(
             fake_bin / "ssh",
             f"""#!/usr/bin/env python3
+import json
 import os
 import shlex
 import subprocess
@@ -1550,11 +1551,27 @@ if command.startswith("bash -lc "):
     payload_parts = shlex.split(command)
     payload = payload_parts[2]
 
+remote_env = {{}}
+for key in ("PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG"):
+    value = os.environ.get(key)
+    if value is not None:
+        remote_env[key] = value
 with open({str(ssh_log)!r}, "a", encoding="utf-8") as handle:
-    handle.write(f"{{host}}|{{payload}}\\n")
+    handle.write(
+        json.dumps(
+            {{
+                "host": host,
+                "payload": payload,
+                "remote_env_exec_root": remote_env.get("DELTA_BENCH_EXEC_ROOT"),
+                "remote_env_results": remote_env.get("DELTA_BENCH_RESULTS"),
+                "remote_env_label": remote_env.get("DELTA_BENCH_LABEL"),
+            }}
+        )
+        + "\\n"
+    )
 
 raise SystemExit(
-    subprocess.run(["bash", "-c", payload], check=False, env=os.environ.copy()).returncode
+    subprocess.run(["bash", "-c", payload], check=False, env=remote_env).returncode
 )
 """,
         )
@@ -1721,6 +1738,9 @@ sys.exit(0)
         assert "outer-label-should-not-leak" not in {
             entry["env_label"] for entry in cargo_entries
         }
+        assert [
+            entry["env_label"] for entry in cargo_entries if entry["command"] == "data"
+        ] == [f"base-{base_sha}"]
         assert {
             entry["env_label"] for entry in cargo_entries if entry["command"] == "run"
         } == {f"base-{base_sha}-r1", f"cand-{candidate_sha}-r1"}
@@ -1744,13 +1764,22 @@ sys.exit(0)
             assert entry["output"].startswith(f"{results_rel}/")
             assert all(path.startswith(f"{results_rel}/") for path in entry["inputs"])
 
-        ssh_log_text = ssh_log.read_text(encoding="utf-8")
-        assert "bench-host|" in ssh_log_text
-        ssh_payloads = [
-            line.split("|", 1)[1]
-            for line in ssh_log_text.splitlines()
-            if "|" in line and line
+        ssh_entries = [
+            json.loads(line)
+            for line in ssh_log.read_text(encoding="utf-8").splitlines()
+            if line
         ]
+        assert ssh_entries
+        assert {entry["host"] for entry in ssh_entries} == {"bench-host"}
+        assert {
+            (
+                entry["remote_env_exec_root"],
+                entry["remote_env_results"],
+                entry["remote_env_label"],
+            )
+            for entry in ssh_entries
+        } == {(None, None, None)}
+        ssh_payloads = [entry["payload"] for entry in ssh_entries]
         assert any(str(remote_root) in shlex.split(payload) for payload in ssh_payloads)
 
 

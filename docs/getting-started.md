@@ -55,6 +55,8 @@ DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
 ./scripts/bench.sh doctor
 ```
 
+Relative `DELTA_BENCH_FIXTURES` and `DELTA_BENCH_RESULTS` values still stay anchored to this harness repository, even when `DELTA_BENCH_EXEC_ROOT` points at a separate delta-rs checkout. Use absolute paths if you want fixtures or results to live somewhere else.
+
 ### Python interop dependencies
 
 If you plan to run `interop_py` cases (or use `--suite all --runner all`), install Python dependencies in the interpreter used by `DELTA_BENCH_INTEROP_PYTHON` (defaults to `python3`):

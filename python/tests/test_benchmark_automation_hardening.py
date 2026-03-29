@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -22,6 +23,8 @@ NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
 VALIDATION_SCRIPT = REPO_ROOT / "scripts" / "validate_perf_harness.sh"
 VALIDATION_DOC = REPO_ROOT / "docs" / "validation.md"
+REFERENCE_DOC = REPO_ROOT / "docs" / "reference.md"
+GETTING_STARTED_DOC = REPO_ROOT / "docs" / "getting-started.md"
 SCAN_PHASE_BENCH = (
     REPO_ROOT / "crates" / "delta-bench" / "benches" / "scan_phase_bench.rs"
 )
@@ -52,6 +55,11 @@ def symlink_command(fake_bin: Path, name: str) -> None:
 def write_executable(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
     path.chmod(0o755)
+
+
+def copy_executable(source: Path, dest: Path) -> None:
+    dest.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
+    dest.chmod(0o755)
 
 
 def assert_order(content: str, earlier: str, later: str) -> None:
@@ -272,9 +280,9 @@ def test_compare_branch_supports_fail_on_passthrough() -> None:
 
 def test_perf_validation_workflow_entrypoint_exists_and_is_executable() -> None:
     assert VALIDATION_SCRIPT.exists(), "missing scripts/validate_perf_harness.sh"
-    assert VALIDATION_SCRIPT.stat().st_mode & 0o111, (
-        "scripts/validate_perf_harness.sh must be executable"
-    )
+    assert (
+        VALIDATION_SCRIPT.stat().st_mode & 0o111
+    ), "scripts/validate_perf_harness.sh must be executable"
 
 
 def test_validation_script_exposes_artifact_dir_contract() -> None:
@@ -325,6 +333,24 @@ def test_validation_docs_and_readme_point_to_perf_validation_workflow() -> None:
     assert "./scripts/validate_perf_harness.sh" in readme
     assert "docs/validation.md" in compare_doc
     assert "./scripts/validate_perf_harness.sh" in compare_doc
+
+
+def test_bench_docs_explain_harness_root_path_resolution_when_exec_root_differs() -> (
+    None
+):
+    reference = REFERENCE_DOC.read_text(encoding="utf-8")
+    getting_started = GETTING_STARTED_DOC.read_text(encoding="utf-8")
+
+    assert (
+        "Relative `DELTA_BENCH_FIXTURES` and `DELTA_BENCH_RESULTS` values are "
+        "resolved against the harness repository root before `bench.sh` switches "
+        "into `DELTA_BENCH_EXEC_ROOT`."
+    ) in reference
+    assert (
+        "Relative `DELTA_BENCH_FIXTURES` and `DELTA_BENCH_RESULTS` values still "
+        "stay anchored to this harness repository, even when "
+        "`DELTA_BENCH_EXEC_ROOT` points at a separate delta-rs checkout."
+    ) in getting_started
 
 
 def test_scan_phase_criterion_bench_covers_multiple_pr_sensitive_cases() -> None:
@@ -1110,6 +1136,581 @@ print("compare ok")
             temp_root / results_rel / f"cand-{candidate_sha}" / "scan.json"
         ).is_file()
         assert not (checkout_dir / results_rel).exists()
+
+
+def test_bench_wrapper_anchors_relative_fixture_and_result_paths_to_harness_root_when_exec_root_differs() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        bench_copy = scripts_dir / "bench.sh"
+        copy_executable(BENCH_SH, bench_copy)
+
+        exec_root = temp_root / "remote cargo root"
+        (exec_root / "crates" / "delta-bench").mkdir(parents=True)
+        (exec_root / "crates" / "delta-bench" / "Cargo.toml").write_text(
+            "[package]\nname = 'delta-bench'\nversion = '0.0.0'\n",
+            encoding="utf-8",
+        )
+
+        cargo_log = temp_root / "cargo-log.jsonl"
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "cargo",
+            f"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+cli_args = args[args.index("--") + 1 :] if "--" in args else args
+cwd = Path.cwd()
+command = "doctor"
+for candidate in ("data", "run", "list", "doctor"):
+    if candidate in cli_args:
+        command = candidate
+        break
+
+fixtures_dir = value(cli_args, "--fixtures-dir")
+results_dir = value(cli_args, "--results-dir")
+entry = {{
+    "command": command,
+    "cwd": str(cwd),
+    "fixtures_dir": str((cwd / fixtures_dir).resolve()) if fixtures_dir else None,
+    "results_dir": str((cwd / results_dir).resolve()) if results_dir else None,
+    "env_exec_root": os.environ.get("DELTA_BENCH_EXEC_ROOT"),
+    "env_results": os.environ.get("DELTA_BENCH_RESULTS"),
+    "env_label": os.environ.get("DELTA_BENCH_LABEL"),
+}}
+with open({str(cargo_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(entry) + "\\n")
+
+if command == "data":
+    Path(entry["fixtures_dir"]).mkdir(parents=True, exist_ok=True)
+    sys.exit(0)
+
+if command == "run":
+    resolved = Path(entry["results_dir"])
+    label = value(cli_args, "--label", "local")
+    target = value(cli_args, "--target", "scan")
+    out_file = resolved / label / f"{{target}}.json"
+    out_file.parent.mkdir(parents=True, exist_ok=True)
+    out_file.write_text(
+        json.dumps({{"label": label, "cwd": str(cwd), "results_dir": str(resolved)}}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+sys.exit(0)
+""",
+        )
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["DELTA_BENCH_EXEC_ROOT"] = str(exec_root)
+        default_env = env.copy()
+        relative_env = env.copy()
+        relative_env["DELTA_BENCH_FIXTURES"] = "fixtures-rel"
+        relative_env["DELTA_BENCH_RESULTS"] = "results-rel"
+        absolute_results_dir = temp_root / "abs-results"
+        absolute_env = env.copy()
+        absolute_env["DELTA_BENCH_RESULTS"] = str(absolute_results_dir)
+
+        default_data_result = subprocess.run(
+            [
+                "bash",
+                str(bench_copy),
+                "data",
+                "--dataset-id",
+                "tiny_smoke",
+            ],
+            cwd=temp_root,
+            env=default_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert default_data_result.returncode == 0, default_data_result.stderr
+
+        default_run_result = subprocess.run(
+            [
+                "bash",
+                str(bench_copy),
+                "run",
+                "--suite",
+                "scan",
+                "--warmup",
+                "1",
+                "--iters",
+                "1",
+            ],
+            cwd=temp_root,
+            env=default_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert default_run_result.returncode == 0, default_run_result.stderr
+
+        relative_data_result = subprocess.run(
+            [
+                "bash",
+                str(bench_copy),
+                "data",
+                "--dataset-id",
+                "tiny_smoke",
+            ],
+            cwd=temp_root,
+            env=relative_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert relative_data_result.returncode == 0, relative_data_result.stderr
+
+        relative_run_result = subprocess.run(
+            [
+                "bash",
+                str(bench_copy),
+                "run",
+                "--suite",
+                "scan",
+                "--warmup",
+                "1",
+                "--iters",
+                "1",
+            ],
+            cwd=temp_root,
+            env=relative_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert relative_run_result.returncode == 0, relative_run_result.stderr
+
+        absolute_run_result = subprocess.run(
+            [
+                "bash",
+                str(bench_copy),
+                "run",
+                "--suite",
+                "scan",
+                "--warmup",
+                "1",
+                "--iters",
+                "1",
+            ],
+            cwd=temp_root,
+            env=absolute_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert absolute_run_result.returncode == 0, absolute_run_result.stderr
+
+        default_fixtures_dir = temp_root / "fixtures"
+        default_results_dir = temp_root / "results"
+        fixtures_dir = temp_root / "fixtures-rel"
+        results_dir = temp_root / "results-rel"
+        assert default_fixtures_dir.is_dir()
+        assert (default_results_dir / "local" / "scan.json").is_file()
+        assert fixtures_dir.is_dir()
+        assert (results_dir / "local" / "scan.json").is_file()
+        assert (absolute_results_dir / "local" / "scan.json").is_file()
+        assert not (exec_root / "fixtures").exists()
+        assert not (exec_root / "results").exists()
+        assert not (exec_root / "fixtures-rel").exists()
+        assert not (exec_root / "results-rel").exists()
+        assert not (exec_root / "abs-results").exists()
+
+        entries = [
+            json.loads(line)
+            for line in cargo_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert len(entries) == 5
+
+        default_entries = [entry for entry in entries if entry["env_results"] is None]
+        relative_entries = [
+            entry for entry in entries if entry["env_results"] == "results-rel"
+        ]
+        absolute_entries = [
+            entry
+            for entry in entries
+            if entry["env_results"] == str(absolute_results_dir)
+        ]
+
+        assert len(default_entries) == 2
+        assert [entry["command"] for entry in default_entries] == ["data", "run"]
+        assert Path(default_entries[0]["cwd"]).resolve() == exec_root.resolve()
+        assert default_entries[0]["fixtures_dir"] == str(default_fixtures_dir.resolve())
+        assert default_entries[0]["env_exec_root"] == str(exec_root)
+        assert Path(default_entries[1]["cwd"]).resolve() == exec_root.resolve()
+        assert default_entries[1]["results_dir"] == str(default_results_dir.resolve())
+        assert default_entries[1]["env_exec_root"] == str(exec_root)
+
+        assert len(relative_entries) == 2
+        assert [entry["command"] for entry in relative_entries] == ["data", "run"]
+        assert Path(relative_entries[0]["cwd"]).resolve() == exec_root.resolve()
+        assert relative_entries[0]["fixtures_dir"] == str(fixtures_dir.resolve())
+        assert relative_entries[0]["env_exec_root"] == str(exec_root)
+        assert Path(relative_entries[1]["cwd"]).resolve() == exec_root.resolve()
+        assert relative_entries[1]["results_dir"] == str(results_dir.resolve())
+        assert relative_entries[1]["env_exec_root"] == str(exec_root)
+
+        assert len(absolute_entries) == 1
+        assert absolute_entries[0]["command"] == "run"
+        assert Path(absolute_entries[0]["cwd"]).resolve() == exec_root.resolve()
+        assert absolute_entries[0]["results_dir"] == str(absolute_results_dir.resolve())
+        assert absolute_entries[0]["env_exec_root"] == str(exec_root)
+
+
+def test_compare_branch_remote_runner_keeps_relative_results_under_remote_root_and_owns_bench_env() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        local_root = temp_root / "local harness"
+        remote_root = temp_root / "remote runner root"
+        local_scripts = local_root / "scripts"
+        remote_scripts = remote_root / "scripts"
+        local_scripts.mkdir(parents=True)
+        remote_scripts.mkdir(parents=True)
+
+        compare_copy = local_scripts / "compare_branch.sh"
+        bench_copy = remote_scripts / "bench.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+        copy_executable(BENCH_SH, bench_copy)
+
+        write_executable(
+            remote_scripts / "prepare_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/.git"
+ref="${DELTA_RS_REF:-${DELTA_RS_BRANCH:-}}"
+if [[ -z "${ref}" ]]; then
+  ref="0000000000000000000000000000000000000000"
+fi
+printf '%s\n' "${ref}" > "${DELTA_RS_DIR}/.bench-current-sha"
+printf 'delta-rs checkout ready: %s\n' "${DELTA_RS_DIR}"
+""",
+        )
+        write_executable(
+            remote_scripts / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            remote_scripts / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+
+        python_pkg = remote_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+
+        compare_log = remote_root / "compare-log.jsonl"
+        write_executable(
+            python_pkg / "aggregate.py",
+            f"""#!/usr/bin/env python3
+import argparse
+import json
+import os
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+entry = {{
+    "tool": "aggregate",
+    "cwd": str(Path.cwd()),
+    "pythonpath": os.environ.get("PYTHONPATH"),
+    "output": args.output,
+    "label": args.label,
+    "inputs": args.inputs,
+}}
+with open({str(compare_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(entry) + "\\n")
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({{"label": args.label, "payloads": payloads}}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            f"""#!/usr/bin/env python3
+import argparse
+import json
+import os
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+args, extra = parser.parse_known_args()
+
+entry = {{
+    "tool": "compare",
+    "cwd": str(Path.cwd()),
+    "pythonpath": os.environ.get("PYTHONPATH"),
+    "base_json": args.base_json,
+    "cand_json": args.cand_json,
+    "extra": extra,
+}}
+with open({str(compare_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(entry) + "\\n")
+
+Path(args.base_json).read_text(encoding="utf-8")
+Path(args.cand_json).read_text(encoding="utf-8")
+print("remote compare ok")
+""",
+        )
+
+        cargo_log = remote_root / "cargo-log.jsonl"
+        ssh_log = temp_root / "ssh.log"
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "ssh",
+            f"""#!/usr/bin/env python3
+import os
+import shlex
+import subprocess
+import sys
+
+host = sys.argv[1] if len(sys.argv) > 1 else ""
+command = sys.argv[2] if len(sys.argv) > 2 else ""
+
+payload = command
+if command.startswith("bash -lc "):
+    payload_parts = shlex.split(command)
+    payload = payload_parts[2]
+
+with open({str(ssh_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(f"{{host}}|{{payload}}\\n")
+
+raise SystemExit(
+    subprocess.run(["bash", "-c", payload], check=False, env=os.environ.copy()).returncode
+)
+""",
+        )
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+        write_executable(
+            fake_bin / "cargo",
+            f"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+cli_args = args[args.index("--") + 1 :] if "--" in args else args
+cwd = Path.cwd()
+command = "doctor"
+for candidate in ("data", "run", "list", "doctor"):
+    if candidate in cli_args:
+        command = candidate
+        break
+
+entry = {{
+    "command": command,
+    "cwd": str(cwd),
+    "env_exec_root": os.environ.get("DELTA_BENCH_EXEC_ROOT"),
+    "env_results": os.environ.get("DELTA_BENCH_RESULTS"),
+    "env_label": os.environ.get("DELTA_BENCH_LABEL"),
+    "fixtures_dir": value(cli_args, "--fixtures-dir"),
+    "results_dir": value(cli_args, "--results-dir"),
+}}
+with open({str(cargo_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(entry) + "\\n")
+
+fixtures_dir = Path(value(cli_args, "--fixtures-dir", "fixtures"))
+if not fixtures_dir.is_absolute():
+    fixtures_dir = cwd / fixtures_dir
+
+if command == "data":
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
+    sys.exit(0)
+
+if command == "run":
+    results_dir = Path(value(cli_args, "--results-dir", "results"))
+    if not results_dir.is_absolute():
+        results_dir = cwd / results_dir
+    label = value(cli_args, "--label", "local")
+    target = value(cli_args, "--target", "scan")
+    out_dir = results_dir / label
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"{{target}}.json"
+    out_file.write_text(
+        json.dumps({{
+            "label": label,
+            "suite": target,
+            "cwd": str(cwd),
+            "env_exec_root": os.environ.get("DELTA_BENCH_EXEC_ROOT"),
+            "env_results": os.environ.get("DELTA_BENCH_RESULTS"),
+        }}),
+        encoding="utf-8",
+    )
+    print(f"wrote result: {{out_file}}")
+    sys.exit(0)
+
+sys.exit(0)
+""",
+        )
+
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        results_rel = Path("results") / "remote compare 20260328"
+        checkout_dir = remote_root / ".delta-rs-remote-checkout"
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(checkout_dir)
+        env["DELTA_BENCH_RESULTS"] = str(results_rel)
+        env["DELTA_BENCH_EXEC_ROOT"] = str(
+            temp_root / "outer exec root should be ignored"
+        )
+        env["DELTA_BENCH_LABEL"] = "outer-label-should-not-leak"
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--remote-runner",
+                "bench-host",
+                "--remote-root",
+                str(remote_root),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=local_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "Comparison report" in result.stdout
+
+        remote_results_dir = remote_root / results_rel
+        assert (remote_results_dir / f"base-{base_sha}" / "scan.json").is_file()
+        assert (remote_results_dir / f"cand-{candidate_sha}" / "scan.json").is_file()
+        assert not (local_root / results_rel).exists()
+        assert not (checkout_dir / results_rel).exists()
+
+        cargo_entries = [
+            json.loads(line)
+            for line in cargo_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert cargo_entries
+        assert {Path(entry["cwd"]).resolve() for entry in cargo_entries} == {
+            checkout_dir.resolve()
+        }
+        assert {entry["env_exec_root"] for entry in cargo_entries} == {
+            str(checkout_dir)
+        }
+        assert {entry["env_results"] for entry in cargo_entries} == {str(results_rel)}
+        assert "outer-label-should-not-leak" not in {
+            entry["env_label"] for entry in cargo_entries
+        }
+        assert {
+            entry["env_label"] for entry in cargo_entries if entry["command"] == "run"
+        } == {f"base-{base_sha}-r1", f"cand-{candidate_sha}-r1"}
+
+        compare_entries = [
+            json.loads(line)
+            for line in compare_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert {Path(entry["cwd"]).resolve() for entry in compare_entries} == {
+            remote_root.resolve()
+        }
+        assert {entry["pythonpath"] for entry in compare_entries} == {
+            str(remote_root / "python")
+        }
+        aggregate_entries = [
+            entry for entry in compare_entries if entry["tool"] == "aggregate"
+        ]
+        assert aggregate_entries
+        for entry in aggregate_entries:
+            assert entry["output"].startswith(f"{results_rel}/")
+            assert all(path.startswith(f"{results_rel}/") for path in entry["inputs"])
+
+        ssh_log_text = ssh_log.read_text(encoding="utf-8")
+        assert "bench-host|" in ssh_log_text
+        ssh_payloads = [
+            line.split("|", 1)[1]
+            for line in ssh_log_text.splitlines()
+            if "|" in line and line
+        ]
+        assert any(str(remote_root) in shlex.split(payload) for payload in ssh_payloads)
 
 
 def test_compare_branch_rejects_checkout_lock_override_inside_managed_checkout_before_first_clone() -> (

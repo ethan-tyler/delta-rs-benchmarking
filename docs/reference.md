@@ -263,6 +263,8 @@ These apply to all `delta-bench` subcommands and are passed through `bench.sh`:
 | `--storage-option`   | —                              | —           | Repeatable `KEY=VALUE` storage options                 |
 | `--backend-profile`  | `DELTA_BENCH_BACKEND_PROFILE`  | —           | Profile name from `backends/*.env`                     |
 
+Relative `DELTA_BENCH_FIXTURES` and `DELTA_BENCH_RESULTS` values are resolved against the harness repository root before `bench.sh` switches into `DELTA_BENCH_EXEC_ROOT`. Use absolute paths if you want fixture or result output somewhere else.
+
 ### `bench.sh data` — Generate fixtures
 
 | Flag           | Default | Description                                                          |

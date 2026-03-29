@@ -22,7 +22,9 @@ NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
 VALIDATION_SCRIPT = REPO_ROOT / "scripts" / "validate_perf_harness.sh"
 VALIDATION_DOC = REPO_ROOT / "docs" / "validation.md"
-SCAN_PHASE_BENCH = REPO_ROOT / "crates" / "delta-bench" / "benches" / "scan_phase_bench.rs"
+SCAN_PHASE_BENCH = (
+    REPO_ROOT / "crates" / "delta-bench" / "benches" / "scan_phase_bench.rs"
+)
 LONGITUDINAL_NIGHTLY_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "longitudinal-nightly.yml"
 )
@@ -296,11 +298,16 @@ def test_validation_script_covers_all_scan_phase_canaries() -> None:
 def test_validation_script_canonicalizes_artifact_dir_once() -> None:
     script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
     assert "canonicalize_dir()" in script
-    assert 'pwd -P' in script
+    assert "pwd -P" in script
     assert (
         'VALIDATION_ARTIFACT_DIR="$(canonicalize_dir "${VALIDATION_ARTIFACT_DIR}")"'
         in script
     )
+
+
+def test_validation_script_keeps_assert_failures_fail_closed() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    assert 'note "$(assert_' not in script
 
 
 def test_validation_docs_and_readme_point_to_perf_validation_workflow() -> None:
@@ -440,7 +447,9 @@ def test_compare_branch_does_not_fast_forward_default_branch_before_ref_pinning(
     start = script.index(
         'phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"'
     )
-    end = script.index('base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"', start)
+    end = script.index(
+        'base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"', start
+    )
     initial_block = script[start:end]
     assert re.search(
         r'if ! exec_on_runner test -d "\$\{DELTA_RS_DIR\}/\.git"; then\s+run_step env DELTA_RS_DIR="\$\{DELTA_RS_DIR\}" \./scripts/prepare_delta_rs\.sh\s+fi',
@@ -448,8 +457,7 @@ def test_compare_branch_does_not_fast_forward_default_branch_before_ref_pinning(
     )
     assert (
         'run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh\n'
-        'ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"'
-        not in initial_block
+        'ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"' not in initial_block
     )
 
 

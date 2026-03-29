@@ -312,7 +312,8 @@ env \
 
 base_label="base-${VALIDATION_SHA}"
 cand_label="cand-${VALIDATION_SHA}"
-note "$(assert_same_sha_compare_is_fail_closed "$(json_path_for_label "${base_label}")" "$(json_path_for_label "${cand_label}")")"
+same_sha_status="$(assert_same_sha_compare_is_fail_closed "$(json_path_for_label "${base_label}")" "$(json_path_for_label "${cand_label}")")"
+note "${same_sha_status}"
 
 note ""
 note "Running phase-isolation canaries..."
@@ -321,49 +322,53 @@ run_scan_case "canary-load-baseline" "load"
 run_scan_case "canary-load-control-baseline" "execute"
 run_scan_case "canary-load-delayed" "load" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_LOAD_MS=${VALIDATION_DELAY_MS}"
 run_scan_case "canary-load-control-delayed" "execute" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_LOAD_MS=${VALIDATION_DELAY_MS}"
-note "$(assert_phase_canary \
+load_canary_status="$(assert_phase_canary \
   "$(json_path_for_label "canary-load-baseline")" \
   "$(json_path_for_label "canary-load-delayed")" \
   "$(json_path_for_label "canary-load-control-baseline")" \
   "$(json_path_for_label "canary-load-control-delayed")" \
   "load" \
   "execute")"
+note "${load_canary_status}"
 
 run_scan_case "canary-plan-baseline" "plan"
 run_scan_case "canary-plan-control-baseline" "execute"
 run_scan_case "canary-plan-delayed" "plan" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_PLAN_MS=${VALIDATION_DELAY_MS}"
 run_scan_case "canary-plan-control-delayed" "execute" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_PLAN_MS=${VALIDATION_DELAY_MS}"
-note "$(assert_phase_canary \
+plan_canary_status="$(assert_phase_canary \
   "$(json_path_for_label "canary-plan-baseline")" \
   "$(json_path_for_label "canary-plan-delayed")" \
   "$(json_path_for_label "canary-plan-control-baseline")" \
   "$(json_path_for_label "canary-plan-control-delayed")" \
   "plan" \
   "execute")"
+note "${plan_canary_status}"
 
 run_scan_case "canary-validate-baseline" "validate"
 run_scan_case "canary-validate-control-baseline" "execute"
 run_scan_case "canary-validate-delayed" "validate" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_VALIDATE_MS=${VALIDATION_DELAY_MS}"
 run_scan_case "canary-validate-control-delayed" "execute" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_VALIDATE_MS=${VALIDATION_DELAY_MS}"
-note "$(assert_phase_canary \
+validate_canary_status="$(assert_phase_canary \
   "$(json_path_for_label "canary-validate-baseline")" \
   "$(json_path_for_label "canary-validate-delayed")" \
   "$(json_path_for_label "canary-validate-control-baseline")" \
   "$(json_path_for_label "canary-validate-control-delayed")" \
   "validate" \
   "execute")"
+note "${validate_canary_status}"
 
 run_scan_case "canary-execute-baseline" "execute"
 run_scan_case "canary-execute-control-baseline" "plan"
 run_scan_case "canary-execute-delayed" "execute" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_EXECUTE_MS=${VALIDATION_DELAY_MS}"
 run_scan_case "canary-execute-control-delayed" "plan" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_EXECUTE_MS=${VALIDATION_DELAY_MS}"
-note "$(assert_phase_canary \
+execute_canary_status="$(assert_phase_canary \
   "$(json_path_for_label "canary-execute-baseline")" \
   "$(json_path_for_label "canary-execute-delayed")" \
   "$(json_path_for_label "canary-execute-control-baseline")" \
   "$(json_path_for_label "canary-execute-control-delayed")" \
   "execute" \
   "plan")"
+note "${execute_canary_status}"
 
 note ""
 note "Running regression-detection canary..."
@@ -383,9 +388,10 @@ done
 
 aggregate_scan_labels "regression-base" "${base_run_labels[@]}"
 aggregate_scan_labels "regression-cand" "${cand_run_labels[@]}"
-note "$(assert_regression_canary_detected \
+regression_canary_status="$(assert_regression_canary_detected \
   "$(json_path_for_label "regression-base")" \
   "$(json_path_for_label "regression-cand")")"
+note "${regression_canary_status}"
 
 note ""
 note "Validation summary written to ${SUMMARY_FILE}"

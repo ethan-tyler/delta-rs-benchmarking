@@ -35,15 +35,15 @@ Latest local rerun on 2026-03-28 (UTC):
 - Commands:
   - `cargo test --locked -p delta-bench`
   - `python3 -m pytest -q python/tests`
-  - `./scripts/validate_perf_harness.sh --dataset-id tiny_smoke`
-- Validation artifact: `results/validation/20260328T210935Z/summary.md`
+  - `./scripts/validate_perf_harness.sh --dataset-id tiny_smoke --artifact-dir results/validation/20260328T235959Z`
+- Validation artifact: `results/validation/20260328T235959Z/summary.md`
 - Same-SHA decision compare: `inconclusive=4`, with no false regression/improvement classification
 - Phase canaries:
-  - load selected `+169.139 ms`, execute control `+2.217 ms`
-  - plan selected `+176.213 ms`, execute control `+1.917 ms`
-  - validate selected `+257.004 ms`, execute control `+4.183 ms`
-  - execute selected `+280.795 ms`, plan control `+21.254 ms`
-- Synthetic regression canary: `scan_filter_flag` classified as `regression` (`17.321 ms -> 187.722 ms`)
+  - load selected `+153.853 ms`, execute control `+0.519 ms`
+  - plan selected `+153.289 ms`, execute control `+1.557 ms`
+  - validate selected `+152.090 ms`, execute control `-0.425 ms`
+  - execute selected `+152.444 ms`, plan control `+0.819 ms`
+- Synthetic regression canary: `scan_filter_flag` classified as `regression` (`11.210 ms -> 167.255 ms`)
 
 The committed source of truth is still the protocol plus the executable entrypoint. Fresh evidence is intentionally generated locally because it depends on the machine, Python environment, and runner class used for the rerun.
 

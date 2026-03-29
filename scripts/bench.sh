@@ -6,8 +6,18 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DELTA_RS_DIR="${DELTA_RS_DIR:-${ROOT_DIR}/.delta-rs-under-test}"
 DELTA_BENCH_EXEC_ROOT="${DELTA_BENCH_EXEC_ROOT:-${ROOT_DIR}}"
 
-FIXTURES_DIR="${DELTA_BENCH_FIXTURES:-${ROOT_DIR}/fixtures}"
-RESULTS_DIR="${DELTA_BENCH_RESULTS:-${ROOT_DIR}/results}"
+# Keep wrapper-owned paths anchored to the harness root before switching cwd.
+resolve_harness_path() {
+  local raw_path="$1"
+  if [[ "${raw_path}" == /* ]]; then
+    printf '%s\n' "${raw_path}"
+    return
+  fi
+  printf '%s/%s\n' "${ROOT_DIR}" "${raw_path}"
+}
+
+FIXTURES_DIR="$(resolve_harness_path "${DELTA_BENCH_FIXTURES:-fixtures}")"
+RESULTS_DIR="$(resolve_harness_path "${DELTA_BENCH_RESULTS:-results}")"
 LABEL="${DELTA_BENCH_LABEL:-local}"
 BACKEND_PROFILE="${DELTA_BENCH_BACKEND_PROFILE:-}"
 DELTA_BENCH_SUPPRESS_RUST_WARNINGS="${DELTA_BENCH_SUPPRESS_RUST_WARNINGS:-1}"

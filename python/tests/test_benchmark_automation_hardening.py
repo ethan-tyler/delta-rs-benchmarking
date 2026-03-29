@@ -1094,6 +1094,18 @@ parser.parse_known_args()
 print("compare ok")
 """,
         )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.parse_known_args()
+print("hash policy ok")
+""",
+        )
 
         base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
         candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
@@ -1486,6 +1498,35 @@ with open({str(compare_log)!r}, "a", encoding="utf-8") as handle:
 Path(args.base_json).read_text(encoding="utf-8")
 Path(args.cand_json).read_text(encoding="utf-8")
 print("remote compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            f"""#!/usr/bin/env python3
+import argparse
+import json
+import os
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+args, extra = parser.parse_known_args()
+
+entry = {{
+    "tool": "hash_policy",
+    "cwd": str(Path.cwd()),
+    "pythonpath": os.environ.get("PYTHONPATH"),
+    "base_json": args.base_json,
+    "cand_json": args.cand_json,
+    "extra": extra,
+}}
+with open({str(compare_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(entry) + "\\n")
+
+Path(args.base_json).read_text(encoding="utf-8")
+Path(args.cand_json).read_text(encoding="utf-8")
+print("remote hash policy ok")
 """,
         )
 

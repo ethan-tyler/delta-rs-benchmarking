@@ -160,8 +160,8 @@ from delta_bench_compare.schema import load_benchmark_payload
 baseline = load_benchmark_payload(Path(sys.argv[1]))
 candidate = load_benchmark_payload(Path(sys.argv[2]))
 comparison = compare_runs(baseline, candidate, mode="decision")
-allowed = {"no change", "inconclusive"}
-bad = [(row.case, row.change) for row in comparison.rows if row.change not in allowed]
+allowed = {"no_change", "inconclusive"}
+bad = [(row.case, row.status) for row in comparison.rows if row.status not in allowed]
 if bad:
     raise SystemExit(
         "same-SHA decision compare produced unexpected statuses: "
@@ -169,7 +169,7 @@ if bad:
     )
 counts = {}
 for row in comparison.rows:
-    counts[row.change] = counts.get(row.change, 0) + 1
+    counts[row.status] = counts.get(row.status, 0) + 1
 print(
     "- Same-SHA decision compare statuses: "
     + ", ".join(f"{status}={counts[status]}" for status in sorted(counts))

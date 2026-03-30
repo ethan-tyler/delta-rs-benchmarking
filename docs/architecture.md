@@ -53,7 +53,7 @@ The harness is organized into three layers: execution, comparison/analysis, and 
 | `scripts/prepare_delta_rs.sh`                                              | Manages the delta-rs checkout at `.delta-rs-under-test`.                                                                          |
 | `scripts/sync_harness_to_delta_rs.sh`                                      | Syncs benchmark crate and configs into the delta-rs workspace.                                                                    |
 | `scripts/bench.sh`                                                         | Wrapper for `delta-bench` subcommands (data, run, list, doctor).                                                                  |
-| `scripts/compare_branch.sh`                                                | Multi-run base-vs-candidate orchestration with aggregation and reporting.                                                         |
+| `scripts/compare_branch.sh`                                                | Multi-run base-vs-candidate orchestration that pins refs once, prepares per-ref checkouts, and emits compare artifacts for automation. |
 | `scripts/validate_perf_harness.sh`                                         | Runs the focused trust-contract suites and records a rerunnable Markdown artifact under `results/validation/`.                    |
 | `scripts/security_mode.sh`                                                 | Toggles benchmark run mode vs maintenance mode on cloud runners.                                                                  |
 | `scripts/security_check.sh`                                                | Preflight guardrails for mode, network, and egress policy.                                                                        |
@@ -75,11 +75,11 @@ GitHub-hosted CI stays on smoke and correctness lanes. Self-hosted infrastructur
 
 4. **Result output.** Each suite writes a schema v4 JSON file to `results/<label>/<suite>.json`. Context now carries lane, fixture recipe, harness revision, and fidelity identity. Cases also carry run summaries and compatibility keys. Correctness-tagged cases requested in macro lane remain operationally runnable but are emitted with `perf_valid=false` so they cannot be compared or reported as trusted perf evidence.
 
-5. **Comparison (optional).** `compare.py` reads baseline and candidate JSON files, rejects invalid or mismatched contexts, and supports two modes: exploratory comparison on representative samples and decision comparison on run-level summaries with schema v4 compatibility checks and explicit fail-on exit policy.
+5. **Comparison (optional).** `compare.py` reads baseline and candidate JSON files, rejects invalid or mismatched contexts, and supports three render formats: text, markdown, and a versioned JSON payload with explicit machine status fields. `compare_branch.sh` prepares one checkout per pinned SHA under `.delta-bench-compare-checkouts/` so repeated runs reuse the same synced worktree.
 
 6. **Security validation.** `security_check.sh` validates fidelity invariants (run mode, network, egress). Self-hosted GitHub Actions workflows enforce this preflight before branch comparison and longitudinal execution. Current automated perf collection is self-hosted, macro-only, and curated to `scan`; GitHub-hosted CI is limited to smoke/correctness validation. PR comments split into exploratory (`run benchmark scan`) and decision (`run benchmark decision scan`) paths.
 
-7. **Report output.** The compare workflow produces grouped text output. `compare.py` also supports markdown output for CI integration.
+7. **Report output.** The compare workflow produces grouped text output and a sidecar artifact bundle under `results/compare/<suite>/<base>__<candidate>/`, including `summary.md`, `comparison.json`, `hash-policy.txt`, and `manifest.json`.
 
 8. **Longitudinal matrix checkpointing (optional).** `run-matrix` writes `matrix-state.json` through an atomic temp-file replace. The state file records per-cell progress plus a configuration fingerprint so resume only happens against the same suite/scale/lane/output contract.
 

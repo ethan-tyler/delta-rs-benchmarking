@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import random
 import statistics
@@ -12,6 +13,7 @@ from .formatting import (
     render_text_report,
 )
 from .model import (
+    VALID_COMPARISON_STATUSES,
     Comparison,
     ComparisonRow,
     ContentionMetricSnapshot,
@@ -27,16 +29,25 @@ from .schema import (
 
 VALID_AGGREGATIONS = {"min", "median", "p95"}
 VALID_COMPARE_MODES = {"exploratory", "decision"}
-VALID_FAIL_ON_STATUSES = {
-    "expected_failure",
-    "improvement",
-    "incomparable",
-    "inconclusive",
-    "new",
-    "no change",
-    "regression",
-    "removed",
-}
+COMPARISON_JSON_SCHEMA_VERSION = 1
+VALID_FAIL_ON_STATUSES = VALID_COMPARISON_STATUSES
+FAIL_ON_STATUS_ALIASES = {"no change": "no_change"}
+
+
+def classify_change(baseline_ms: float, candidate_ms: float, threshold: float) -> str:
+    if baseline_ms <= 0.0:
+        if candidate_ms <= 0.0:
+            return "no_change"
+        return "incomparable"
+    if candidate_ms <= 0.0:
+        return "incomparable"
+
+    delta = (candidate_ms - baseline_ms) / baseline_ms
+    if abs(delta) <= threshold:
+        return "no_change"
+    if candidate_ms < baseline_ms:
+        return "improvement"
+    return "regression"
 
 
 def representative_sample(case: dict, aggregation: str = "median") -> dict | None:
@@ -127,18 +138,13 @@ def best_sample_metrics(
 
 
 def format_change(baseline_ms: float, candidate_ms: float, threshold: float) -> str:
-    if baseline_ms <= 0.0:
-        if candidate_ms <= 0.0:
-            return "no change"
+    status = classify_change(baseline_ms, candidate_ms, threshold)
+    if status == "incomparable":
         return "incomparable"
-    if candidate_ms <= 0.0:
-        return "incomparable"
-
-    delta = (candidate_ms - baseline_ms) / baseline_ms
-    if abs(delta) <= threshold:
+    if status == "no_change":
         return "no change"
     ratio = baseline_ms / candidate_ms
-    if candidate_ms < baseline_ms:
+    if status == "improvement":
         return f"{ratio:.2f}x faster"
     return f"{1 / ratio:.2f}x slower"
 
@@ -212,8 +218,27 @@ def _decision_change(case: dict, baseline: list[float], candidate: list[float]) 
     if high < -threshold:
         return "improvement"
     if -threshold <= low and high <= threshold:
-        return "no change"
+        return "no_change"
     return "inconclusive"
+
+
+def _display_change_for_status(
+    status: str,
+    *,
+    baseline_ms: float | None,
+    candidate_ms: float | None,
+    threshold: float,
+    mode: str,
+) -> str:
+    if mode == "exploratory" and status in {"improvement", "regression", "no_change"}:
+        if baseline_ms is None or candidate_ms is None:
+            raise ValueError(
+                "exploratory comparable statuses require baseline and candidate timings"
+            )
+        return format_change(baseline_ms, candidate_ms, threshold)
+    if status == "no_change":
+        return "no change"
+    return status
 
 
 def compare_runs(
@@ -257,10 +282,11 @@ def compare_runs(
             new += 1
             rows.append(
                 ComparisonRow(
-                    name,
-                    None,
-                    representative_ms(c, aggregation=aggregation),
-                    "new",
+                    case=name,
+                    baseline_ms=None,
+                    candidate_ms=representative_ms(c, aggregation=aggregation),
+                    status="new",
+                    change="new",
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
                     baseline_metrics=None,
@@ -272,10 +298,11 @@ def compare_runs(
             removed += 1
             rows.append(
                 ComparisonRow(
-                    name,
-                    representative_ms(b, aggregation=aggregation),
-                    None,
-                    "removed",
+                    case=name,
+                    baseline_ms=representative_ms(b, aggregation=aggregation),
+                    candidate_ms=None,
+                    status="removed",
+                    change="removed",
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
                     baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
@@ -293,10 +320,11 @@ def compare_runs(
             incomparable += 1
             rows.append(
                 ComparisonRow(
-                    name,
-                    representative_ms(b, aggregation=aggregation),
-                    representative_ms(c, aggregation=aggregation),
-                    "expected_failure",
+                    case=name,
+                    baseline_ms=representative_ms(b, aggregation=aggregation),
+                    candidate_ms=representative_ms(c, aggregation=aggregation),
+                    status="expected_failure",
+                    change="expected_failure",
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
                     baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
@@ -324,21 +352,28 @@ def compare_runs(
             candidate_values = _run_metric_values(c, metric)
             base_ms = statistics.median(baseline_values) if baseline_values else None
             cand_ms = statistics.median(candidate_values) if candidate_values else None
-            change = _decision_change(c, baseline_values, candidate_values)
-            if change == "improvement":
+            status = _decision_change(c, baseline_values, candidate_values)
+            if status == "improvement":
                 faster += 1
-            elif change == "regression":
+            elif status == "regression":
                 slower += 1
-            elif change == "no change":
+            elif status == "no_change":
                 no_change += 1
             else:
                 incomparable += 1
             rows.append(
                 ComparisonRow(
-                    name,
-                    base_ms,
-                    cand_ms,
-                    change,
+                    case=name,
+                    baseline_ms=base_ms,
+                    candidate_ms=cand_ms,
+                    status=status,
+                    change=_display_change_for_status(
+                        status,
+                        baseline_ms=base_ms,
+                        candidate_ms=cand_ms,
+                        threshold=threshold,
+                        mode=mode,
+                    ),
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
                     baseline_metrics=None,
@@ -353,10 +388,11 @@ def compare_runs(
             incomparable += 1
             rows.append(
                 ComparisonRow(
-                    name,
-                    base_ms,
-                    cand_ms,
-                    "incomparable",
+                    case=name,
+                    baseline_ms=base_ms,
+                    candidate_ms=cand_ms,
+                    status="incomparable",
+                    change="incomparable",
                     baseline_classification=baseline_classification,
                     candidate_classification=candidate_classification,
                     baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
@@ -365,19 +401,26 @@ def compare_runs(
             )
             continue
 
-        change = format_change(base_ms, cand_ms, threshold)
-        if "faster" in change:
+        status = classify_change(base_ms, cand_ms, threshold)
+        if status == "improvement":
             faster += 1
-        elif "slower" in change:
+        elif status == "regression":
             slower += 1
         else:
             no_change += 1
         rows.append(
             ComparisonRow(
-                name,
-                base_ms,
-                cand_ms,
-                change,
+                case=name,
+                baseline_ms=base_ms,
+                candidate_ms=cand_ms,
+                status=status,
+                change=_display_change_for_status(
+                    status,
+                    baseline_ms=base_ms,
+                    candidate_ms=cand_ms,
+                    threshold=threshold,
+                    mode=mode,
+                ),
                 baseline_classification=baseline_classification,
                 candidate_classification=candidate_classification,
                 baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
@@ -408,6 +451,25 @@ def render_markdown(comparison: Comparison, include_metrics: bool = False) -> st
     return render_markdown_output(comparison, include_metrics=include_metrics)
 
 
+def build_json_payload(
+    comparison: Comparison,
+    *,
+    mode: str,
+    aggregation: str,
+    noise_threshold: float,
+) -> dict[str, object]:
+    payload = comparison.to_json_dict()
+    return {
+        "schema_version": COMPARISON_JSON_SCHEMA_VERSION,
+        "metadata": {
+            "mode": mode,
+            "aggregation": aggregation,
+            "noise_threshold": noise_threshold,
+        },
+        **payload,
+    }
+
+
 def _resolve_input_paths(
     parser: argparse.ArgumentParser, args: argparse.Namespace
 ) -> tuple[Path, Path]:
@@ -432,14 +494,21 @@ def _resolve_input_paths(
 
 
 def _parse_fail_on(raw: str) -> set[str]:
-    statuses = {item.strip() for item in raw.split(",") if item.strip()}
-    invalid = sorted(
-        status for status in statuses if status not in VALID_FAIL_ON_STATUSES
-    )
+    statuses: set[str] = set()
+    invalid: list[str] = []
+    for item in raw.split(","):
+        status = item.strip()
+        if not status:
+            continue
+        canonical = FAIL_ON_STATUS_ALIASES.get(status, status)
+        if canonical not in VALID_FAIL_ON_STATUSES:
+            invalid.append(status)
+            continue
+        statuses.add(canonical)
     if invalid:
         raise ValueError(
             "invalid --fail-on status(es): "
-            + ", ".join(invalid)
+            + ", ".join(sorted(set(invalid)))
             + " (expected one of: "
             + ", ".join(sorted(VALID_FAIL_ON_STATUSES))
             + ")"
@@ -459,7 +528,9 @@ def main() -> None:
     parser.add_argument(
         "--aggregation", choices=["min", "median", "p95"], default="median"
     )
-    parser.add_argument("--format", choices=["text", "markdown"], default="text")
+    parser.add_argument(
+        "--format", choices=["text", "markdown", "json"], default="text"
+    )
     parser.add_argument("--include-metrics", action="store_true")
     parser.add_argument(
         "--fail-on",
@@ -492,13 +563,22 @@ def main() -> None:
     except (ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)
         raise SystemExit(1) from exc
-    output = (
-        render_markdown(comparison, include_metrics=args.include_metrics)
-        if args.format == "markdown"
-        else render_text(comparison, include_metrics=args.include_metrics)
-    )
+    if args.format == "json":
+        output = json.dumps(
+            build_json_payload(
+                comparison,
+                mode=args.mode,
+                aggregation=args.aggregation,
+                noise_threshold=args.noise_threshold,
+            ),
+            indent=2,
+        )
+    elif args.format == "markdown":
+        output = render_markdown(comparison, include_metrics=args.include_metrics)
+    else:
+        output = render_text(comparison, include_metrics=args.include_metrics)
     print(output)
-    if any(row.change in fail_on_statuses for row in comparison.rows):
+    if any(row.status in fail_on_statuses for row in comparison.rows):
         raise SystemExit(2)
 
 

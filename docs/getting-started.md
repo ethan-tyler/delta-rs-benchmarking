@@ -26,7 +26,9 @@ The main scripts are:
 | `prepare_delta_rs.sh`         | Clones or updates the delta-rs checkout                    |
 | `sync_harness_to_delta_rs.sh` | Copies benchmark crate and configs into the checkout       |
 | `bench.sh`                    | Generates fixtures and runs benchmark suites               |
-| `compare_branch.sh`           | Runs benchmarks against two revisions and compares results |
+| `compare_branch.sh`           | Runs benchmarks against two revisions, compares them, and writes compare artifacts |
+
+Branch compare writes an automation-friendly bundle under `results/compare/<suite>/<base>__<candidate>/`, including `summary.md`, versioned `comparison.json`, `hash-policy.txt`, and `manifest.json`. If a trusted immutable SHA lives on a fork remote, pass `--candidate-fetch-url <clone-url>` or `--base-fetch-url <clone-url>` and prefer the full 40-character SHA.
 
 ## Prerequisites
 
@@ -198,7 +200,7 @@ Notes:
 
 ## Cleanup
 
-The `cleanup_local.sh` script removes accumulated fixtures, results, and checkout artifacts. It is **dry-run by default** and will not delete anything unless you pass `--apply`.
+The `cleanup_local.sh` script removes accumulated fixtures, results, and checkout artifacts, including cached per-SHA compare worktrees under `.delta-bench-compare-checkouts/`. It is **dry-run by default** and will not delete anything unless you pass `--apply`.
 
 Preview what would be cleaned:
 
@@ -210,6 +212,7 @@ Apply targeted cleanup:
 
 ```bash
 ./scripts/cleanup_local.sh --apply --results --keep-last 5 --older-than-days 14
+./scripts/cleanup_local.sh --apply --compare-checkouts --keep-last 5
 ./scripts/cleanup_local.sh --apply --fixtures
 ./scripts/cleanup_local.sh --apply --delta-rs-under-test
 ```
@@ -217,9 +220,10 @@ Apply targeted cleanup:
 | Flag                    | What it targets                                        |
 | ----------------------- | ------------------------------------------------------ |
 | `--results`             | JSON result files under `results/`                     |
+| `--compare-checkouts`   | Cached compare worktrees under `.delta-bench-compare-checkouts/` |
 | `--fixtures`            | Generated fixture data under `fixtures/`               |
 | `--delta-rs-under-test` | The managed delta-rs checkout                          |
-| `--keep-last N`         | Retain the N most recent result sets                   |
+| `--keep-last N`         | Retain the N most recent result or compare-checkout entries |
 | `--older-than-days N`   | Only remove items older than N days                    |
 | `--allow-outside-root`  | Allow cleanup of results stored outside this repo root |
 

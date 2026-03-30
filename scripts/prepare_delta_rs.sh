@@ -25,6 +25,8 @@ DELTA_RS_REPO_URL="${DELTA_RS_REPO_URL:-https://github.com/delta-io/delta-rs}"
 DELTA_RS_BRANCH="${DELTA_RS_BRANCH:-main}"
 DELTA_RS_REF="${DELTA_RS_REF:-}"
 DELTA_RS_REF_TYPE="${DELTA_RS_REF_TYPE:-auto}"
+DELTA_RS_FETCH_URL="${DELTA_RS_FETCH_URL:-}"
+DELTA_RS_FETCH_REF="${DELTA_RS_FETCH_REF:-}"
 DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_DIR}")}"
 DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS:-300}"
 CHECKOUT_LOCK_FD=""
@@ -116,6 +118,61 @@ cleanup_harness_overlay_untracked() {
   done
 }
 
+resolve_fetch_ref() {
+  local ref="${1:-}"
+  if [[ -z "${ref}" || ! "${ref}" =~ ^[0-9a-fA-F]{7,39}$ ]]; then
+    printf '%s' "${ref}"
+    return 0
+  fi
+
+  local ls_remote_output
+  if ! ls_remote_output="$(git ls-remote "${DELTA_RS_FETCH_URL}")"; then
+    return 1
+  fi
+
+  local matches
+  matches="$(
+    printf '%s\n' "${ls_remote_output}" \
+      | awk '{print $1}' \
+      | tr 'A-F' 'a-f' \
+      | sort -u \
+      | grep -i "^${ref}" || true
+  )"
+
+  local match_count
+  match_count="$(printf '%s\n' "${matches}" | sed '/^$/d' | wc -l | tr -d ' ')"
+  case "${match_count}" in
+    1)
+      printf '%s' "$(printf '%s\n' "${matches}" | sed -n '1p')"
+      ;;
+    0)
+      echo "delta-rs ref '${ref}' is not advertised by alternate fetch URL '${DELTA_RS_FETCH_URL}'; provide the full 40-character SHA or DELTA_RS_FETCH_REF" >&2
+      return 1
+      ;;
+    *)
+      echo "delta-rs ref '${ref}' is ambiguous on alternate fetch URL '${DELTA_RS_FETCH_URL}'; provide the full 40-character SHA or DELTA_RS_FETCH_REF" >&2
+      return 1
+      ;;
+  esac
+}
+
+fetch_ref_from_alternate_remote_if_needed() {
+  if [[ -z "${DELTA_RS_FETCH_URL}" ]]; then
+    return 1
+  fi
+
+  local target_ref="${DELTA_RS_FETCH_REF:-${DELTA_RS_REF}}"
+  if [[ -z "${target_ref}" ]]; then
+    return 1
+  fi
+
+  if [[ -z "${DELTA_RS_FETCH_REF}" ]]; then
+    target_ref="$(resolve_fetch_ref "${target_ref}")" || return 1
+  fi
+
+  git -C "${DELTA_RS_DIR}" fetch "${DELTA_RS_FETCH_URL}" "${target_ref}"
+}
+
 trap release_checkout_lock EXIT
 
 ensure_checkout_lock_path_safe_for_initial_clone
@@ -133,7 +190,12 @@ if [[ -n "${DELTA_RS_REF}" ]]; then
   case "${DELTA_RS_REF_TYPE}" in
     auto|commit)
       if ! git -C "${DELTA_RS_DIR}" rev-parse --verify --quiet "${DELTA_RS_REF}^{commit}" >/dev/null; then
-        echo "delta-rs ref '${DELTA_RS_REF}' is not available after fetch; provide a reachable commit SHA" >&2
+        if [[ -n "${DELTA_RS_FETCH_URL}" ]]; then
+          fetch_ref_from_alternate_remote_if_needed
+        fi
+      fi
+      if ! git -C "${DELTA_RS_DIR}" rev-parse --verify --quiet "${DELTA_RS_REF}^{commit}" >/dev/null; then
+        echo "delta-rs ref '${DELTA_RS_REF}' is not available after fetch; provide a reachable commit SHA, DELTA_RS_FETCH_URL, or DELTA_RS_FETCH_REF" >&2
         exit 1
       fi
       git -C "${DELTA_RS_DIR}" checkout -q --detach "${DELTA_RS_REF}"

@@ -22,6 +22,8 @@ BENCH_COMPARE_RUNS="${BENCH_COMPARE_RUNS:-3}"
 BENCH_MEASURE_ORDER="${BENCH_MEASURE_ORDER:-alternate}"
 BASE_SHA_OVERRIDE=""
 CANDIDATE_SHA_OVERRIDE=""
+BASE_FETCH_URL=""
+CANDIDATE_FETCH_URL=""
 WORKING_VS_UPSTREAM_MAIN=0
 UPSTREAM_REMOTE_OVERRIDE=""
 STORAGE_BACKEND="${BENCH_STORAGE_BACKEND:-local}"
@@ -83,6 +85,8 @@ Options:
                                   Per-run execution order used for measured runs (default: ${BENCH_MEASURE_ORDER})
   --base-sha <sha>                Force immutable commit mode for the base revision
   --candidate-sha <sha>           Force immutable commit mode for the candidate revision
+  --base-fetch-url <url>          Fetch URL used when base SHA is only reachable from another remote
+  --candidate-fetch-url <url>     Fetch URL used when candidate SHA is only reachable from another remote
   --current-vs-main               Compare current HEAD commit against latest <remote>/main
   --working-vs-upstream-main      Legacy alias for --current-vs-main
   --upstream-remote <name>        Remote used with --current-vs-main (default: upstream, else origin)
@@ -175,6 +179,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --candidate-sha)
       CANDIDATE_SHA_OVERRIDE="$2"
+      shift 2
+      ;;
+    --base-fetch-url)
+      BASE_FETCH_URL="$2"
+      shift 2
+      ;;
+    --candidate-fetch-url)
+      CANDIDATE_FETCH_URL="$2"
       shift 2
       ;;
     --current-vs-main|--working-vs-upstream-main)
@@ -356,6 +368,7 @@ esac
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
 RUNNER_RESULTS_DIR="${DELTA_BENCH_RESULTS:-${RUNNER_ROOT}/results}"
+compare_checkout_root="${DELTA_BENCH_COMPARE_CHECKOUT_ROOT:-${RUNNER_ROOT}/.delta-bench-compare-checkouts}"
 
 default_checkout_lock_file() {
   local checkout_dir="${1:-}"
@@ -426,8 +439,9 @@ ensure_known_ref_mode() {
 prepare_delta_rs_ref() {
   local ref="${1:-}"
   local mode="${2:-auto}"
+  local fetch_url="${3:-}"
   if [[ "${mode}" == "commit" ]]; then
-    run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+    run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
     return
   fi
   if branch_ref_exists "${ref}"; then
@@ -435,7 +449,7 @@ prepare_delta_rs_ref() {
     return
   fi
   if is_commit_sha "${ref}"; then
-    run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+    run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
     return
   fi
   print_ref_not_found_guidance "${ref}"
@@ -445,7 +459,8 @@ prepare_delta_rs_ref() {
 pin_ref_to_commit() {
   local ref="${1:-}"
   local mode="${2:-auto}"
-  prepare_delta_rs_ref "${ref}" "${mode}" >/dev/null
+  local fetch_url="${3:-}"
+  prepare_delta_rs_ref "${ref}" "${mode}" "${fetch_url}" >/dev/null
   exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD
 }
 
@@ -504,6 +519,24 @@ exec_on_runner() {
       run_with_timeout "$@"
     )
   fi
+}
+
+shell_join() {
+  local joined=""
+  local arg
+  for arg in "$@"; do
+    joined+=$(printf '%q ' "${arg}")
+  done
+  printf '%s' "${joined% }"
+}
+
+run_command_to_file() {
+  local output_path="$1"
+  shift
+  local cmd=("$@")
+  local command_string
+  command_string="$(shell_join "${cmd[@]}")"
+  run_step bash -lc "set -euo pipefail; ${command_string} > $(printf '%q' "${output_path}")"
 }
 
 path_is_within_dir() {
@@ -661,24 +694,27 @@ phase() {
   printf '\n=== [%d/%d] %s ===\n\n' "${step}" "${total}" "${desc}"
 }
 
-run_benchmark_suite_for_ref() {
-  local ref="$1"
-  local mode="$2"
-  local label="$3"
-  local warmup="$4"
-  local iters="$5"
-  local no_summary_table="${6:-0}"
-  local quiet="${7:-0}"
+checkout_dir_for_ref() {
+  local ref="${1:-}"
+  printf '%s/%s\n' "${compare_checkout_root}" "${ref}"
+}
 
-  if (( quiet != 0 )); then
-    run_security_check >/dev/null
-    prepare_delta_rs_ref "${ref}" "${mode}" >/dev/null
-    run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh >/dev/null
-  else
-    run_security_check
-    prepare_delta_rs_ref "${ref}" "${mode}"
-    run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
-  fi
+prepare_ref_checkout_once() {
+  local ref="$1"
+  local checkout_dir="$2"
+  local fetch_url="${3:-}"
+  local fetch_source="${fetch_url:-${DELTA_RS_DIR}}"
+
+  run_step env DELTA_RS_DIR="${checkout_dir}" DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_source}" ./scripts/prepare_delta_rs.sh
+  run_step env DELTA_RS_DIR="${checkout_dir}" ./scripts/sync_harness_to_delta_rs.sh
+}
+
+run_benchmark_suite_for_checkout() {
+  local checkout_dir="$1"
+  local label="$2"
+  local warmup="$3"
+  local iters="$4"
+  local no_summary_table="${5:-0}"
 
   local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --lane macro --mode "${BENCHMARK_MODE}" --warmup "${warmup}" --iters "${iters}")
   if [[ -n "${DATASET_ID}" ]]; then
@@ -693,7 +729,7 @@ run_benchmark_suite_for_ref() {
     run_cmd+=(--no-summary-table)
   fi
 
-  run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${label}" "${run_cmd[@]}"
+  run_step_no_retry env DELTA_RS_DIR="${checkout_dir}" DELTA_BENCH_EXEC_ROOT="${checkout_dir}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${label}" "${run_cmd[@]}"
 }
 
 run_order_for_iteration() {
@@ -751,18 +787,20 @@ ensure_known_ref_mode "${candidate_ref}" "${candidate_ref_mode}"
 
 base_requested_ref="${base_ref}"
 candidate_requested_ref="${candidate_ref}"
-base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"
+base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}" "${BASE_FETCH_URL}")"
 base_ref_mode="commit"
-candidate_ref="$(pin_ref_to_commit "${candidate_ref}" "${candidate_ref_mode}")"
+candidate_ref="$(pin_ref_to_commit "${candidate_ref}" "${candidate_ref_mode}" "${CANDIDATE_FETCH_URL}")"
 candidate_ref_mode="commit"
 echo "Pinned base ref: ${base_requested_ref} -> ${base_ref}"
 echo "Pinned candidate ref: ${candidate_requested_ref} -> ${candidate_ref}"
 
 base_label="base-$(sanitize_label "${base_ref}")"
 cand_label="cand-$(sanitize_label "${candidate_ref}")"
+base_checkout_dir="$(checkout_dir_for_ref "${base_ref}")"
+candidate_checkout_dir="$(checkout_dir_for_ref "${candidate_ref}")"
 
-prepare_delta_rs_ref "${base_ref}" "${base_ref_mode}"
-run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/sync_harness_to_delta_rs.sh
+prepare_ref_checkout_once "${base_ref}" "${base_checkout_dir}" "${BASE_FETCH_URL}"
+prepare_ref_checkout_once "${candidate_ref}" "${candidate_checkout_dir}" "${CANDIDATE_FETCH_URL}"
 data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)
 if [[ -n "${DATASET_ID}" ]]; then
   data_cmd+=(--dataset-id "${DATASET_ID}")
@@ -771,13 +809,13 @@ data_cmd+=("${storage_args[@]}")
 if [[ ${#profile_args[@]} -gt 0 ]]; then
   data_cmd+=("${profile_args[@]}")
 fi
-run_step_no_retry env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" "${data_cmd[@]}"
+run_step_no_retry env DELTA_RS_DIR="${base_checkout_dir}" DELTA_BENCH_EXEC_ROOT="${base_checkout_dir}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" "${data_cmd[@]}"
 
 if (( BENCH_PREWARM_ITERS > 0 )); then
   phase "${current_phase}" "${total_phases}" "Prewarm runs (${BENCH_PREWARM_ITERS} iterations, results discarded)"
   current_phase=$((current_phase + 1))
-  run_benchmark_suite_for_ref "${base_ref}" "${base_ref_mode}" "${base_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1 1
-  run_benchmark_suite_for_ref "${candidate_ref}" "${candidate_ref_mode}" "${cand_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1 1
+  run_benchmark_suite_for_checkout "${base_checkout_dir}" "${base_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
+  run_benchmark_suite_for_checkout "${candidate_checkout_dir}" "${cand_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
 fi
 
 base_run_labels=()
@@ -791,12 +829,12 @@ while (( run_idx <= BENCH_COMPARE_RUNS )); do
     if [[ "${side}" == "base" ]]; then
       run_label="${base_label}-r${run_idx}"
       echo "  -> base (${base_ref:0:10}...)"
-      run_benchmark_suite_for_ref "${base_ref}" "${base_ref_mode}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1 1
+      run_benchmark_suite_for_checkout "${base_checkout_dir}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1
       base_run_labels+=("${run_label}")
     else
       run_label="${cand_label}-r${run_idx}"
       echo "  -> candidate (${candidate_ref:0:10}...)"
-      run_benchmark_suite_for_ref "${candidate_ref}" "${candidate_ref_mode}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1 1
+      run_benchmark_suite_for_checkout "${candidate_checkout_dir}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1
       cand_run_labels+=("${run_label}")
     fi
   done
@@ -814,10 +852,42 @@ cand_json="${RUNNER_RESULTS_DIR}/${cand_label}/${suite}.json"
 
 phase "${current_phase}" "${total_phases}" "Comparison report"
 
+compare_artifact_dir="${RUNNER_RESULTS_DIR}/compare/${suite}/${base_ref}__${candidate_ref}"
+compare_stdout="${compare_artifact_dir}/stdout.txt"
+compare_markdown="${compare_artifact_dir}/summary.md"
+compare_json="${compare_artifact_dir}/comparison.json"
+hash_policy_txt="${compare_artifact_dir}/hash-policy.txt"
+manifest_json="${compare_artifact_dir}/manifest.json"
+
 compare_args=(--mode "${COMPARE_MODE}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
 if [[ -n "${COMPARE_FAIL_ON}" ]]; then
   compare_args+=(--fail-on "${COMPARE_FAIL_ON}")
 fi
+
+compare_render_args=(--mode "${COMPARE_MODE}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}")
+compare_cmd=(env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}")
+hash_policy_cmd=(env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.hash_policy "${base_json}" "${cand_json}")
+
+run_step mkdir -p "${compare_artifact_dir}"
+run_command_to_file "${compare_stdout}" "${compare_cmd[@]}" "${compare_render_args[@]}" --format text
+run_command_to_file "${compare_markdown}" "${compare_cmd[@]}" "${compare_render_args[@]}" --format markdown
+run_command_to_file "${compare_json}" "${compare_cmd[@]}" "${compare_render_args[@]}" --format json
+run_command_to_file "${hash_policy_txt}" "${hash_policy_cmd[@]}"
+run_step env \
+  COMPARE_MANIFEST_PATH="${manifest_json}" \
+  COMPARE_SUITE="${suite}" \
+  COMPARE_BASE_SHA="${base_ref}" \
+  COMPARE_CANDIDATE_SHA="${candidate_ref}" \
+  COMPARE_BASE_JSON="${base_json}" \
+  COMPARE_CANDIDATE_JSON="${cand_json}" \
+  COMPARE_STDOUT_REPORT="${compare_stdout}" \
+  COMPARE_MARKDOWN_REPORT="${compare_markdown}" \
+  COMPARE_COMPARISON_JSON="${compare_json}" \
+  COMPARE_HASH_POLICY_REPORT="${hash_policy_txt}" \
+  COMPARE_MODE_VALUE="${COMPARE_MODE}" \
+  COMPARE_AGGREGATION="${AGGREGATION}" \
+  COMPARE_NOISE_THRESHOLD="${NOISE_THRESHOLD}" \
+  python3 -c 'import json, os, pathlib; pathlib.Path(os.environ["COMPARE_MANIFEST_PATH"]).write_text(json.dumps({"suite": os.environ["COMPARE_SUITE"], "base_sha": os.environ["COMPARE_BASE_SHA"], "candidate_sha": os.environ["COMPARE_CANDIDATE_SHA"], "base_json": os.environ["COMPARE_BASE_JSON"], "candidate_json": os.environ["COMPARE_CANDIDATE_JSON"], "stdout_report": os.environ["COMPARE_STDOUT_REPORT"], "markdown_report": os.environ["COMPARE_MARKDOWN_REPORT"], "comparison_json": os.environ["COMPARE_COMPARISON_JSON"], "hash_policy_report": os.environ["COMPARE_HASH_POLICY_REPORT"], "compare_mode": os.environ["COMPARE_MODE_VALUE"], "aggregation": os.environ["COMPARE_AGGREGATION"], "noise_threshold": float(os.environ["COMPARE_NOISE_THRESHOLD"])}, indent=2) + "\n", encoding="utf-8")'
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.hash_policy "${base_json}" "${cand_json}"

@@ -173,9 +173,13 @@ def test_compare_runs_handles_failures_and_missing_cases() -> None:
 
     by_case = {row.case: row for row in comparison.rows}
 
+    assert by_case["a"].status == "improvement"
     assert by_case["a"].change == "1.11x faster"
+    assert by_case["b"].status == "incomparable"
     assert by_case["b"].change == "incomparable"
+    assert by_case["only_base"].status == "removed"
     assert by_case["only_base"].change == "removed"
+    assert by_case["only_cand"].status == "new"
     assert by_case["only_cand"].change == "new"
 
     assert comparison.summary.faster == 1
@@ -940,6 +944,67 @@ def test_compare_cli_rejects_missing_input_without_traceback(tmp_path: Path) -> 
     assert "Traceback" not in result.stderr
 
 
+def test_compare_cli_supports_json_output(tmp_path: Path) -> None:
+    baseline = _run([{"case": "a", "samples": [{"elapsed_ms": 100.0}]}])
+    candidate = _run([{"case": "a", "samples": [{"elapsed_ms": 90.0}]}])
+
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = _run_compare_cli(baseline_path, candidate_path, "--format", "json")
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["faster"] == 1
+    assert payload["rows"][0]["status"] == "improvement"
+    assert payload["rows"][0]["case"] == "a"
+
+
+def test_compare_cli_json_output_is_versioned_and_machine_readable(
+    tmp_path: Path,
+) -> None:
+    baseline = _run(
+        [
+            {
+                "case": "a",
+                "classification": "expected_failure",
+                "samples": [{"elapsed_ms": 100.0}],
+            }
+        ]
+    )
+    candidate = _run([{"case": "a", "samples": [{"elapsed_ms": 90.0}]}])
+
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = _run_compare_cli(
+        baseline_path,
+        candidate_path,
+        "--format",
+        "json",
+        "--aggregation",
+        "p95",
+        "--noise-threshold",
+        "0.07",
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["schema_version"] == 1
+    assert payload["metadata"] == {
+        "mode": "exploratory",
+        "aggregation": "p95",
+        "noise_threshold": 0.07,
+    }
+    assert payload["rows"][0]["status"] == "expected_failure"
+    assert payload["rows"][0]["display_change"] == "expected_failure"
+    assert payload["rows"][0]["delta_pct"] is None
+
+
 def test_compare_cli_fail_on_regression_exits_non_zero(tmp_path: Path) -> None:
     baseline = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 1.0}]}])
     candidate = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 1.0}]}])
@@ -973,6 +1038,48 @@ def test_compare_cli_fail_on_regression_exits_non_zero(tmp_path: Path) -> None:
 
     assert result.returncode == 2
     assert "regression" in result.stdout.lower()
+
+
+def test_compare_cli_fail_on_improvement_matches_exploratory_status(
+    tmp_path: Path,
+) -> None:
+    baseline = _run([{"case": "scan_case", "samples": [{"elapsed_ms": 100.0}]}])
+    candidate = _run([{"case": "scan_case", "samples": [{"elapsed_ms": 80.0}]}])
+
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = _run_compare_cli(
+        baseline_path,
+        candidate_path,
+        "--fail-on",
+        "improvement",
+    )
+
+    assert result.returncode == 2
+    assert "faster" in result.stdout.lower()
+
+
+def test_compare_cli_fail_on_accepts_canonical_no_change_status(tmp_path: Path) -> None:
+    baseline = _run([{"case": "scan_case", "samples": [{"elapsed_ms": 100.0}]}])
+    candidate = _run([{"case": "scan_case", "samples": [{"elapsed_ms": 103.0}]}])
+
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = _run_compare_cli(
+        baseline_path,
+        candidate_path,
+        "--fail-on",
+        "no_change",
+    )
+
+    assert result.returncode == 2
+    assert "no change" in result.stdout.lower()
 
 
 def test_compare_cli_default_exit_policy_remains_non_failing(tmp_path: Path) -> None:

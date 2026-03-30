@@ -62,6 +62,53 @@ def copy_executable(source: Path, dest: Path) -> None:
     dest.chmod(0o755)
 
 
+def configure_git_identity(repo: Path) -> None:
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "bench@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.name", "Bench Test"],
+        check=True,
+    )
+
+
+def create_origin_and_fork_repos(temp_root: Path) -> tuple[Path, Path, str]:
+    origin_src = temp_root / "origin-src"
+    subprocess.run(["git", "init", "-q", str(origin_src)], check=True)
+    configure_git_identity(origin_src)
+    (origin_src / "base.txt").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(origin_src), "add", "base.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(origin_src), "commit", "-q", "-m", "base"],
+        check=True,
+    )
+
+    origin_repo = temp_root / "origin.git"
+    subprocess.run(
+        ["git", "clone", "-q", "--bare", str(origin_src), str(origin_repo)],
+        check=True,
+    )
+
+    fork_repo = temp_root / "fork-src"
+    subprocess.run(["git", "clone", "-q", str(origin_repo), str(fork_repo)], check=True)
+    configure_git_identity(fork_repo)
+    (fork_repo / "candidate.txt").write_text("candidate\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(fork_repo), "add", "candidate.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(fork_repo), "commit", "-q", "-m", "candidate"],
+        check=True,
+    )
+    candidate_sha = subprocess.run(
+        ["git", "-C", str(fork_repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    return origin_repo, fork_repo, candidate_sha
+
+
 def assert_order(content: str, earlier: str, later: str) -> None:
     assert earlier in content, f"missing earlier marker: {earlier}"
     assert later in content, f"missing later marker: {later}"
@@ -228,7 +275,7 @@ def test_compare_branch_does_not_retry_benchmark_producing_steps() -> None:
     assert "run_step_no_retry()" in script
     assert "data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)" in script
     assert re.search(r'run_step_no_retry env .*?"\$\{data_cmd\[@\]\}"', script)
-    assert "run_benchmark_suite_for_ref" in script
+    assert "run_benchmark_suite_for_checkout" in script
     assert "./scripts/bench.sh run --scale sf1" in script
 
 
@@ -479,7 +526,8 @@ def test_compare_branch_does_not_fast_forward_default_branch_before_ref_pinning(
         'phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"'
     )
     end = script.index(
-        'base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"', start
+        'base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}" "${BASE_FETCH_URL}")"',
+        start,
     )
     initial_block = script[start:end]
     assert re.search(
@@ -492,32 +540,46 @@ def test_compare_branch_does_not_fast_forward_default_branch_before_ref_pinning(
     )
 
 
-def test_compare_branch_runs_security_preflight_before_per_ref_checkout() -> None:
+def test_compare_branch_runs_security_preflight_once_before_ref_pinning() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
-    start = script.index("run_benchmark_suite_for_ref() {")
-    end = script.index("\n}\n\nrun_order_for_iteration", start) + 2
-    function_body = script[start:end]
-    assert_order(
-        function_body,
-        "run_security_check",
-        'prepare_delta_rs_ref "${ref}" "${mode}"',
+    start = script.index(
+        'phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"'
     )
+    end = script.index(
+        'base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}" "${BASE_FETCH_URL}")"',
+        start,
+    )
+    initial_block = script[start:end]
+    assert initial_block.count("run_security_check") == 1
+    assert_order(
+        initial_block,
+        "run_security_check",
+        'base_requested_ref="${base_ref}"',
+    )
+
+
+def test_compare_branch_does_not_repeat_security_preflight_per_ref_checkout() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    start = script.index("prepare_ref_checkout_once() {")
+    end = script.index("\n}\n\nrun_benchmark_suite_for_checkout", start) + 2
+    function_body = script[start:end]
+    assert "run_security_check" not in function_body
 
 
 def test_compare_branch_pins_refs_once_before_labels_and_measured_runs() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "pin_ref_to_commit()" in script
     assert re.search(
-        r'base_ref="\$\(pin_ref_to_commit \"\$\{base_ref\}\" \"\$\{base_ref_mode\}\"\)"',
+        r'base_ref="\$\(pin_ref_to_commit \"\$\{base_ref\}\" \"\$\{base_ref_mode\}\" \"\$\{BASE_FETCH_URL\}\"\)"',
         script,
     )
     assert re.search(
-        r'candidate_ref="\$\(pin_ref_to_commit \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"\)"',
+        r'candidate_ref="\$\(pin_ref_to_commit \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\" \"\$\{CANDIDATE_FETCH_URL\}\"\)"',
         script,
     )
     assert_order(
         script,
-        'base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}")"',
+        'base_ref="$(pin_ref_to_commit "${base_ref}" "${base_ref_mode}" "${BASE_FETCH_URL}")"',
         'base_label="base-$(sanitize_label "${base_ref}")"',
     )
 
@@ -529,10 +591,11 @@ def test_compare_branch_supports_explicit_sha_flags() -> None:
     assert re.search(r"--base-sha\)\n\s+BASE_SHA_OVERRIDE=\"\$2\"", script)
     assert re.search(r"--candidate-sha\)\n\s+CANDIDATE_SHA_OVERRIDE=\"\$2\"", script)
     assert re.search(
-        r"prepare_delta_rs_ref \"\$\{base_ref\}\" \"\$\{base_ref_mode\}\"", script
+        r'prepare_ref_checkout_once "\$\{base_ref\}" "\$\{base_checkout_dir\}" "\$\{BASE_FETCH_URL\}"',
+        script,
     )
     assert re.search(
-        r"run_benchmark_suite_for_ref \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"",
+        r'run_benchmark_suite_for_checkout "\$\{candidate_checkout_dir\}" "\$\{run_label\}"',
         script,
     )
     assert re.search(r"if \[\[ \"\$\{mode\}\" == \"commit\" \]\]; then", script)
@@ -584,7 +647,7 @@ def test_compare_branch_emits_clear_missing_ref_guidance() -> None:
     assert "--candidate-sha" in script
     assert 'git -C "${DELTA_RS_DIR}" branch -a' in script
     assert re.search(
-        r"ensure_known_ref_mode \"\$\{candidate_ref\}\" \"\$\{candidate_ref_mode\}\"[\s\S]*prepare_delta_rs_ref \"\$\{base_ref\}\"",
+        r'ensure_known_ref_mode "\$\{candidate_ref\}" "\$\{candidate_ref_mode\}"[\s\S]*base_ref="\$\(pin_ref_to_commit "\$\{base_ref\}"',
         script,
     )
 
@@ -595,6 +658,285 @@ def test_prepare_delta_rs_supports_immutable_ref_checkout() -> None:
     assert "DELTA_RS_REF_TYPE" in script
     assert re.search(r"checkout(?: -q)? --detach", script)
     assert re.search(r"pull(?: -q)? --ff-only origin", script)
+
+
+def test_prepare_delta_rs_fetches_immutable_ref_from_alternate_remote_url() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        copy_executable(PREPARE_DELTA_RS, prepare_copy)
+
+        origin_repo, fork_repo, candidate_sha = create_origin_and_fork_repos(temp_root)
+
+        env = os.environ.copy()
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_RS_REPO_URL"] = str(origin_repo)
+        env["DELTA_RS_REF"] = candidate_sha
+        env["DELTA_RS_REF_TYPE"] = "commit"
+        env["DELTA_RS_FETCH_URL"] = str(fork_repo)
+
+        result = subprocess.run(
+            ["bash", str(prepare_copy)],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert "delta-rs checkout ready:" in result.stdout
+        resolved = subprocess.run(
+            ["git", "-C", env["DELTA_RS_DIR"], "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert resolved == candidate_sha
+
+
+def test_prepare_delta_rs_fetches_abbreviated_immutable_ref_from_alternate_remote_url() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        prepare_copy = scripts_dir / "prepare_delta_rs.sh"
+        copy_executable(PREPARE_DELTA_RS, prepare_copy)
+
+        origin_repo, fork_repo, candidate_sha = create_origin_and_fork_repos(temp_root)
+
+        env = os.environ.copy()
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_RS_REPO_URL"] = str(origin_repo)
+        env["DELTA_RS_REF"] = candidate_sha[:12]
+        env["DELTA_RS_REF_TYPE"] = "commit"
+        env["DELTA_RS_FETCH_URL"] = str(fork_repo)
+
+        result = subprocess.run(
+            ["bash", str(prepare_copy)],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        resolved = subprocess.run(
+            ["git", "-C", env["DELTA_RS_DIR"], "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert resolved == candidate_sha
+
+
+def test_compare_branch_passes_candidate_fetch_url_for_candidate_sha() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        prep_log = temp_root / "prep-log.jsonl"
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+(checkout_dir / ".git").mkdir(exist_ok=True)
+ref = os.environ.get("DELTA_RS_REF") or os.environ.get("DELTA_RS_BRANCH") or ""
+(checkout_dir / ".bench-current-sha").write_text(ref or "0" * 40, encoding="utf-8")
+with open({str(prep_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(
+        json.dumps(
+            {{
+                "ref": os.environ.get("DELTA_RS_REF"),
+                "branch": os.environ.get("DELTA_RS_BRANCH"),
+                "ref_type": os.environ.get("DELTA_RS_REF_TYPE"),
+                "fetch_url": os.environ.get("DELTA_RS_FETCH_URL"),
+            }}
+        )
+        + "\\n"
+    )
+print(f"delta-rs checkout ready: {{checkout_dir}}")
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+args = sys.argv[1:]
+command = args[0]
+suite = "scan"
+if "--suite" in args:
+    suite = args[args.index("--suite") + 1]
+
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+target_dir = results_dir / label
+target_dir.mkdir(parents=True, exist_ok=True)
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps({"label": label, "suite": suite}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.parse_known_args()
+print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        fork_repo = temp_root / "fork.git"
+        fork_repo.mkdir()
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "--candidate-fetch-url",
+                str(fork_repo),
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        prep_entries = [
+            json.loads(line)
+            for line in prep_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert any(
+            entry["ref"] == candidate_sha and entry["fetch_url"] == str(fork_repo)
+            for entry in prep_entries
+        )
 
 
 def test_prepare_delta_rs_cleans_untracked_harness_overlay_before_checkout() -> None:
@@ -1053,6 +1395,18 @@ if command == "run":
     print(f"wrote result: {out_file}")
     sys.exit(0)
 
+if command == "validate":
+    input_path = Path(value(cli_args, "--input"))
+    output_path = Path(value(cli_args, "--output"))
+    if not input_path.is_absolute():
+        input_path = cwd / input_path
+    if not output_path.is_absolute():
+        output_path = cwd / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(input_path.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"validated result: {output_path}")
+    sys.exit(0)
+
 sys.exit(0)
 """,
         )
@@ -1148,6 +1502,456 @@ print("hash policy ok")
             temp_root / results_rel / f"cand-{candidate_sha}" / "scan.json"
         ).is_file()
         assert not (checkout_dir / results_rel).exists()
+
+
+def test_compare_branch_writes_markdown_and_manifest_artifacts() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/.git"
+ref="${DELTA_RS_REF:-${DELTA_RS_BRANCH:-}}"
+if [[ -z "${ref}" ]]; then
+  ref="0000000000000000000000000000000000000000"
+fi
+printf '%s\n' "${ref}" > "${DELTA_RS_DIR}/.bench-current-sha"
+printf 'delta-rs checkout ready: %s\n' "${DELTA_RS_DIR}"
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+suite = value(args, "--suite", "scan")
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    target_dir = results_dir / label
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps({"label": label, "suite": suite}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "clone" ]]; then
+  dest="${@: -1}"
+  mkdir -p "${dest}/.git"
+  exit 0
+fi
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.add_argument("--format", choices=["text", "markdown", "json"], default="text")
+parser.parse_known_args()
+args, _ = parser.parse_known_args()
+
+if args.format == "markdown":
+    print("# Compare Summary")
+elif args.format == "json":
+    print(
+        json.dumps(
+            {
+                "summary": {
+                    "faster": 1,
+                    "slower": 0,
+                    "no_change": 0,
+                    "incomparable": 0,
+                    "new": 0,
+                    "removed": 0,
+                },
+                "rows": [
+                    {
+                        "case": "a",
+                        "change": "1.11x faster",
+                        "baseline_ms": 100.0,
+                        "candidate_ms": 90.0,
+                        "delta_pct": -10.0,
+                    }
+                ],
+            }
+        )
+    )
+else:
+    print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        results_dir = temp_root / "results"
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        artifact_dir = results_dir / "compare" / "scan" / f"{base_sha}__{candidate_sha}"
+        manifest = json.loads(
+            (artifact_dir / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["compare_mode"] == "exploratory"
+        assert manifest["aggregation"] == "median"
+        assert manifest["noise_threshold"] == 0.05
+        assert Path(manifest["stdout_report"]).is_file()
+        assert Path(manifest["markdown_report"]).is_file()
+        assert Path(manifest["comparison_json"]).is_file()
+        assert Path(manifest["hash_policy_report"]).is_file()
+
+
+def test_compare_branch_prepares_each_pinned_ref_once_and_reuses_checkout() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        prep_log = temp_root / "prep-log.jsonl"
+        sync_log = temp_root / "sync-log.jsonl"
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+(checkout_dir / ".git").mkdir(exist_ok=True)
+ref = os.environ.get("DELTA_RS_REF") or os.environ.get("DELTA_RS_BRANCH") or ""
+(checkout_dir / ".bench-current-sha").write_text(ref or "0" * 40, encoding="utf-8")
+with open({str(prep_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(
+        json.dumps(
+            {{
+                "ref": os.environ.get("DELTA_RS_REF"),
+                "branch": os.environ.get("DELTA_RS_BRANCH"),
+                "dir": os.environ["DELTA_RS_DIR"],
+            }}
+        )
+        + "\\n"
+    )
+print(f"delta-rs checkout ready: {{checkout_dir}}")
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+with open({str(sync_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps({{"dir": os.environ["DELTA_RS_DIR"]}}) + "\\n")
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+suite = value(args, "--suite", "scan")
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    target_dir = results_dir / label
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps({"label": label, "suite": suite}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        checkout_root = temp_root / "prepared-checkouts"
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "1"
+        env["BENCH_COMPARE_RUNS"] = "2"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+        env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(checkout_root)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        prep_entries = [
+            json.loads(line)
+            for line in prep_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        prepared_entries = [
+            entry
+            for entry in prep_entries
+            if Path(entry["dir"]).resolve().parent == checkout_root.resolve()
+        ]
+        assert [entry["ref"] for entry in prepared_entries] == [
+            base_sha,
+            candidate_sha,
+        ]
+        sync_entries = [
+            json.loads(line)
+            for line in sync_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert [entry["dir"] for entry in sync_entries] == [
+            str(checkout_root / base_sha),
+            str(checkout_root / candidate_sha),
+        ]
 
 
 def test_bench_wrapper_anchors_relative_fixture_and_result_paths_to_harness_root_when_exec_root_differs() -> (
@@ -1669,6 +2473,18 @@ if command == "run":
     print(f"wrote result: {{out_file}}")
     sys.exit(0)
 
+if command == "validate":
+    input_path = Path(value(cli_args, "--input"))
+    output_path = Path(value(cli_args, "--output"))
+    if not input_path.is_absolute():
+        input_path = cwd / input_path
+    if not output_path.is_absolute():
+        output_path = cwd / output_path
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(input_path.read_text(encoding="utf-8"), encoding="utf-8")
+    print(f"validated result: {{output_path}}")
+    sys.exit(0)
+
 sys.exit(0)
 """,
         )
@@ -1677,6 +2493,9 @@ sys.exit(0)
         candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
         results_rel = Path("results") / "remote compare 20260328"
         checkout_dir = remote_root / ".delta-rs-remote-checkout"
+        compare_checkout_root = remote_root / ".delta-bench-compare-checkouts"
+        base_checkout_dir = compare_checkout_root / base_sha
+        candidate_checkout_dir = compare_checkout_root / candidate_sha
 
         env = os.environ.copy()
         env["PATH"] = f"{fake_bin}:{env['PATH']}"
@@ -1729,10 +2548,12 @@ sys.exit(0)
         ]
         assert cargo_entries
         assert {Path(entry["cwd"]).resolve() for entry in cargo_entries} == {
-            checkout_dir.resolve()
+            base_checkout_dir.resolve(),
+            candidate_checkout_dir.resolve(),
         }
         assert {entry["env_exec_root"] for entry in cargo_entries} == {
-            str(checkout_dir)
+            str(base_checkout_dir),
+            str(candidate_checkout_dir),
         }
         assert {entry["env_results"] for entry in cargo_entries} == {str(results_rel)}
         assert "outer-label-should-not-leak" not in {
@@ -1997,6 +2818,7 @@ def test_cleanup_local_help_lists_all_flags() -> None:
         "--apply",
         "--dry-run",
         "--results",
+        "--compare-checkouts",
         "--fixtures",
         "--delta-rs-under-test",
         "--allow-outside-root",
@@ -2119,6 +2941,50 @@ def test_cleanup_local_older_than_days_no_matches_is_noop() -> None:
 
         assert result.returncode == 0
         assert "No matching artifacts to clean." in result.stdout
+
+
+def test_cleanup_local_compare_checkout_target_honors_keep_last() -> None:
+    with tempfile.TemporaryDirectory() as td:
+        checkout_root = Path(td) / ".delta-bench-compare-checkouts"
+        oldest = checkout_root / "1111111"
+        middle = checkout_root / "2222222"
+        newest = checkout_root / "3333333"
+        for checkout_dir in (oldest, middle, newest):
+            checkout_dir.mkdir(parents=True)
+            (checkout_dir / "marker.txt").write_text(
+                checkout_dir.name, encoding="utf-8"
+            )
+
+        now = time.time()
+        os.utime(oldest, (now - 300, now - 300))
+        os.utime(middle, (now - 200, now - 200))
+        os.utime(newest, (now - 100, now - 100))
+
+        env = os.environ.copy()
+        env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(checkout_root)
+
+        apply_run = subprocess.run(
+            [
+                "bash",
+                str(LOCAL_CLEANUP),
+                "--apply",
+                "--compare-checkouts",
+                "--keep-last",
+                "2",
+                "--allow-outside-root",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert apply_run.returncode == 0, apply_run.stderr or apply_run.stdout
+        assert not oldest.exists()
+        assert middle.exists()
+        assert newest.exists()
+        assert "compare checkouts" in apply_run.stdout
 
 
 def test_cleanup_local_apply_refuses_outside_repo_without_override() -> None:

@@ -74,17 +74,30 @@ Pin both sides to exact commit SHAs for fully reproducible results:
 
 This is the most reproducible option because branches can move during a long run, but SHAs cannot. Prefer this for benchmarks that take more than a few minutes.
 
+If a trusted PR head SHA lives on a fork remote instead of `origin`, pass the fork URL explicitly so checkout prep can fetch that immutable ref:
+
+```bash
+./scripts/compare_branch.sh \
+  --base-sha 5a0c8d7f3f2d9d42fdd9414f1ce2af319e0c52e1 \
+  --candidate-sha 8c6170f1de4af5e2d3336b4fce8a9896af4d9b90 \
+  --candidate-fetch-url https://github.com/example/delta-rs \
+  scan
+```
+
+Use `--base-fetch-url` the same way when the base SHA is only reachable from a non-`origin` remote. Prefer the full 40-character SHA when you use an alternate fetch URL. If you only have an abbreviated SHA and it is not directly advertised by the alternate remote, set `DELTA_RS_FETCH_REF` to an advertised branch/ref so the checkout can fetch that history first. The lower-level checkout contract is also available through `prepare_delta_rs.sh` via `DELTA_RS_FETCH_URL` and `DELTA_RS_FETCH_REF`.
+
 ## What Compare Does Under the Hood
 
 When you run a comparison, the script executes these steps in order:
 
-1. **Updates the checkout** -- fetches the latest state of `.delta-rs-under-test` and resolves the base and candidate refs.
-2. **Syncs the harness** -- copies the benchmark crate and configuration into the delta-rs workspace so Cargo can build it.
+1. **Pins immutable refs** -- updates `.delta-rs-under-test`, and for immutable SHAs can fall back to a trusted alternate remote URL before resolving the base and candidate refs.
+2. **Prepares per-ref worktrees** -- creates one synced checkout per pinned SHA under `.delta-bench-compare-checkouts/` and reuses those prepared directories for prewarm and measured runs instead of flipping one checkout back and forth.
 3. **Generates fixtures** -- creates deterministic test data using the base revision, ensuring both sides benchmark against identical input.
 4. **Runs prewarm iterations** (optional) -- executes unreported warmup iterations for both refs to prime caches and stabilize thermal state.
 5. **Runs measured iterations** -- executes the configured number of measured benchmark runs for base and candidate in the configured order (alternating by default).
 6. **Aggregates results** -- combines all measured runs for each side into a single JSON payload using the configured aggregation method (median by default).
-7. **Prints the report** -- classifies each case and prints grouped output for valid perf comparisons only. Invalid or mismatched inputs fail closed before comparison.
+7. **Writes compare artifacts** -- stores `stdout.txt`, `summary.md`, `comparison.json`, `hash-policy.txt`, and `manifest.json` under `results/compare/<suite>/<base>__<candidate>/`.
+8. **Prints the report** -- classifies each case and prints grouped output for valid perf comparisons only. Invalid or mismatched inputs fail closed before comparison.
 
 ## Tuning Your Comparison
 
@@ -197,6 +210,15 @@ Key metrics to look at:
 - **Relative change (%)** -- how much faster or slower the candidate is compared to the base.
 - **cv_pct** -- coefficient of variation as a percentage. Below 5% is good. Above 10% means the measurement is noisy and you should increase `--compare-runs` or `--iters`.
 - **median_ms** -- the representative timing for each case.
+
+Automation-friendly compare artifacts live next to the aggregated run JSON:
+
+| Artifact | Purpose |
+| --- | --- |
+| `summary.md` | Markdown report for PR comments or artifact upload |
+| `comparison.json` | Versioned machine-readable compare payload with `schema_version`, `metadata`, `summary`, and `rows` |
+| `hash-policy.txt` | Hash/schema compatibility report for the aggregated payload pair across all observed sample hashes |
+| `manifest.json` | Pointer file with suite, SHAs, compare settings, and artifact paths |
 
 For the complete list of metrics that may appear in the report, see [Reference](reference.md#metrics-reference).
 

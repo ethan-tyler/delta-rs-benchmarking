@@ -172,6 +172,90 @@ def render_hash_policy_text(analysis: HashPolicyAnalysis) -> str:
     return "\n".join(lines)
 
 
+def _sample_hash_values(case: dict, key: str) -> list[str]:
+    values: list[str] = []
+    for sample in case.get("samples") or []:
+        if not isinstance(sample, dict):
+            continue
+        metrics = sample.get("metrics") or {}
+        value = metrics.get(key)
+        if value is not None:
+            values.append(str(value))
+    return values
+
+
+def _case_hashes(case: dict | None) -> dict[str, list[str | None]]:
+    if case is None:
+        return {"result_hash": [None], "schema_hash": [None]}
+
+    result_hashes = _sample_hash_values(case, "result_hash")
+    if not result_hashes:
+        fallback_result_hash = case.get("exact_result_hash") or case.get("result_hash")
+        result_hashes = (
+            [fallback_result_hash] if fallback_result_hash is not None else [None]
+        )
+
+    schema_hashes = _sample_hash_values(case, "schema_hash")
+    if not schema_hashes:
+        fallback_schema_hash = case.get("schema_hash")
+        schema_hashes = (
+            [fallback_schema_hash] if fallback_schema_hash is not None else [None]
+        )
+
+    return {
+        "result_hash": sorted(
+            set(result_hashes), key=lambda value: "" if value is None else value
+        ),
+        "schema_hash": sorted(
+            set(schema_hashes), key=lambda value: "" if value is None else value
+        ),
+    }
+
+
+def render_hash_policy_report(baseline: dict, candidate: dict) -> str:
+    baseline_cases = {case["case"]: case for case in baseline.get("cases", [])}
+    candidate_cases = {case["case"]: case for case in candidate.get("cases", [])}
+    shared_cases = sorted(set(baseline_cases) & set(candidate_cases))
+
+    lines = [
+        "# Hash Policy Report",
+        "",
+        f"Shared cases: {len(shared_cases)}",
+        "",
+    ]
+
+    mismatches: list[str] = []
+    non_uniform: list[str] = []
+    for case_name in shared_cases:
+        baseline_hashes = _case_hashes(baseline_cases.get(case_name))
+        candidate_hashes = _case_hashes(candidate_cases.get(case_name))
+        for key in ("result_hash", "schema_hash"):
+            if len(baseline_hashes[key]) > 1:
+                non_uniform.append(
+                    f"- {case_name}: baseline {key} values={baseline_hashes[key]!r}"
+                )
+            if len(candidate_hashes[key]) > 1:
+                non_uniform.append(
+                    f"- {case_name}: candidate {key} values={candidate_hashes[key]!r}"
+                )
+            if baseline_hashes[key] != candidate_hashes[key]:
+                mismatches.append(
+                    f"- {case_name}: {key} baseline={baseline_hashes[key]!r} candidate={candidate_hashes[key]!r}"
+                )
+
+    if mismatches:
+        lines.append("Mismatched hash fields:")
+        lines.extend(mismatches)
+        lines.append("")
+    if non_uniform:
+        lines.append("Multiple observed hash values within a payload:")
+        lines.extend(non_uniform)
+    if not mismatches and not non_uniform:
+        lines.append("All shared case hash fields align.")
+
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Triages benchmark exact_result_hash mismatches between baseline and candidate runs"

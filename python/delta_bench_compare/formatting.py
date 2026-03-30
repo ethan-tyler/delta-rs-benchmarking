@@ -65,9 +65,9 @@ def _fmt_metric(value: int | None) -> str:
 
 
 def _fmt_delta_pct(
-    baseline_ms: float | None, candidate_ms: float | None, change: str
+    baseline_ms: float | None, candidate_ms: float | None, status: str
 ) -> str:
-    if change in {"incomparable", "expected_failure", "new", "removed", "inconclusive"}:
+    if status in {"incomparable", "expected_failure", "new", "removed", "inconclusive"}:
         return "-"
     if baseline_ms is None or candidate_ms is None or baseline_ms <= 0.0:
         return "-"
@@ -157,7 +157,7 @@ def _row_cells(
         row.case,
         _fmt_ms(row.baseline_ms),
         _fmt_ms(row.candidate_ms),
-        _fmt_delta_pct(row.baseline_ms, row.candidate_ms, row.change),
+        _fmt_delta_pct(row.baseline_ms, row.candidate_ms, row.status),
         row.change,
     ]
     if include_metrics:
@@ -208,19 +208,19 @@ def _row_cells(
     return cells
 
 
-def _colorize_cells(cells: list[str], change: str) -> list[str]:
+def _colorize_cells(cells: list[str], status: str) -> list[str]:
     """Apply ANSI color to delta_pct and change columns based on classification."""
     colored = list(cells)
-    if "faster" in change or change == "improvement":
+    if status == "improvement":
         colored[3] = green(cells[3])
         colored[4] = green(cells[4])
-    elif "slower" in change or change == "regression":
+    elif status == "regression":
         colored[3] = red(cells[3])
         colored[4] = red(cells[4])
-    elif change == "no change":
+    elif status == "no_change":
         colored[3] = dim(cells[3])
         colored[4] = dim(cells[4])
-    elif change in {
+    elif status in {
         "incomparable",
         "expected_failure",
         "new",
@@ -292,7 +292,7 @@ def _table_lines_plain(
     ]
 
     for raw_cells, row in zip(raw_body, rows):
-        colored = _colorize_cells(raw_cells, row.change)
+        colored = _colorize_cells(raw_cells, row.status)
         lines.append(
             "  ".join(
                 _pad(colored[idx], widths[idx], idx in right_indices)
@@ -303,21 +303,13 @@ def _table_lines_plain(
 
 
 def _group_rows(comparison: Comparison) -> list[tuple[str, list[ComparisonRow]]]:
-    slower = [
-        row
-        for row in comparison.rows
-        if "slower" in row.change or row.change == "regression"
-    ]
-    faster = [
-        row
-        for row in comparison.rows
-        if "faster" in row.change or row.change == "improvement"
-    ]
-    stable = [row for row in comparison.rows if row.change == "no change"]
+    slower = [row for row in comparison.rows if row.status == "regression"]
+    faster = [row for row in comparison.rows if row.status == "improvement"]
+    stable = [row for row in comparison.rows if row.status == "no_change"]
     needs_attention = [
         row
         for row in comparison.rows
-        if row.change
+        if row.status
         in {"incomparable", "expected_failure", "new", "removed", "inconclusive"}
     ]
     return [

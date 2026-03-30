@@ -306,28 +306,59 @@ fn tpcds_duckdb_dataset_skips_tpcds_hash_assertions() {
 }
 
 #[test]
-fn tpcds_duckdb_dataset_policy_does_not_modify_non_tpcds_cases() {
+fn medium_selective_dataset_policy_drops_exact_hash_for_non_default_scan_cases() {
     let mut planned = vec![planned_case(
-        "write_append_small",
-        "write",
+        "scan_full_narrow",
+        "scan",
         vec![
             CaseAssertion::ExactResultHash("sha256:expected".to_string()),
             CaseAssertion::SchemaHash("sha256:schema".to_string()),
         ],
     )];
 
-    apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TpcdsDuckdb));
+    apply_dataset_assertion_policy(&mut planned, Some(DatasetId::MediumSelective));
+
+    assert_eq!(planned.len(), 1);
+    assert_eq!(planned[0].assertions.len(), 1);
+    assert!(
+        planned[0]
+            .assertions
+            .iter()
+            .all(|assertion| !matches!(assertion, CaseAssertion::ExactResultHash(_))),
+        "non-default datasets should not enforce authoritative exact-result hashes"
+    );
+    assert!(
+        planned[0]
+            .assertions
+            .iter()
+            .any(|assertion| matches!(assertion, CaseAssertion::SchemaHash(_))),
+        "schema hash assertions must remain enabled for medium_selective"
+    );
+}
+
+#[test]
+fn tiny_smoke_dataset_policy_keeps_exact_hash_assertions() {
+    let mut planned = vec![planned_case(
+        "scan_full_narrow",
+        "scan",
+        vec![
+            CaseAssertion::ExactResultHash("sha256:expected".to_string()),
+            CaseAssertion::SchemaHash("sha256:schema".to_string()),
+        ],
+    )];
+
+    apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TinySmoke));
 
     assert_eq!(planned.len(), 1);
     assert_eq!(planned[0].assertions.len(), 2);
-    assert!(matches!(
-        planned[0].assertions[0],
-        CaseAssertion::ExactResultHash(_)
-    ));
-    assert!(matches!(
-        planned[0].assertions[1],
-        CaseAssertion::SchemaHash(_)
-    ));
+    assert!(planned[0]
+        .assertions
+        .iter()
+        .any(|assertion| matches!(assertion, CaseAssertion::ExactResultHash(_))));
+    assert!(planned[0]
+        .assertions
+        .iter()
+        .any(|assertion| matches!(assertion, CaseAssertion::SchemaHash(_))));
 }
 
 #[tokio::test]

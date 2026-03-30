@@ -64,6 +64,10 @@ Example with all preflight checks enabled:
   main <candidate_ref> all
 ```
 
+For trusted fork SHAs, add `--candidate-fetch-url <clone-url>` or `--base-fetch-url <clone-url>` so the runner can fetch immutable refs that are not advertised by `origin`. Prefer the full 40-character SHA for these runs, or set `DELTA_RS_FETCH_REF` if you need to fetch an advertised branch/ref and then resolve an abbreviated commit from that history.
+
+Remote compare also writes a stable artifact bundle under `<remote-root>/results/compare/<suite>/<base>__<candidate>/`. Automation can upload `summary.md` directly and read `manifest.json` to locate `comparison.json` and `hash-policy.txt` without scraping stdout.
+
 The self-hosted GitHub Actions workflows enforce the same preflight contract:
 
 - `benchmark.yml` passes `--enforce-run-mode`, `--require-no-public-ipv4`, and `--require-egress-policy` directly into `./scripts/compare_branch.sh`

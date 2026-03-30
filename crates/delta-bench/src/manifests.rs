@@ -126,18 +126,21 @@ impl DatasetId {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DatasetAssertionPolicy {
-    pub relax_tpcds_exact_result_hash: bool,
+    pub relax_exact_result_hash: bool,
 }
 
 impl DatasetId {
     pub const fn assertion_policy(self) -> DatasetAssertionPolicy {
         match self {
-            Self::TpcdsDuckdb => DatasetAssertionPolicy {
-                relax_tpcds_exact_result_hash: true,
+            // Manifest exact-result hashes are authored against the default tiny_smoke corpus.
+            // Non-default dataset ids intentionally vary scale/profile and therefore change the
+            // authoritative row-level digest while still keeping the same schema contract.
+            Self::TinySmoke => DatasetAssertionPolicy {
+                relax_exact_result_hash: false,
             },
-            Self::TinySmoke | Self::MediumSelective | Self::SmallFiles | Self::ManyVersions => {
+            Self::MediumSelective | Self::SmallFiles | Self::ManyVersions | Self::TpcdsDuckdb => {
                 DatasetAssertionPolicy {
-                    relax_tpcds_exact_result_hash: false,
+                    relax_exact_result_hash: true,
                 }
             }
         }

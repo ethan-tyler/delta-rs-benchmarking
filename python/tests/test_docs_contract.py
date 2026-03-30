@@ -274,6 +274,10 @@ def test_validation_docs_match_artifact_dir_contract() -> None:
     assert "--artifact-dir" in reference
     assert "summary.md" in validation
     assert "summary.md" in reference
+    assert "--candidate-fetch-url" in compare_doc
+    assert "summary.md" in compare_doc
+    assert "comparison.json" in reference
+    assert "manifest.json" in reference
 
 
 def test_validation_docs_record_all_scan_phase_canaries() -> None:

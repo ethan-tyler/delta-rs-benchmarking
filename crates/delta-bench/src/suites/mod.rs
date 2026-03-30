@@ -155,10 +155,10 @@ pub fn apply_dataset_assertion_policy(planned: &mut [PlannedCase], dataset: Opti
     let policy = dataset
         .map(DatasetId::assertion_policy)
         .unwrap_or_else(DatasetAssertionPolicy::default);
-    if !policy.relax_tpcds_exact_result_hash {
+    if !policy.relax_exact_result_hash {
         return;
     }
-    for case in planned.iter_mut().filter(|case| case.target == "tpcds") {
+    for case in planned.iter_mut() {
         case.assertions
             .retain(|assertion| !matches!(assertion, CaseAssertion::ExactResultHash(_)));
     }

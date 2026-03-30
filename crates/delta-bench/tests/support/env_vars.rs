@@ -9,7 +9,9 @@ impl EnvVarRestoreGuard {
             .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
             .collect::<Vec<_>>();
         for (key, value) in entries {
-            std::env::set_var(key, value);
+            // Safety: call sites are expected to hold the integration-test env lock so
+            // no concurrent threads mutate process environment while overrides are active.
+            unsafe { std::env::set_var(key, value) };
         }
         Self { previous }
     }
@@ -19,9 +21,12 @@ impl Drop for EnvVarRestoreGuard {
     fn drop(&mut self) {
         for (key, value) in self.previous.drain(..) {
             if let Some(value) = value {
-                std::env::set_var(&key, value);
+                // Safety: the same env lock used during setup remains held until the
+                // restore guard is dropped, so restoration is also serialized.
+                unsafe { std::env::set_var(&key, value) };
             } else {
-                std::env::remove_var(&key);
+                // Safety: restoration runs under the same serialized test env contract.
+                unsafe { std::env::remove_var(&key) };
             }
         }
     }

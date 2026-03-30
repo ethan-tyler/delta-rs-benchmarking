@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from delta_bench_compare.hash_policy import analyze_hash_policy, render_hash_policy_text
+from delta_bench_compare.hash_policy import (
+    analyze_hash_policy,
+    render_hash_policy_report,
+    render_hash_policy_text,
+)
 
 
 def _case(
@@ -165,3 +169,56 @@ def test_render_hash_policy_text_includes_actionable_sections() -> None:
     assert "scan_pruning_miss" in output
     assert "metadata_load" in output
     assert "tpcds_q07" in output
+def test_hash_policy_report_detects_mismatch_in_later_samples() -> None:
+    baseline = {
+        "schema_version": 4,
+        "context": {"schema_version": 4},
+        "cases": [
+            {
+                "case": "scan_case",
+                "samples": [
+                    {
+                        "metrics": {
+                            "result_hash": "sha256:same",
+                            "schema_hash": "sha256:schema",
+                        }
+                    },
+                    {
+                        "metrics": {
+                            "result_hash": "sha256:baseline-later",
+                            "schema_hash": "sha256:schema",
+                        }
+                    },
+                ],
+            }
+        ],
+    }
+    candidate = {
+        "schema_version": 4,
+        "context": {"schema_version": 4},
+        "cases": [
+            {
+                "case": "scan_case",
+                "samples": [
+                    {
+                        "metrics": {
+                            "result_hash": "sha256:same",
+                            "schema_hash": "sha256:schema",
+                        }
+                    },
+                    {
+                        "metrics": {
+                            "result_hash": "sha256:candidate-later",
+                            "schema_hash": "sha256:schema",
+                        }
+                    },
+                ],
+            }
+        ],
+    }
+
+    report = render_hash_policy_report(baseline, candidate)
+
+    assert "scan_case" in report
+    assert "baseline-later" in report
+    assert "candidate-later" in report

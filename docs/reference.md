@@ -311,6 +311,8 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `<base_ref> <candidate_ref>` | —             | Positional: base and candidate branch/ref names                                                                                                                                     |
 | `--base-sha`                 | —             | Pin base to an exact commit SHA                                                                                                                                                     |
 | `--candidate-sha`            | —             | Pin candidate to an exact commit SHA                                                                                                                                                |
+| `--base-fetch-url`           | —             | Alternate remote URL used when the base SHA is not reachable from `origin`; prefer the full 40-character SHA or set `DELTA_RS_FETCH_REF` when using abbreviated SHAs             |
+| `--candidate-fetch-url`      | —             | Alternate remote URL used when the candidate SHA is not reachable from `origin`; prefer the full 40-character SHA or set `DELTA_RS_FETCH_REF` when using abbreviated SHAs        |
 | `--current-vs-main`          | —             | Compare current checkout against upstream main                                                                                                                                      |
 | `--warmup`                   | `2`           | Warmup iterations per case                                                                                                                                                          |
 | `--iters`                    | `9`           | Measured iterations per case per run                                                                                                                                                |
@@ -319,7 +321,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--measure-order`            | `alternate`   | Run interleaving: `base-first`, `candidate-first`, `alternate`                                                                                                                      |
 | `--aggregation`              | `median`      | Aggregation method: `min`, `median`, `p95`                                                                                                                                          |
 | `--compare-mode`             | `exploratory` | Comparison policy for `compare.py`: `exploratory` or `decision`                                                                                                                     |
-| `--fail-on`                  | —             | Comma-separated statuses that should force a non-zero compare exit (`expected_failure`, `improvement`, `incomparable`, `inconclusive`, `new`, `no change`, `regression`, `removed`) |
+| `--fail-on`                  | —             | Comma-separated statuses that should force a non-zero compare exit (`expected_failure`, `improvement`, `incomparable`, `inconclusive`, `new`, `no_change`, `regression`, `removed`) |
 | `--noise-threshold`          | `0.05`        | Minimum relative change to classify as regression/improvement                                                                                                                       |
 | `--remote-runner`            | —             | SSH target for remote execution                                                                                                                                                     |
 | `--remote-root`              | —             | Remote working directory                                                                                                                                                            |
@@ -331,6 +333,20 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--mode`                     | `perf`        | Benchmark mode forwarded to `bench.sh run`                                                                                                                                          |
 | `--dataset-id`               | —             | Dataset id forwarded to fixture generation and benchmark runs                                                                                                                       |
 | `--timing-phase`             | `execute`     | Timing phase forwarded to `bench.sh run`                                                                                                                                            |
+
+Compare automation artifacts are written to `results/compare/<suite>/<base_sha>__<candidate_sha>/`. The directory includes:
+
+| Artifact | Description |
+| -------- | ----------- |
+| `stdout.txt` | Plain-text compare report captured for automation |
+| `summary.md` | Markdown compare report |
+| `comparison.json` | Versioned JSON compare payload with `schema_version`, `metadata`, `summary`, and `rows` |
+| `hash-policy.txt` | Hash/schema compatibility report for the aggregated base and candidate payloads across all observed sample hashes |
+| `manifest.json` | JSON manifest with suite, SHAs, compare settings, aggregated input paths, and artifact paths |
+
+`comparison.json` schema version `1` includes top-level `schema_version`, `metadata`, `summary`, and `rows`. Each row contains `case`, `status`, `display_change`, `baseline_ms`, `candidate_ms`, and `delta_pct`.
+
+`manifest.json` contains these top-level keys: `suite`, `base_sha`, `candidate_sha`, `base_json`, `candidate_json`, `stdout_report`, `markdown_report`, `comparison_json`, `hash_policy_report`, `compare_mode`, `aggregation`, and `noise_threshold`.
 
 ### `validate_perf_harness.sh` — Trust contract verification
 
@@ -349,9 +365,10 @@ Subcommands: `select-revisions`, `build-artifacts`, `run-matrix`, `ingest-result
 | Flag                    | Default | Description                              |
 | ----------------------- | ------- | ---------------------------------------- |
 | `--results`             | —       | Target result files                      |
+| `--compare-checkouts`   | —       | Target cached compare checkouts          |
 | `--fixtures`            | —       | Target fixture data                      |
 | `--delta-rs-under-test` | —       | Target managed checkout                  |
-| `--keep-last N`         | —       | Retain N most recent result sets         |
+| `--keep-last N`         | —       | Retain N most recent result or checkout entries |
 | `--older-than-days N`   | —       | Only remove items older than N days      |
 | `--allow-outside-root`  | —       | Allow cleanup outside repo root          |
 | `--apply`               | `false` | Execute deletions (dry-run without this) |
@@ -418,6 +435,16 @@ These commands are the current repo-wide baseline for code, dependency, and self
 | `BENCH_RUNNER_MODE`         | —       | Runner mode for script-level workflows (`rust`, `python`, `all`)               |
 | `BENCH_BENCHMARK_MODE`      | `perf`  | Benchmark mode for script-level workflows (`perf`, `assert`)                   |
 | `BENCH_COMPARE_FAIL_ON`     | —       | Default `--fail-on` statuses for `compare_branch.sh` / `compare.py` automation |
+| `DELTA_BENCH_COMPARE_CHECKOUT_ROOT` | `${RUNNER_ROOT}/.delta-bench-compare-checkouts` | Root directory for per-ref prepared compare checkouts |
+
+### delta-rs checkout preparation
+
+`prepare_delta_rs.sh` supports immutable SHAs that live on a trusted alternate remote instead of `origin`. Prefer the full 40-character SHA when you use `DELTA_RS_FETCH_URL`.
+
+| Variable                      | Default       | Description                                                                              |
+| ----------------------------- | ------------- | ---------------------------------------------------------------------------------------- |
+| `DELTA_RS_FETCH_URL`          | —             | Alternate fetch URL used when `DELTA_RS_REF` is not reachable from `origin`             |
+| `DELTA_RS_FETCH_REF`          | `DELTA_RS_REF`| Optional advertised branch/ref to fetch when the checkout commit differs from the fetch target |
 
 ### Scan phase canary injection
 
@@ -469,6 +496,8 @@ Legacy `rows.jsonl` / `index.json` stores are no longer a supported primary path
 | `small_files`      | sf1   | Standard        | Many small files for optimize/vacuum testing.                            |
 | `many_versions`    | sf1   | ManyVersions    | Creates 12 commits to build version history.                             |
 | `tpcds_duckdb`     | sf1   | TpcdsDuckdb     | TPC-DS `store_sales` sourced from DuckDB. Requires `python3` + `duckdb`. |
+
+Exact-result manifest hashes are authored against the default `tiny_smoke` corpus. When you run with another dataset id, the harness keeps schema validation enabled but relaxes exact-result hash assertions at runtime because scale/profile changes legitimately alter row-level digests.
 
 ### Scale factors
 

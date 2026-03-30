@@ -40,7 +40,7 @@ This writes `results/local/scan.json` and prints a local summary table.
 ./scripts/compare_branch.sh --current-vs-main scan
 ```
 
-Results land in `results/local/scan.json`. Pass `--help` to any script for full usage details.
+Single-suite runs land in `results/local/scan.json`. Branch compare also writes a bot-friendly bundle under `results/compare/<suite>/<base>__<candidate>/` with `summary.md`, versioned `comparison.json`, `hash-policy.txt`, and `manifest.json`. Use `--candidate-fetch-url <clone-url>` when a trusted candidate SHA only exists on a fork remote; prefer the full 40-character SHA, or set `DELTA_RS_FETCH_REF` when the abbreviated SHA is not directly advertised. Pass `--help` to any script for full usage details.
 
 `bench.sh run` defaults to the `smoke` lane. Use `correctness` for correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`) and use `macro` only for macro-safe perf exploration. GitHub-hosted CI stays on smoke and correctness lanes, while self-hosted workflows are the authoritative path for macro perf, decision compare, and longitudinal automation.
 

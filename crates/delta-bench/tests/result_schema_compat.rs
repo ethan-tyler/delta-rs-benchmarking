@@ -310,7 +310,7 @@ fn schema_v5_elapsed_stats_parse_when_present() {
 }
 
 #[test]
-fn schema_v2_contention_metrics_parse_and_round_trip() {
+fn schema_v2_payload_is_rejected() {
     let payload = r#"
 {
   "schema_version": 2,
@@ -365,29 +365,10 @@ fn schema_v2_contention_metrics_parse_and_round_trip() {
 }
 "#;
 
-    let parsed: BenchRunResult =
-        serde_json::from_str(payload).expect("schema v2 with contention should parse");
-    let contention = parsed.cases[0].samples[0]
-        .metrics
-        .as_ref()
-        .and_then(|metrics| metrics.contention.as_ref())
-        .expect("contention metrics should be present");
-    assert_eq!(contention.worker_count, 2);
-    assert_eq!(contention.race_count, 3);
-    assert_eq!(contention.ops_attempted, 6);
-    assert_eq!(contention.ops_succeeded, 3);
-    assert_eq!(contention.ops_failed, 3);
-    assert_eq!(contention.conflict_delete_read, 2);
-    assert_eq!(contention.conflict_delete_delete, 1);
-
-    let serialized = serde_json::to_string(&parsed).expect("serialize round-trip");
-    let reparsed: BenchRunResult =
-        serde_json::from_str(&serialized).expect("reparse round-trip payload");
-    let reparsed_contention = reparsed.cases[0].samples[0]
-        .metrics
-        .as_ref()
-        .and_then(|metrics| metrics.contention.as_ref())
-        .expect("contention metrics should survive round-trip");
-    assert_eq!(reparsed_contention.worker_count, 2);
-    assert_eq!(reparsed_contention.conflict_delete_read, 2);
+    let err = serde_json::from_str::<BenchRunResult>(payload)
+        .expect_err("schema v2 payloads should be rejected after the v5 cutover");
+    assert!(
+        err.to_string().contains("schema_version must be 5"),
+        "unexpected error: {err}"
+    );
 }

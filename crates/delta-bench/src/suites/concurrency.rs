@@ -22,8 +22,8 @@ use crate::data::fixtures::{
 use crate::error::{BenchError, BenchResult};
 use crate::fingerprint::hash_json;
 use crate::results::{
-    CaseFailure, CaseResult, ContentionMetrics, ElapsedStats, IterationSample, RuntimeIOMetrics,
-    SampleMetrics,
+    CaseFailure, CaseResult, ContentionMetrics, ElapsedStats, IterationSample, PerfStatus,
+    RuntimeIOMetrics, SampleMetrics,
 };
 use crate::stats::compute_stats;
 use crate::storage::StorageConfig;
@@ -751,7 +751,7 @@ fn success_case_result(name: &str, samples: Vec<IterationSample>) -> CaseResult 
         case: name.to_string(),
         success: true,
         validation_passed: true,
-        perf_valid: true,
+        perf_status: PerfStatus::Trusted,
         classification: "supported".to_string(),
         elapsed_stats: elapsed_stats_from_samples(&samples),
         run_summary: None,
@@ -774,7 +774,7 @@ fn failure_case_result(name: &str, samples: Vec<IterationSample>, message: Strin
         case: name.to_string(),
         success: false,
         validation_passed: false,
-        perf_valid: false,
+        perf_status: PerfStatus::Invalid,
         classification: "supported".to_string(),
         elapsed_stats: elapsed_stats_from_samples(&samples),
         run_summary: None,

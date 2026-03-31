@@ -1948,13 +1948,14 @@ def test_public_schema_loader_preserves_nested_contention_metrics(
     from delta_bench_compare.schema import load_benchmark_payload
 
     payload = {
-        "schema_version": 2,
-        "context": {"schema_version": 2, "label": "v2"},
+        "schema_version": 5,
+        "context": {"schema_version": 5, "label": "v5"},
         "cases": [
             {
                 "case": "update_vs_compaction",
                 "success": True,
                 "classification": "supported",
+                "perf_status": "trusted",
                 "samples": [
                     {
                         "elapsed_ms": 91.0,

@@ -264,7 +264,7 @@ def compare_runs(
     invalid_cases = invalid_perf_case_names((baseline, candidate))
     if invalid_cases:
         raise ValueError(
-            "compare requires perf-valid inputs; invalid cases present: "
+            "compare requires perf_status=trusted inputs; invalid cases present: "
             + ", ".join(invalid_cases)
         )
     names = sorted(set(baseline_cases) | set(candidate_cases))
@@ -335,10 +335,10 @@ def compare_runs(
 
         if mode == "decision":
             if (
-                baseline.get("schema_version") != 4
-                or candidate.get("schema_version") != 4
+                baseline.get("schema_version") != 5
+                or candidate.get("schema_version") != 5
             ):
-                raise ValueError("decision mode requires schema v4 inputs")
+                raise ValueError("decision mode requires schema v5 inputs")
             if not b.get("compatibility_key") or not c.get("compatibility_key"):
                 raise ValueError(
                     f"decision mode requires compatibility_key for case '{name}'"

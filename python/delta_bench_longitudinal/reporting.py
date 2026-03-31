@@ -30,8 +30,14 @@ def generate_trend_reports(
 
     grouped, invalid_rows = _load_grouped_rows(Path(store_dir))
     if not grouped:
-        markdown = "# Longitudinal Benchmark Summary\n\nNo longitudinal rows found.\n"
-        html_report = _empty_html()
+        lines = ["# Longitudinal Benchmark Summary", ""]
+        if invalid_rows:
+            lines.append(f"- Invalid rows skipped: {invalid_rows}")
+            lines.append("")
+        lines.append("No longitudinal rows found.")
+        lines.append("")
+        markdown = "\n".join(lines)
+        html_report = _empty_html(invalid_rows)
         _write(markdown_path, markdown)
         _write(html_path, html_report)
         return {
@@ -237,16 +243,24 @@ def _load_grouped_rows(
     if not rows:
         return {}, 0
     grouped: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    invalid_rows = 0
     for row in rows:
         if not row.get("success"):
+            invalid_rows += 1
+            continue
+        if row.get("perf_status") != "trusted":
+            invalid_rows += 1
             continue
         if int(row.get("sample_count") or 0) <= 0:
+            invalid_rows += 1
             continue
         if row.get("median_ms") is None:
+            invalid_rows += 1
             continue
         series_id = str(
             (
                 row.get("runner"),
+                row.get("benchmark_mode"),
                 row.get("timing_phase"),
                 row.get("dataset_id"),
                 row.get("dataset_fingerprint"),
@@ -269,7 +283,7 @@ def _load_grouped_rows(
             series_id,
         )
         grouped.setdefault(key, []).append(row)
-    return grouped, 0
+    return grouped, invalid_rows
 
 
 def _markdown_summary(
@@ -437,13 +451,16 @@ def _sparkline_svg(values: list[float]) -> str:
     ).format(points=" ".join(points))
 
 
-def _empty_html() -> str:
+def _empty_html(invalid_rows: int = 0) -> str:
+    invalid_rows_html = (
+        f"<p>Invalid rows skipped: {invalid_rows}</p>" if invalid_rows else ""
+    )
     return """<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8" /><title>Longitudinal Benchmark Trends</title></head>
-<body><h1>Longitudinal Benchmark Trends</h1><p>No longitudinal rows found.</p></body>
+<body><h1>Longitudinal Benchmark Trends</h1>{invalid_rows_html}<p>No longitudinal rows found.</p></body>
 </html>
-"""
+""".format(invalid_rows_html=invalid_rows_html)
 
 
 def _write(path: Path | str, content: str) -> None:

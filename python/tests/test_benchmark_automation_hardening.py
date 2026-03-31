@@ -22,6 +22,7 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark.yml"
 NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
 VALIDATION_SCRIPT = REPO_ROOT / "scripts" / "validate_perf_harness.sh"
+PUBLISH_CONTRACT_SCRIPT = REPO_ROOT / "scripts" / "publish_contract.sh"
 VALIDATION_DOC = REPO_ROOT / "docs" / "validation.md"
 REFERENCE_DOC = REPO_ROOT / "docs" / "reference.md"
 GETTING_STARTED_DOC = REPO_ROOT / "docs" / "getting-started.md"
@@ -325,11 +326,72 @@ def test_compare_branch_supports_fail_on_passthrough() -> None:
     assert re.search(r'compare_args\+=\(--fail-on "\$\{COMPARE_FAIL_ON\}"\)', script)
 
 
+def test_compare_branch_decision_mode_requires_at_least_five_runs() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert 'if [[ "${COMPARE_MODE}" == "decision" ]]' in script
+    assert "decision mode requires --compare-runs >= 5" in script
+
+
+def test_bench_run_requires_correctness_lane_for_assert_mode() -> None:
+    script = BENCH_SH.read_text(encoding="utf-8")
+    assert 'if [[ "${benchmark_mode}" == "assert" && "${lane}" != "correctness" ]]' in script
+    assert "--mode assert requires --lane correctness" in script
+
+
 def test_perf_validation_workflow_entrypoint_exists_and_is_executable() -> None:
     assert VALIDATION_SCRIPT.exists(), "missing scripts/validate_perf_harness.sh"
     assert (
         VALIDATION_SCRIPT.stat().st_mode & 0o111
     ), "scripts/validate_perf_harness.sh must be executable"
+
+
+def test_publish_contract_entrypoint_exists_and_is_executable() -> None:
+    assert PUBLISH_CONTRACT_SCRIPT.exists(), "missing scripts/publish_contract.sh"
+    assert (
+        PUBLISH_CONTRACT_SCRIPT.stat().st_mode & 0o111
+    ), "scripts/publish_contract.sh must be executable"
+
+
+def test_publish_contract_captures_current_operator_docs_and_entrypoints(
+    tmp_path: Path,
+) -> None:
+    output_dir = tmp_path / "contract"
+    result = subprocess.run(
+        [
+            "bash",
+            str(PUBLISH_CONTRACT_SCRIPT),
+            "--output-dir",
+            str(output_dir),
+        ],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
+
+    manifest = json.loads((output_dir / "manifest.json").read_text(encoding="utf-8"))
+    published_files = set(manifest["files"])
+    expected_files = {
+        "README.md",
+        *[
+            str(path.relative_to(REPO_ROOT))
+            for path in sorted((REPO_ROOT / "docs").glob("*.md"))
+        ],
+        "bench/manifests/core_python.yaml",
+        "bench/manifests/core_rust.yaml",
+        "scripts/bench.sh",
+        "scripts/cleanup_local.sh",
+        "scripts/compare_branch.sh",
+        "scripts/longitudinal_bench.sh",
+        "scripts/publish_contract.sh",
+        "scripts/validate_perf_harness.sh",
+    }
+
+    assert expected_files <= published_files
+    for relative_path in expected_files:
+        assert (output_dir / relative_path).is_file(), relative_path
 
 
 def test_validation_script_exposes_artifact_dir_contract() -> None:
@@ -609,11 +671,11 @@ def test_compare_branch_supports_working_branch_vs_upstream_main_shortcut() -> N
     assert re.search(r"WORKING_VS_UPSTREAM_MAIN=0", script)
     assert re.search(r"UPSTREAM_REMOTE_OVERRIDE=\"\"", script)
     assert re.search(
-        r"if \(\( WORKING_VS_UPSTREAM_MAIN != 0 \)\); then[\s\S]*candidate_ref=\"\$\{working_head_sha\}\"",
+        r"if \(\(\s*WORKING_VS_UPSTREAM_MAIN != 0\s*\)\); then[\s\S]*candidate_ref=\"\$\{working_head_sha\}\"",
         script,
     )
     assert re.search(
-        r"if \(\( WORKING_VS_UPSTREAM_MAIN != 0 \)\); then[\s\S]*base_ref=\"\$\{upstream_main_sha\}\"",
+        r"if \(\(\s*WORKING_VS_UPSTREAM_MAIN != 0\s*\)\); then[\s\S]*base_ref=\"\$\{upstream_main_sha\}\"",
         script,
     )
     assert re.search(
@@ -2787,9 +2849,11 @@ def test_bench_wrapper_help_is_structured_and_readable() -> None:
 def test_bench_wrapper_supports_no_summary_table_passthrough() -> None:
     script = (REPO_ROOT / "scripts" / "bench.sh").read_text(encoding="utf-8")
     assert "--no-summary-table" in script
-    assert re.search(r"--no-summary-table\)\s+no_summary_table=1; shift 1 ;;", script)
     assert re.search(
-        r"if \(\( no_summary_table != 0 \)\); then\s+run_args\+=\(--no-summary-table\)",
+        r"--no-summary-table\)\s+no_summary_table=1\s+shift 1\s+;;", script
+    )
+    assert re.search(
+        r"if \(\(\s*no_summary_table != 0\s*\)\); then\s+run_args\+=\(--no-summary-table\)",
         script,
     )
 

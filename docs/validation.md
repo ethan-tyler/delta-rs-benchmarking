@@ -12,6 +12,8 @@ The trust contract is split deliberately:
 
 Use this page as the stable operator guide, and use the generated artifact under `results/validation/` as the latest machine-local evidence.
 
+When you need to publish the current operator-facing contract itself, run `./scripts/publish_contract.sh`. It snapshots the current docs, manifests, and wrapper entrypoints into `results/contracts/`.
+
 The authoritative scan decision manifest is intentionally narrower than the raw suite: `scan_pruning_miss` is currently disabled from `core_rust.yaml`, so it must not be used for authoritative perf conclusions until requalified.
 
 ## Verification Matrix
@@ -23,7 +25,7 @@ The authoritative scan decision manifest is intentionally narrower than the raw 
 | Correctness validation lane | GitHub-hosted | `.github/workflows/ci.yml` hosted benchmark validation job | Semantic/hash-backed assertions hold for trusted correctness suites |
 | Branch compare and decision runs | Self-hosted | `benchmark.yml`, `benchmark-prerelease.yml`, `./scripts/compare_branch.sh` | Macro perf claims only on hardened runners |
 | Criterion scan microbench | Self-hosted or local trusted host | `cargo bench -p delta-bench --bench scan_phase_bench` | PR-sensitive scan phases stay observable |
-| Longitudinal ingest/report/prune | Self-hosted | `longitudinal-nightly.yml`, `longitudinal-release-history.yml` | Only schema v4 identity-rich results enter the store |
+| Longitudinal ingest/report/prune | Self-hosted | `longitudinal-nightly.yml`, `longitudinal-release-history.yml` | Only schema v5 identity-rich results enter the store |
 | Trust-contract rerun | Local operator or self-hosted runner | `./scripts/validate_perf_harness.sh` | Fresh evidence in `results/validation/<timestamp>/summary.md` or a caller-selected artifact dir |
 
 ## Latest Evidence
@@ -61,4 +63,4 @@ By default the script writes a timestamped artifact tree under `results/validati
 2. Run `cargo test --locked` and `python3 -m pytest -q python/tests`.
 3. Run `./scripts/validate_perf_harness.sh` to refresh the focused trust-contract evidence.
 4. Inspect the generated `summary.md` in the chosen artifact directory before making any benchmark trust claim.
-5. Treat any smoke/correctness failure, scan phase canary drift, or schema-v4 ingest rejection as a release blocker until explained or fixed.
+5. Treat any smoke/correctness failure, scan phase canary drift, or schema-v5 ingest rejection as a release blocker until explained or fixed.

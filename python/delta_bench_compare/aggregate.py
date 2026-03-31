@@ -90,6 +90,15 @@ def _run_summary_from_case(case: dict[str, Any]) -> dict[str, Any]:
     return _build_run_summary(case.get("samples") or [])
 
 
+def _merge_perf_status(variants: list[dict[str, Any]]) -> str:
+    statuses = {str(variant.get("perf_status")) for variant in variants}
+    if statuses == {"trusted"}:
+        return "trusted"
+    if "invalid" in statuses:
+        return "invalid"
+    return "validation_only"
+
+
 def _merge_case_variants(variants: list[dict[str, Any]]) -> dict[str, Any]:
     merged = copy.deepcopy(variants[0])
     merged_samples: list[dict[str, Any]] = []
@@ -100,9 +109,11 @@ def _merge_case_variants(variants: list[dict[str, Any]]) -> dict[str, Any]:
     merged["validation_passed"] = all(
         bool(variant.get("validation_passed")) for variant in variants
     )
-    merged["perf_valid"] = all(bool(variant.get("perf_valid")) for variant in variants)
+    merged["perf_status"] = _merge_perf_status(variants)
     merged["elapsed_stats"] = (
-        _compute_elapsed_stats(merged_samples) if merged["perf_valid"] else None
+        _compute_elapsed_stats(merged_samples)
+        if merged["perf_status"] == "trusted"
+        else None
     )
 
     classifications = {
@@ -144,7 +155,7 @@ def _merge_case_variants(variants: list[dict[str, Any]]) -> dict[str, Any]:
     return merged
 
 
-def _aggregate_payloads_v4(
+def _aggregate_payloads_v5(
     payloads: list[dict[str, Any]], label: str
 ) -> dict[str, Any]:
     first = copy.deepcopy(payloads[0])
@@ -199,54 +210,13 @@ def aggregate_payloads(payloads: list[dict[str, Any]], label: str) -> dict[str, 
     invalid_cases = invalid_perf_case_names(payloads)
     if invalid_cases:
         raise ValueError(
-            "aggregate requires perf-valid inputs; invalid cases present: "
+            "aggregate requires perf_status=trusted inputs; invalid cases present: "
             + ", ".join(invalid_cases)
         )
 
-    if int(payloads[0].get("schema_version") or 0) >= 4:
-        return _aggregate_payloads_v4(payloads, label)
-
-    first = copy.deepcopy(payloads[0])
-    first_case_order = [case["case"] for case in first.get("cases", [])]
-    first_case_set = set(first_case_order)
-    for payload in payloads[1:]:
-        if payload.get("schema_version") != first.get("schema_version"):
-            raise ValueError("cannot aggregate payloads with different schema versions")
-        if payload.get("context", {}).get("suite") != first.get("context", {}).get(
-            "suite"
-        ):
-            raise ValueError("cannot aggregate payloads across different suites")
-        ensure_matching_contexts(first, payload)
-        payload_case_set = {case["case"] for case in payload.get("cases", [])}
-        if payload_case_set != first_case_set:
-            missing = sorted(first_case_set - payload_case_set)
-            extra = sorted(payload_case_set - first_case_set)
-            raise ValueError(
-                f"case set mismatch across payloads; missing={missing}, extra={extra}"
-            )
-
-    first["context"]["label"] = label
-    first["context"]["iterations"] = sum(
-        int(payload.get("context", {}).get("iterations", 0)) for payload in payloads
-    )
-
-    out_cases: list[dict[str, Any]] = []
-
-    for case_name in first_case_order:
-        variants: list[dict[str, Any]] = []
-        for payload in payloads:
-            lookup = {case["case"]: case for case in payload.get("cases", [])}
-            if case_name not in lookup:
-                raise ValueError(
-                    f"case '{case_name}' missing from one or more payloads"
-                )
-            variants.append(lookup[case_name])
-
-        merged = _merge_case_variants(variants)
-        out_cases.append(merged)
-
-    first["cases"] = out_cases
-    return first
+    if int(payloads[0].get("schema_version") or 0) != 5:
+        raise ValueError("aggregate requires schema v5 inputs")
+    return _aggregate_payloads_v5(payloads, label)
 
 
 def main() -> None:

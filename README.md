@@ -4,7 +4,7 @@ Benchmark harness for [delta-rs](https://github.com/delta-io/delta-rs). Run repr
 
 Anyone can use this repository, but it is maintained as tooling for `delta-rs` performance work rather than as a general community project. Changes to the harness should come through reviewed pull requests that support `delta-rs` benchmarking needs.
 
-This repository is separate from delta-rs itself. It manages a delta-rs checkout, generates deterministic test data, runs benchmark suites, and writes structured JSON results.
+This repository is separate from delta-rs itself. It manages a delta-rs checkout, generates deterministic test data, runs benchmark suites, and writes structured schema v5 JSON results.
 
 ## Quick Start
 
@@ -44,6 +44,8 @@ Single-suite runs land in `results/local/scan.json`. Branch compare also writes 
 
 `bench.sh run` defaults to the `smoke` lane. Use `correctness` for correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`) and use `macro` only for macro-safe perf exploration. GitHub-hosted CI stays on smoke and correctness lanes, while self-hosted workflows are the authoritative path for macro perf, decision compare, and longitudinal automation.
 
+When you need a portable copy of the current operator contract, publish it with `./scripts/publish_contract.sh`. That snapshots the current docs, manifests, and wrapper scripts into `results/contracts/`.
+
 For Python interop coverage (`--runner all`), install dependencies first: `python3 -m pip install -r python/requirements-audit.txt`
 
 ## What You Can Do
@@ -67,6 +69,7 @@ For Python interop coverage (`--runner all`), install dependencies first: `pytho
 | `./scripts/longitudinal_bench.sh`    | Longitudinal matrix, ingest, reporting, and retention                |
 | `./scripts/cleanup_local.sh`         | Clean fixtures, results, and checkout artifacts (dry-run by default) |
 | `./scripts/validate_perf_harness.sh` | Trust-contract verification for perf claims                          |
+| `./scripts/publish_contract.sh`      | Publish the current operator/docs contract bundle                    |
 
 ## Benchmark Coverage
 

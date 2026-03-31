@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{de, Deserialize, Deserializer, Serialize};
 
-pub const RESULT_SCHEMA_VERSION: u32 = 4;
+pub const RESULT_SCHEMA_VERSION: u32 = 5;
 pub const FAILURE_KIND_EXECUTION_ERROR: &str = "execution_error";
 pub const FAILURE_KIND_ASSERTION_MISMATCH: &str = "assertion_mismatch";
 pub const FAILURE_KIND_CONTEXT_MISMATCH: &str = "context_mismatch";
@@ -12,11 +12,11 @@ where
     D: Deserializer<'de>,
 {
     let value = u32::deserialize(deserializer)?;
-    if matches!(value, 2 | 3 | RESULT_SCHEMA_VERSION) {
+    if value == RESULT_SCHEMA_VERSION {
         Ok(value)
     } else {
         Err(de::Error::custom(format!(
-            "schema_version must be one of: 2, 3, {RESULT_SCHEMA_VERSION} (found {value})"
+            "schema_version must be {RESULT_SCHEMA_VERSION} (found {value})"
         )))
     }
 }
@@ -81,7 +81,7 @@ pub fn render_run_summary_table(cases: &[CaseResult]) -> String {
     for case in cases {
         let status = match (
             case.classification.as_str(),
-            case.perf_valid,
+            case.perf_status.is_trusted(),
             case.validation_passed,
         ) {
             ("expected_failure", _, _) => "expected_failure",
@@ -89,7 +89,7 @@ pub fn render_run_summary_table(cases: &[CaseResult]) -> String {
             (_, false, true) => "validated",
             _ => "invalid",
         };
-        let stats = if case.perf_valid {
+        let stats = if case.perf_status.is_trusted() {
             case.elapsed_stats.as_ref()
         } else {
             None
@@ -516,14 +516,31 @@ pub struct RunSummary {
     pub fidelity_fingerprint: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PerfStatus {
+    Trusted,
+    ValidationOnly,
+    Invalid,
+}
+
+impl PerfStatus {
+    pub const fn is_trusted(&self) -> bool {
+        matches!(self, Self::Trusted)
+    }
+
+    pub const fn is_validation_only(&self) -> bool {
+        matches!(self, Self::ValidationOnly)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CaseResult {
     pub case: String,
     pub success: bool,
     #[serde(default = "default_true")]
     pub validation_passed: bool,
-    #[serde(default = "default_true")]
-    pub perf_valid: bool,
+    pub perf_status: PerfStatus,
     #[serde(deserialize_with = "deserialize_case_classification")]
     pub classification: String,
     pub samples: Vec<IterationSample>,
@@ -646,7 +663,7 @@ pub fn build_run_summary(
 #[cfg(test)]
 mod tests {
     use super::{
-        render_run_summary_table, CaseFailure, CaseResult, ElapsedStats,
+        render_run_summary_table, CaseFailure, CaseResult, ElapsedStats, PerfStatus,
         FAILURE_KIND_EXECUTION_ERROR,
     };
 
@@ -655,7 +672,7 @@ mod tests {
             case: name.to_string(),
             success: true,
             validation_passed: true,
-            perf_valid: true,
+            perf_status: PerfStatus::Trusted,
             classification: "supported".to_string(),
             samples: Vec::new(),
             elapsed_stats: Some(ElapsedStats {
@@ -699,7 +716,7 @@ mod tests {
             case: "merge_upsert_10pct".to_string(),
             success: false,
             validation_passed: false,
-            perf_valid: false,
+            perf_status: PerfStatus::Invalid,
             classification: "supported".to_string(),
             samples: Vec::new(),
             elapsed_stats: None,
@@ -729,7 +746,7 @@ mod tests {
             case: "scan_filter_flag".to_string(),
             success: true,
             validation_passed: true,
-            perf_valid: false,
+            perf_status: PerfStatus::ValidationOnly,
             classification: "supported".to_string(),
             samples: Vec::new(),
             elapsed_stats: None,

@@ -171,8 +171,8 @@ def test_render_hash_policy_text_includes_actionable_sections() -> None:
     assert "tpcds_q07" in output
 def test_hash_policy_report_detects_mismatch_in_later_samples() -> None:
     baseline = {
-        "schema_version": 4,
-        "context": {"schema_version": 4},
+        "schema_version": 5,
+        "context": {"schema_version": 5},
         "cases": [
             {
                 "case": "scan_case",
@@ -194,8 +194,8 @@ def test_hash_policy_report_detects_mismatch_in_later_samples() -> None:
         ],
     }
     candidate = {
-        "schema_version": 4,
-        "context": {"schema_version": 4},
+        "schema_version": 5,
+        "context": {"schema_version": 5},
         "cases": [
             {
                 "case": "scan_case",

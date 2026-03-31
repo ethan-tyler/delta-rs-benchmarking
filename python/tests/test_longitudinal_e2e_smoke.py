@@ -70,15 +70,16 @@ def _make_fake_executor(
         out_dir = results_dir / label
         out_dir.mkdir(parents=True, exist_ok=True)
         result = {
-            "schema_version": 4,
+            "schema_version": 5,
             "context": {
-                "schema_version": 4,
+                "schema_version": 5,
                 "label": label,
                 "git_sha": artifact.revision,
                 "created_at": "2026-02-02T00:00:00+00:00",
                 "host": "host",
                 "suite": suite,
                 "runner": "rust",
+                "benchmark_mode": "perf",
                 "scale": scale,
                 "timing_phase": "execute",
                 "dataset_id": "tiny_smoke",
@@ -100,7 +101,7 @@ def _make_fake_executor(
                     "classification": "supported",
                     "success": True,
                     "validation_passed": True,
-                    "perf_valid": True,
+                    "perf_status": "trusted",
                     "samples": [{"elapsed_ms": 100.0}],
                     "run_summary": {
                         "sample_count": 1,

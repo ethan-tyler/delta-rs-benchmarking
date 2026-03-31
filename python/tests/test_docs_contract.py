@@ -52,7 +52,7 @@ REQUIRED_SECTIONS: dict[str, list[str]] = {
         "## CLI Commands and Flags",
         "## Environment Variables",
         "## Datasets and Scales",
-        "## Result Schema v4",
+        "## Result Schema v5",
     ],
     "docs/architecture.md": [
         "## Key Concepts",

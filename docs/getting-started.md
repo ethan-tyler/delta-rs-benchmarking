@@ -120,17 +120,17 @@ This runs the smoke lane across every suite (scan, write, merge, delete_update, 
 If you want trusted semantic validation for the correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`), switch to the correctness lane:
 
 ```bash
-./scripts/bench.sh run --suite write --runner rust --lane correctness --dataset-id tiny_smoke --label assert-smoke
+./scripts/bench.sh run --suite write --runner rust --lane correctness --mode assert --dataset-id tiny_smoke --label assert-correctness
 ```
 
-If you switch those same suites to `--lane macro`, the workload still runs, but the result is marked validation-only (`perf_valid=false`) so compare/reporting will not treat it as trusted perf evidence.
+If you switch those same suites to `--lane macro`, the workload still runs, but the result is marked validation-only (`perf_status=validation_only`) so compare/reporting will not treat it as trusted perf evidence.
 
 ### Step 3: Read the output
 
 You should see two things:
 
 1. **Terminal summary table** showing each case with its median time, status, and key metrics.
-2. **JSON result files** at `results/local/<suite>.json` containing full schema v4 results with lane, compatibility identity, and per-run summaries.
+2. **JSON result files** at `results/local/<suite>.json` containing full schema v5 results with lane, benchmark mode, compatibility identity, and per-run summaries.
 
 The JSON files are the primary output. They include context metadata (host, git SHA, timestamp), per-case outcomes, and per-sample metrics like `rows_processed`, `bytes_processed`, and timing statistics. See [reference.md](reference.md) for the complete schema.
 

@@ -27,13 +27,19 @@ def _run(
     scale: str = "sf1",
     backend_profile: str = "local",
     storage_backend: str = "local",
+    lane: str = "macro",
+    measurement_kind: str = "phase_breakdown",
+    validation_level: str = "operational",
+    harness_revision: str = "harness-rev",
+    fixture_recipe_hash: str = "sha256:recipe",
+    fidelity_fingerprint: str = "sha256:fidelity",
 ) -> dict:
     normalized_cases: list[dict] = []
     for case in cases:
         normalized_case = {
             "success": True,
             "validation_passed": True,
-            "perf_valid": True,
+            "perf_status": "trusted",
             "classification": "supported",
             **case,
         }
@@ -41,9 +47,9 @@ def _run(
             normalized_case["classification"] = case["classification"]
         normalized_cases.append(normalized_case)
     return {
-        "schema_version": 3,
+        "schema_version": 5,
         "context": {
-            "schema_version": 3,
+            "schema_version": 5,
             "label": "test",
             "suite": "scan",
             "benchmark_mode": benchmark_mode,
@@ -54,6 +60,12 @@ def _run(
             "scale": scale,
             "storage_backend": storage_backend,
             "backend_profile": backend_profile,
+            "lane": lane,
+            "measurement_kind": measurement_kind,
+            "validation_level": validation_level,
+            "harness_revision": harness_revision,
+            "fixture_recipe_hash": fixture_recipe_hash,
+            "fidelity_fingerprint": fidelity_fingerprint,
         },
         "cases": normalized_cases,
     }
@@ -79,7 +91,7 @@ def _run_v4(
         normalized_case = {
             "success": True,
             "validation_passed": True,
-            "perf_valid": True,
+            "perf_status": "trusted",
             "classification": "supported",
             "suite_manifest_hash": "sha256:manifest",
             "case_definition_hash": f"sha256:{case['case']}-def",
@@ -99,11 +111,12 @@ def _run_v4(
         }
         normalized_cases.append(normalized_case)
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "context": {
-            "schema_version": 4,
+            "schema_version": 5,
             "label": "test",
             "suite": "scan",
+            "benchmark_mode": "perf",
             "runner": "rust",
             "scale": "sf1",
             "storage_backend": "local",
@@ -195,7 +208,7 @@ def test_compare_runs_rejects_invalid_perf_cases() -> None:
                 "case": "a",
                 "success": False,
                 "validation_passed": False,
-                "perf_valid": False,
+                "perf_status": "invalid",
                 "failure_kind": "assertion_mismatch",
                 "failure": {"message": "hash mismatch"},
                 "samples": [],
@@ -204,7 +217,7 @@ def test_compare_runs_rejects_invalid_perf_cases() -> None:
     )
     cand = _run([{"case": "a", "samples": [{"elapsed_ms": 90.0}]}])
 
-    with pytest.raises(ValueError, match="perf-valid"):
+    with pytest.raises(ValueError, match="perf_status=trusted"):
         compare_runs(base, cand, threshold=0.05)
 
 
@@ -693,7 +706,7 @@ def test_aggregate_payloads_reject_invalid_perf_cases() -> None:
                 "case": "scan_case",
                 "success": False,
                 "validation_passed": False,
-                "perf_valid": False,
+                "perf_status": "invalid",
                 "failure_kind": "execution_error",
                 "failure": {"message": "boom"},
                 "samples": [],
@@ -702,7 +715,7 @@ def test_aggregate_payloads_reject_invalid_perf_cases() -> None:
     )
     run_b = _run([{"case": "scan_case", "samples": [{"elapsed_ms": 90.0}]}])
 
-    with pytest.raises(ValueError, match="perf-valid"):
+    with pytest.raises(ValueError, match="perf_status=trusted"):
         aggregate_payloads([run_a, run_b], label="merged-run")
 
 
@@ -887,7 +900,7 @@ def test_compare_cli_rejects_invalid_perf_input_without_traceback(
                 "case": "scan_case",
                 "success": False,
                 "validation_passed": False,
-                "perf_valid": False,
+                "perf_status": "invalid",
                 "failure_kind": "assertion_mismatch",
                 "failure": {"message": "hash mismatch"},
                 "samples": [],
@@ -905,7 +918,7 @@ def test_compare_cli_rejects_invalid_perf_input_without_traceback(
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert "compare requires perf-valid inputs" in result.stderr
+    assert "compare requires perf_status=trusted inputs" in result.stderr
     assert "Traceback" not in result.stderr
 
 
@@ -1798,16 +1811,64 @@ def test_load_rejects_schema_v1_payload(tmp_path: Path) -> None:
         _load(path)
 
 
-def test_load_rejects_missing_case_classification(tmp_path: Path) -> None:
+def test_load_rejects_schema_v4_payload(tmp_path: Path) -> None:
     payload = {
-        "schema_version": 3,
-        "context": {"schema_version": 3, "label": "v3"},
+        "schema_version": 4,
+        "context": {"schema_version": 4, "label": "v4"},
+        "cases": [],
+    }
+    path = tmp_path / "v4.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="schema_version"):
+        _load(path)
+
+
+def test_load_rejects_missing_perf_status(tmp_path: Path) -> None:
+    payload = {
+        "schema_version": 5,
+        "context": {
+            "schema_version": 5,
+            "label": "v5",
+            "suite": "scan",
+            "runner": "rust",
+            "scale": "sf1",
+            "storage_backend": "local",
+            "timing_phase": "execute",
+            "dataset_fingerprint": "sha256:fixture",
+            "lane": "macro",
+            "measurement_kind": "phase_breakdown",
+            "validation_level": "operational",
+            "harness_revision": "harness-rev",
+            "fixture_recipe_hash": "sha256:recipe",
+        },
         "cases": [
             {
                 "case": "a",
                 "success": True,
                 "validation_passed": True,
-                "perf_valid": True,
+                "classification": "supported",
+                "samples": [],
+            }
+        ],
+    }
+    path = tmp_path / "missing-perf-status.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="perf_status"):
+        _load(path)
+
+
+def test_load_rejects_missing_case_classification(tmp_path: Path) -> None:
+    payload = {
+        "schema_version": 5,
+        "context": {"schema_version": 5, "label": "v5"},
+        "cases": [
+            {
+                "case": "a",
+                "success": True,
+                "validation_passed": True,
+                "perf_status": "trusted",
                 "samples": [],
             }
         ],
@@ -1821,14 +1882,14 @@ def test_load_rejects_missing_case_classification(tmp_path: Path) -> None:
 
 def test_load_rejects_unknown_case_classification(tmp_path: Path) -> None:
     payload = {
-        "schema_version": 3,
-        "context": {"schema_version": 3, "label": "v3"},
+        "schema_version": 5,
+        "context": {"schema_version": 5, "label": "v5"},
         "cases": [
             {
                 "case": "a",
                 "success": True,
                 "validation_passed": True,
-                "perf_valid": True,
+                "perf_status": "trusted",
                 "classification": "experimental",
                 "samples": [],
             }
@@ -1843,14 +1904,14 @@ def test_load_rejects_unknown_case_classification(tmp_path: Path) -> None:
 
 def test_load_rejects_duplicate_case_ids(tmp_path: Path) -> None:
     payload = {
-        "schema_version": 3,
-        "context": {"schema_version": 3, "label": "v3"},
+        "schema_version": 5,
+        "context": {"schema_version": 5, "label": "v5"},
         "cases": [
             {
                 "case": "duplicate",
                 "success": True,
                 "validation_passed": True,
-                "perf_valid": True,
+                "perf_status": "trusted",
                 "classification": "supported",
                 "samples": [],
             },
@@ -1858,7 +1919,7 @@ def test_load_rejects_duplicate_case_ids(tmp_path: Path) -> None:
                 "case": "duplicate",
                 "success": True,
                 "validation_passed": True,
-                "perf_valid": True,
+                "perf_status": "trusted",
                 "classification": "supported",
                 "samples": [],
             },

@@ -1,4 +1,4 @@
-use crate::results::{CaseFailure, CaseResult, FAILURE_KIND_ASSERTION_MISMATCH};
+use crate::results::{CaseFailure, CaseResult, PerfStatus, FAILURE_KIND_ASSERTION_MISMATCH};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CaseAssertion {
@@ -82,7 +82,7 @@ fn assert_expected_error_contains(case: &mut CaseResult, needle: &str) {
     if failure.message.contains(needle) {
         case.success = true;
         case.validation_passed = true;
-        case.perf_valid = false;
+        case.perf_status = PerfStatus::ValidationOnly;
         case.classification = "expected_failure".to_string();
     }
 }
@@ -116,7 +116,7 @@ fn assert_version_monotonicity(case: &mut CaseResult) {
 fn fail_case(case: &mut CaseResult, message: String) {
     case.success = false;
     case.validation_passed = false;
-    case.perf_valid = false;
+    case.perf_status = PerfStatus::Invalid;
     case.elapsed_stats = None;
     case.failure_kind = Some(FAILURE_KIND_ASSERTION_MISMATCH.to_string());
     case.failure = Some(CaseFailure { message });

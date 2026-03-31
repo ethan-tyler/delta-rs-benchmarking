@@ -29,11 +29,11 @@ The fastest way to compare your current checkout against upstream `main`:
 
 This builds and benchmarks both your current checkout and the latest remote `main`, then prints a grouped report showing regressions, improvements, stable cases, and inconclusive results.
 
-The compare pipeline runs the macro lane in `--mode perf`. By default `compare_branch.sh` uses `--compare-mode exploratory`, which works for same-machine investigation but not automatic pass/fail decisions. Decision mode requires schema v4 payloads with complete compatibility identity.
+The compare pipeline runs the macro lane in `--mode perf`. By default `compare_branch.sh` uses `--compare-mode exploratory`, which works for same-machine investigation but not automatic pass/fail decisions. Decision mode requires schema v5 payloads with complete compatibility identity and at least five measured runs per ref.
 
 Before treating a machine or workflow as trustworthy for perf claims, rerun `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
 
-> **Automation scope.** PR comments support `run benchmark scan` (exploratory) and `run benchmark decision scan` (decision-grade). Automated macro perf is curated to `scan` only — specifically `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` is disabled until requalified. Stateful Rust suites are correctness-trusted; forcing them through macro lane produces operational but not perf-valid results. GitHub-hosted CI stays on smoke and correctness lanes.
+> **Automation scope.** PR comments support `run benchmark scan` (exploratory) and `run benchmark decision scan` (decision-grade). Automated macro perf is curated to `scan` only — specifically `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` is disabled until requalified. Stateful Rust suites are correctness-trusted; forcing them through macro lane produces operational but not `perf_status=trusted` results. GitHub-hosted CI stays on smoke and correctness lanes.
 
 ## Comparison Methods
 
@@ -110,11 +110,11 @@ These flags control the measurement itself:
 | `--warmup`          | `2`           | Warmup iterations per case (not measured).                                                                                                    |
 | `--iters`           | `9`           | Measured iterations per case per run.                                                                                                         |
 | `--prewarm-iters`   | `1`           | Unreported warmup iterations per ref (run before any measured iterations).                                                                    |
-| `--compare-runs`    | `3`           | Number of independent measured runs per ref before aggregation. Exploratory mode can use this default; decision mode should use at least `5`. |
+| `--compare-runs`    | `3`           | Number of independent measured runs per ref before aggregation. Exploratory mode can use this default; decision mode hard-requires at least `5`. |
 | `--measure-order`   | `alternate`   | Run interleaving: `base-first`, `candidate-first`, or `alternate`.                                                                            |
 | `--aggregation`     | `median`      | How to pick the representative sample: `min`, `median`, or `p95`.                                                                             |
 | `--noise-threshold` | `0.05`        | Minimum relative change to classify as regression or improvement.                                                                             |
-| `--compare-mode`    | `exploratory` | Comparison policy: `exploratory` for investigation, `decision` for run-level bootstrap classification on schema v4 payloads.                  |
+| `--compare-mode`    | `exploratory` | Comparison policy: `exploratory` for investigation, `decision` for run-level bootstrap classification on schema v5 payloads.                  |
 | `--fail-on`         | —             | Comma-separated compare statuses that should exit non-zero after rendering (used by decision automation).                                     |
 | `--mode`            | `perf`        | Benchmark mode forwarded to `bench.sh run`. Branch comparison should stay on `perf`.                                                          |
 | `--dataset-id`      | —             | Dataset id forwarded to fixture generation and benchmark runs.                                                                                |
@@ -192,7 +192,7 @@ Freshness rules for trustworthy compare output:
 
 - If `fixture_recipe_hash`, `dataset_fingerprint`, or `compatibility_key` differs, treat the artifact pair as incomparable and rerun with fresh fixtures.
 - If a case's `exact_result_hash` or `schema_hash` assertions are stale, refresh them from a trusted validation run before treating new perf artifacts as authoritative.
-- `--mode assert` is for semantic validation only. It is intentionally rejected by `compare_branch.sh` because assert-only artifacts cannot support perf conclusions.
+- `--mode assert` is for semantic validation only, and `bench.sh` requires it to run with `--lane correctness`. `compare_branch.sh` intentionally rejects assert-only artifacts because they cannot support perf conclusions.
 
 ## Reading the Report
 
@@ -226,4 +226,4 @@ For the complete list of metrics that may appear in the report, see [Reference](
 
 - **Track trends over time** -- see [Longitudinal Benchmarking](longitudinal.md) for regression detection across many revisions.
 - **Run on dedicated hardware** -- see [Cloud Runner](cloud-runner.md) for noise-isolated benchmarks on hardened infrastructure.
-- **Understand the result format** -- see [Reference](reference.md#result-schema-v4) for the complete schema v4 field listing.
+- **Understand the result format** -- see [Reference](reference.md#result-schema-v5) for the complete schema v5 field listing.

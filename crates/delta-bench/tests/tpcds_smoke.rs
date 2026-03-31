@@ -41,9 +41,9 @@ async fn tpcds_smoke_produces_deterministic_case_names_and_json_shape() {
     );
 
     let output = BenchRunResult {
-        schema_version: 4,
+        schema_version: 5,
         context: BenchContext {
-            schema_version: 4,
+            schema_version: 5,
             label: "smoke".to_string(),
             git_sha: Some("deadbeef".to_string()),
             created_at: Utc::now(),

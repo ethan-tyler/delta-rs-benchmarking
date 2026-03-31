@@ -8,7 +8,7 @@ use crate::cli::BenchmarkLane;
 use crate::error::{BenchError, BenchResult};
 use crate::results::{
     validate_case_classification, CaseFailure, CaseResult, ElapsedStats, IterationSample,
-    RuntimeIOMetrics, SampleMetrics, FAILURE_KIND_EXECUTION_ERROR,
+    PerfStatus, RuntimeIOMetrics, SampleMetrics, FAILURE_KIND_EXECUTION_ERROR,
 };
 use crate::stats::compute_stats;
 use crate::storage::StorageConfig;
@@ -127,7 +127,7 @@ pub async fn run(
                 case,
                 success: true,
                 validation_passed: true,
-                perf_valid: false,
+                perf_status: PerfStatus::ValidationOnly,
                 classification: "expected_failure".to_string(),
                 samples: Vec::new(),
                 elapsed_stats: None,
@@ -240,7 +240,7 @@ async fn run_case(
                     case: case.to_string(),
                     success: false,
                     validation_passed: false,
-                    perf_valid: false,
+                    perf_status: PerfStatus::Invalid,
                     classification,
                     elapsed_stats: None,
                     run_summary: None,
@@ -266,7 +266,7 @@ async fn run_case(
         case: case.to_string(),
         success: true,
         validation_passed: true,
-        perf_valid: true,
+        perf_status: PerfStatus::Trusted,
         classification,
         elapsed_stats: elapsed_stats_from_samples(&samples),
         run_summary: None,

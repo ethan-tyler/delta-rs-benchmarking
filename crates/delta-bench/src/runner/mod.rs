@@ -3,8 +3,8 @@ use std::{future::Future, time::Duration};
 
 pub use crate::cli::TimingPhase;
 use crate::results::{
-    build_run_summary, CaseFailure, CaseResult, ElapsedStats, IterationSample, SampleMetrics,
-    FAILURE_KIND_EXECUTION_ERROR, FAILURE_KIND_UNSUPPORTED,
+    build_run_summary, CaseFailure, CaseResult, ElapsedStats, IterationSample, PerfStatus,
+    SampleMetrics, FAILURE_KIND_EXECUTION_ERROR, FAILURE_KIND_UNSUPPORTED,
 };
 use crate::stats::compute_stats;
 
@@ -502,7 +502,7 @@ fn success_case_result(name: &str, samples: Vec<IterationSample>) -> CaseResult 
         case: name.to_string(),
         success: true,
         validation_passed: true,
-        perf_valid: true,
+        perf_status: PerfStatus::Trusted,
         classification: "supported".to_string(),
         elapsed_stats: elapsed_stats_from_samples(&samples),
         run_summary: Some(run_summary),
@@ -525,7 +525,7 @@ fn failure_case_result(name: &str, samples: Vec<IterationSample>, message: Strin
         case: name.to_string(),
         success: false,
         validation_passed: false,
-        perf_valid: false,
+        perf_status: PerfStatus::Invalid,
         classification: "supported".to_string(),
         elapsed_stats: None,
         run_summary: Some(build_run_summary(&samples, None, None)),
@@ -552,7 +552,7 @@ fn unsupported_case_result(
         case: name.to_string(),
         success: false,
         validation_passed: false,
-        perf_valid: false,
+        perf_status: PerfStatus::Invalid,
         classification: "supported".to_string(),
         elapsed_stats: None,
         run_summary: Some(build_run_summary(&samples, None, None)),

@@ -8,7 +8,7 @@ How the benchmark harness is structured, how data flows through it, and what con
 - [Components](#components)
 - [Data Flow](#data-flow)
 - [Longitudinal State and Storage](#longitudinal-state-and-storage)
-- [Result Schema v4](#result-schema-v4)
+- [Result Schema v5](#result-schema-v5)
 - [Benchmark Coverage](#benchmark-coverage)
 - [Reproducibility Controls](#reproducibility-controls)
 - [Advanced Fixture Profiles](#advanced-fixture-profiles)
@@ -23,7 +23,7 @@ A quick orientation on the most important terms. See [Reference](reference.md#gl
 | **Case**      | An individual benchmark within a suite, run for warmup + measured iterations.                 |
 | **Runner**    | Execution lane: `rust`, `python`, or `all`.                                                   |
 | **Fixture**   | Deterministic test data generated from a seed. Produces Delta tables and row snapshots.       |
-| **Schema v4** | The normalized JSON result format used by authoritative benchmark output.                     |
+| **Schema v5** | The normalized JSON result format used by authoritative benchmark output.                     |
 | **Manifest**  | A YAML file declaring which cases to execute and what assertions to validate.                 |
 
 ## Components
@@ -42,7 +42,7 @@ The harness is organized into three layers: execution, comparison/analysis, and 
 
 | Component                    | Description                                                                                                                       |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `python/delta_bench_compare` | Result comparison and rendering. Reads schema v3/v4 JSON, but decision mode requires schema v4 and strict compatibility identity. |
+| `python/delta_bench_compare` | Result comparison and rendering. Reads schema v5 JSON and enforces strict compatibility identity for compare and aggregation. |
 | `python/delta_bench_interop` | Python interop benchmark cases using pandas, polars, and pyarrow.                                                                 |
 | `python/delta_bench_tpcds`   | DuckDB-backed `store_sales` fixture generation script for the `tpcds_duckdb` dataset.                                             |
 
@@ -55,6 +55,7 @@ The harness is organized into three layers: execution, comparison/analysis, and 
 | `scripts/bench.sh`                                                         | Wrapper for `delta-bench` subcommands (data, run, list, doctor).                                                                  |
 | `scripts/compare_branch.sh`                                                | Multi-run base-vs-candidate orchestration that pins refs once, prepares per-ref checkouts, and emits compare artifacts for automation. |
 | `scripts/validate_perf_harness.sh`                                         | Runs the focused trust-contract suites and records a rerunnable Markdown artifact under `results/validation/`.                    |
+| `scripts/publish_contract.sh`                                              | Publishes the current docs/manifests/script contract bundle under `results/contracts/`.                                           |
 | `scripts/security_mode.sh`                                                 | Toggles benchmark run mode vs maintenance mode on cloud runners.                                                                  |
 | `scripts/security_check.sh`                                                | Preflight guardrails for mode, network, and egress policy.                                                                        |
 | `scripts/provision_runner.sh`                                              | Terraform orchestration wrapper for runner provisioning.                                                                          |
@@ -69,13 +70,13 @@ Benchmark execution follows this pipeline:
 
 2. **TPC-DS fixtures (optional).** For `dataset_id=tpcds_duckdb`, the `store_sales` table is sourced from DuckDB's `tpcds` extension, exported through CSV, and written as a Delta table.
 
-3. **Suite execution.** `delta-bench run` resolves runner mode from manifest-planned cases and executes Rust suites directly and Python interop cases via subprocess. `bench.sh` defaults to the smoke lane; explicit `--lane correctness` is the trusted semantic-validation path for correctness-backed suites; `--lane macro` is the performance lane for macro-safe cases.
+3. **Suite execution.** `delta-bench run` resolves runner mode from manifest-planned cases and executes Rust suites directly and Python interop cases via subprocess. `bench.sh` defaults to the smoke lane; explicit `--lane correctness` is the trusted semantic-validation path for correctness-backed suites; `--lane macro` is the performance lane for macro-safe cases; and `--mode assert` is only valid with `--lane correctness`.
 
 GitHub-hosted CI stays on smoke and correctness lanes. Self-hosted infrastructure is the only authorized path for macro perf, decision compare, Criterion microbench, and longitudinal ingestion.
 
-4. **Result output.** Each suite writes a schema v4 JSON file to `results/<label>/<suite>.json`. Context now carries lane, fixture recipe, harness revision, and fidelity identity. Cases also carry run summaries and compatibility keys. Correctness-tagged cases requested in macro lane remain operationally runnable but are emitted with `perf_valid=false` so they cannot be compared or reported as trusted perf evidence.
+4. **Result output.** Each suite writes a schema v5 JSON file to `results/<label>/<suite>.json`. Context carries lane, benchmark mode, fixture recipe, harness revision, and fidelity identity. Cases also carry run summaries, compatibility keys, and `perf_status`. Correctness-tagged cases requested in macro lane remain operationally runnable but are emitted with `perf_status=validation_only` so they cannot be compared or reported as trusted perf evidence.
 
-5. **Comparison (optional).** `compare.py` reads baseline and candidate JSON files, rejects invalid or mismatched contexts, and supports three render formats: text, markdown, and a versioned JSON payload with explicit machine status fields. `compare_branch.sh` prepares one checkout per pinned SHA under `.delta-bench-compare-checkouts/` so repeated runs reuse the same synced worktree.
+5. **Comparison (optional).** `compare.py` reads baseline and candidate schema v5 JSON files, rejects invalid or mismatched contexts, and supports three render formats: text, markdown, and a versioned JSON payload with explicit machine status fields. `compare_branch.sh` prepares one checkout per pinned SHA under `.delta-bench-compare-checkouts/` so repeated runs reuse the same synced worktree. Exploratory mode can run with the default three measured runs; decision mode fails closed unless both sides provide at least five runs.
 
 6. **Security validation.** `security_check.sh` validates fidelity invariants (run mode, network, egress). Self-hosted GitHub Actions workflows enforce this preflight before branch comparison and longitudinal execution. Current automated perf collection is self-hosted, macro-only, and curated to `scan`; GitHub-hosted CI is limited to smoke/correctness validation. PR comments split into exploratory (`run benchmark scan`) and decision (`run benchmark decision scan`) paths.
 
@@ -83,7 +84,7 @@ GitHub-hosted CI stays on smoke and correctness lanes. Self-hosted infrastructur
 
 8. **Longitudinal matrix checkpointing (optional).** `run-matrix` writes `matrix-state.json` through an atomic temp-file replace. The state file records per-cell progress plus a configuration fingerprint so resume only happens against the same suite/scale/lane/output contract.
 
-9. **Longitudinal ingest, reporting, and retention (optional).** `ingest-results` normalizes schema v4 suite outputs into a SQLite store. Reporting uses explicit stored compatibility identity fields and `compatibility_key` rather than just `suite/scale/case`, and the pipeline rejects legacy `rows.jsonl` / `index.json`-only stores to avoid silent split state.
+9. **Longitudinal ingest, reporting, and retention (optional).** `ingest-results` normalizes schema v5 suite outputs into a SQLite store. Reporting uses explicit stored compatibility identity fields, `benchmark_mode`, and `compatibility_key` rather than just `suite/scale/case`, and the pipeline rejects legacy `rows.jsonl` / `index.json`-only stores to avoid silent split state.
 
 10. **Criterion decision lane (optional).** `cargo bench -p delta-bench --bench scan_phase_bench` runs phase-isolated microbenchmarks for PR-sensitive scan paths using Criterion `iter_batched` loops so setup stays outside the timed phase.
 11. **Trust validation (operator step).** `validate_perf_harness.sh` reruns the focused trust-contract suites before the operator treats a machine/workflow as trustworthy for PR perf claims.
@@ -101,13 +102,13 @@ The longitudinal pipeline persists two control-plane artifacts:
 
 If a store directory still contains only legacy `rows.jsonl` or `index.json` artifacts, the current pipeline fails fast instead of silently treating that state as empty.
 
-## Result Schema v4
+## Result Schema v5
 
 Benchmark results use a normalized JSON format with three top-level sections: `context` (metadata about the run), `cases` (per-case outcomes and samples), and a `schema_version` field.
 
-Each case contains an array of `samples`, where each sample captures the elapsed time and optional metrics for one measured iteration. Case-level `elapsed_stats` are only populated when `perf_valid=true`.
+Each case contains an array of `samples`, where each sample captures the elapsed time and optional metrics for one measured iteration. Case-level `elapsed_stats` are only populated when `perf_status=trusted`.
 
-For the complete field-by-field listing of all context, fidelity, case-level, and sample-level fields, see [Reference](reference.md#result-schema-v4).
+For the complete field-by-field listing of all context, fidelity, case-level, and sample-level fields, see [Reference](reference.md#result-schema-v5).
 
 ### Source mapping highlights
 

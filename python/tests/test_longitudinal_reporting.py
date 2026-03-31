@@ -29,7 +29,14 @@ def _seed_rows(store_dir: Path, rows: list[dict]) -> None:
                         git_sha,
                         host,
                         suite,
+                        runner,
+                        benchmark_mode,
                         scale,
+                        timing_phase,
+                        dataset_id,
+                        dataset_fingerprint,
+                        storage_backend,
+                        backend_profile,
                         lane,
                         measurement_kind,
                         validation_level,
@@ -39,7 +46,7 @@ def _seed_rows(store_dir: Path, rows: list[dict]) -> None:
                         iterations,
                         warmup,
                         source_result_path
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         row["run_id"],
@@ -54,7 +61,14 @@ def _seed_rows(store_dir: Path, rows: list[dict]) -> None:
                         row.get("git_sha", row["revision"]),
                         row.get("host", "bench-host"),
                         row["suite"],
+                        row.get("runner"),
+                        row.get("benchmark_mode", "perf"),
                         row["scale"],
+                        row.get("timing_phase"),
+                        row.get("dataset_id"),
+                        row.get("dataset_fingerprint"),
+                        row.get("storage_backend"),
+                        row.get("backend_profile"),
                         row.get("lane"),
                         row.get("measurement_kind"),
                         row.get("validation_level"),
@@ -74,6 +88,7 @@ def _seed_rows(store_dir: Path, rows: list[dict]) -> None:
                     INSERT INTO case_rows (
                         run_id,
                         case_name,
+                        perf_status,
                         compatibility_key,
                         case_definition_hash,
                         success,
@@ -85,11 +100,12 @@ def _seed_rows(store_dir: Path, rows: list[dict]) -> None:
                         max_ms,
                         mean_ms,
                         median_ms
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         row["run_id"],
                         row["case"],
+                        row.get("perf_status", "trusted"),
                         row.get("compatibility_key"),
                         row.get("case_definition_hash"),
                         int(bool(row["success"])),
@@ -407,13 +423,14 @@ def test_generate_trend_reports_excludes_validation_only_runs(
         result_path.write_text(
             json.dumps(
                 {
-                    "schema_version": 4,
+                    "schema_version": 5,
                     "context": {
-                        "schema_version": 4,
+                        "schema_version": 5,
                         "label": run_id,
                         "created_at": created_at,
                         "suite": "scan",
                         "runner": "rust",
+                        "benchmark_mode": "perf",
                         "scale": "sf1",
                         "timing_phase": "execute",
                         "dataset_fingerprint": "sha256:fixture",
@@ -433,7 +450,7 @@ def test_generate_trend_reports_excludes_validation_only_runs(
                             "case": "scan_full_narrow",
                             "success": True,
                             "validation_passed": True,
-                            "perf_valid": False,
+                            "perf_status": "validation_only",
                             "classification": "supported",
                             "samples": [{"elapsed_ms": median_ms}],
                             "compatibility_key": "sha256:scan-full-narrow",
@@ -474,6 +491,8 @@ def test_generate_trend_reports_excludes_validation_only_runs(
 
     assert summary["total_series"] == 0
     assert summary["regressions"] == 0
+    assert summary["invalid_rows"] == 2
+    assert "Invalid rows skipped: 2" in markdown_path.read_text(encoding="utf-8")
     assert "scan_full_narrow" not in markdown_path.read_text(encoding="utf-8")
 
 

@@ -23,6 +23,7 @@ STORE_DB_FILENAME = "store.sqlite3"
 
 RUNS_REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
     ("runner", "TEXT"),
+    ("benchmark_mode", "TEXT"),
     ("timing_phase", "TEXT"),
     ("dataset_id", "TEXT"),
     ("dataset_fingerprint", "TEXT"),
@@ -37,6 +38,7 @@ RUNS_REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
 )
 
 CASE_ROWS_REQUIRED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("perf_status", "TEXT"),
     ("compatibility_key", "TEXT"),
     ("case_definition_hash", "TEXT"),
 )
@@ -90,6 +92,7 @@ def ingest_benchmark_result(
                         INSERT INTO case_rows (
                             run_id,
                             case_name,
+                            perf_status,
                             compatibility_key,
                             case_definition_hash,
                             success,
@@ -101,7 +104,7 @@ def ingest_benchmark_result(
                             max_ms,
                             mean_ms,
                             median_ms
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [_case_row_params(run_id=run_id, row=row) for row in case_rows],
                     )
@@ -129,6 +132,7 @@ def load_longitudinal_rows(store_dir: Path | str) -> list[dict[str, Any]]:
                 r.host,
                 r.suite,
                 r.runner,
+                r.benchmark_mode,
                 r.scale,
                 r.timing_phase,
                 r.dataset_id,
@@ -157,6 +161,7 @@ def load_longitudinal_rows(store_dir: Path | str) -> list[dict[str, Any]]:
                 r.maintenance_window_id,
                 r.source_result_path,
                 c.case_name,
+                c.perf_status,
                 c.compatibility_key,
                 c.case_definition_hash,
                 c.success,
@@ -200,6 +205,7 @@ def _normalize_run_record(
         "host": context.get("host"),
         "suite": context.get("suite"),
         "runner": context.get("runner"),
+        "benchmark_mode": context.get("benchmark_mode"),
         "scale": context.get("scale"),
         "timing_phase": context.get("timing_phase"),
         "dataset_id": context.get("dataset_id"),
@@ -233,16 +239,18 @@ def _normalize_run_record(
 def _validate_authoritative_longitudinal_payload(
     payload: dict[str, Any], source: Path
 ) -> None:
-    if payload.get("schema_version") != 4:
+    if payload.get("schema_version") != 5:
         raise ValueError(
-            f"{source}: authoritative longitudinal ingest requires schema v4 benchmark payloads"
+            f"{source}: authoritative longitudinal ingest requires schema v5 benchmark payloads"
         )
     context = payload.get("context") or {}
-    if context.get("schema_version") != 4:
+    if context.get("schema_version") != 5:
         raise ValueError(
-            f"{source}: authoritative longitudinal ingest requires context.schema_version=4"
+            f"{source}: authoritative longitudinal ingest requires context.schema_version=5"
         )
     for field in (
+        "runner",
+        "benchmark_mode",
         "lane",
         "measurement_kind",
         "validation_level",
@@ -273,17 +281,18 @@ def _normalize_case_row(
     *,
     case: dict[str, Any],
 ) -> dict[str, Any]:
-    perf_valid = bool(case.get("perf_valid", True))
+    perf_status = str(case.get("perf_status") or "")
+    trusted = perf_status == "trusted"
     summary = case.get("run_summary") or {}
     samples = case.get("samples") or []
     elapsed = (
         [float(sample["elapsed_ms"]) for sample in samples if "elapsed_ms" in sample]
-        if perf_valid
+        if trusted
         else []
     )
     metrics = _elapsed_metrics(elapsed)
     failure = case.get("failure") or {}
-    if summary and perf_valid:
+    if summary and trusted:
         metrics = {
             "best_ms": summary.get("min_ms"),
             "min_ms": summary.get("min_ms"),
@@ -294,6 +303,7 @@ def _normalize_case_row(
 
     return {
         "case": case.get("case"),
+        "perf_status": perf_status,
         "compatibility_key": case.get("compatibility_key"),
         "case_definition_hash": case.get("case_definition_hash"),
         "success": bool(case.get("success", False)),
@@ -396,6 +406,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             host TEXT,
             suite TEXT,
             runner TEXT,
+            benchmark_mode TEXT,
             scale TEXT,
             timing_phase TEXT,
             dataset_id TEXT,
@@ -428,6 +439,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS case_rows (
             run_id TEXT NOT NULL,
             case_name TEXT NOT NULL,
+            perf_status TEXT,
             compatibility_key TEXT,
             case_definition_hash TEXT,
             success INTEGER NOT NULL,
@@ -489,6 +501,7 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             host,
             suite,
             runner,
+            benchmark_mode,
             scale,
             timing_phase,
             dataset_id,
@@ -516,7 +529,7 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             run_mode,
             maintenance_window_id,
             source_result_path
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row["run_id"],
@@ -530,6 +543,7 @@ def _insert_run(conn: sqlite3.Connection, row: dict[str, Any]) -> None:
             row["host"],
             row["suite"],
             row["runner"],
+            row["benchmark_mode"],
             row["scale"],
             row["timing_phase"],
             row["dataset_id"],
@@ -565,6 +579,7 @@ def _case_row_params(*, run_id: str, row: dict[str, Any]) -> tuple[Any, ...]:
     return (
         run_id,
         row["case"],
+        row["perf_status"],
         row["compatibility_key"],
         row["case_definition_hash"],
         int(bool(row["success"])),
@@ -592,6 +607,7 @@ def _row_from_db(row: sqlite3.Row) -> dict[str, Any]:
         "host": row["host"],
         "suite": row["suite"],
         "runner": row["runner"],
+        "benchmark_mode": row["benchmark_mode"],
         "scale": row["scale"],
         "timing_phase": row["timing_phase"],
         "dataset_id": row["dataset_id"],
@@ -607,6 +623,7 @@ def _row_from_db(row: sqlite3.Row) -> dict[str, Any]:
         "iterations": row["iterations"],
         "warmup": row["warmup"],
         "case": row["case_name"],
+        "perf_status": row["perf_status"],
         "compatibility_key": row["compatibility_key"],
         "case_definition_hash": row["case_definition_hash"],
         "success": bool(row["success"]),

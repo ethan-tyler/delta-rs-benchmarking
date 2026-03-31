@@ -87,6 +87,7 @@ async fn main() -> BenchResult<()> {
             let dataset = parse_dataset(dataset_id.as_deref())?;
             let effective_scale = resolve_scale(&scale, dataset)?;
             validate_label(&args.label)?;
+            validate_execution_contract(benchmark_mode, lane)?;
             fs::create_dir_all(&args.results_dir)?;
             let mut run_plan = plan_run_cases(&target, runner, case_filter.as_deref())?;
             apply_dataset_assertion_policy(&mut run_plan, dataset);
@@ -350,6 +351,18 @@ fn parse_dataset(dataset_id: Option<&str>) -> BenchResult<Option<DatasetId>> {
     dataset_id.map(DatasetId::parse).transpose()
 }
 
+fn validate_execution_contract(
+    benchmark_mode: BenchmarkMode,
+    lane: BenchmarkLane,
+) -> BenchResult<()> {
+    if benchmark_mode == BenchmarkMode::Assert && lane != BenchmarkLane::Correctness {
+        return Err(BenchError::InvalidArgument(
+            "--mode assert requires --lane correctness".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 fn finalize_cases(
     mut cases: Vec<delta_bench::results::CaseResult>,
     plan: &[delta_bench::suites::PlannedCase],
@@ -376,7 +389,11 @@ fn finalize_cases(
             || lane == BenchmarkLane::Smoke
             || (lane == BenchmarkLane::Macro && planned.lane == BenchmarkLane::Correctness.as_str())
         {
-            case.perf_valid = false;
+            case.perf_status = if case.validation_passed {
+                delta_bench::results::PerfStatus::ValidationOnly
+            } else {
+                delta_bench::results::PerfStatus::Invalid
+            };
             case.elapsed_stats = None;
         }
     }
@@ -523,11 +540,13 @@ fn command_requires_manifest_preflight(command: &Command) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_case_compatibility_key, finalize_cases};
+    use super::{compute_case_compatibility_key, finalize_cases, validate_execution_contract};
     use chrono::Utc;
     use delta_bench::cli::{BenchmarkLane, BenchmarkMode};
     use delta_bench::error::BenchError;
-    use delta_bench::results::{BenchContext, CaseResult, ElapsedStats, IterationSample};
+    use delta_bench::results::{
+        BenchContext, CaseResult, ElapsedStats, IterationSample, PerfStatus,
+    };
     use delta_bench::suites::PlannedCase;
 
     fn planned_case(decision_threshold_pct: Option<f64>) -> PlannedCase {
@@ -550,7 +569,7 @@ mod tests {
             case: "case-a".to_string(),
             success: true,
             validation_passed: true,
-            perf_valid: true,
+            perf_status: PerfStatus::Trusted,
             classification: "supported".to_string(),
             samples: Vec::new(),
             elapsed_stats: None,
@@ -589,7 +608,7 @@ mod tests {
 
     fn bench_context() -> BenchContext {
         BenchContext {
-            schema_version: 4,
+            schema_version: 5,
             label: "test".to_string(),
             git_sha: Some("abc123".to_string()),
             created_at: Utc::now(),
@@ -682,7 +701,7 @@ mod tests {
     }
 
     #[test]
-    fn finalize_cases_marks_correctness_tagged_macro_runs_not_perf_valid() {
+    fn finalize_cases_marks_correctness_tagged_macro_runs_validation_only() {
         let mut planned = planned_case(Some(5.0));
         planned.target = "write".to_string();
         planned.lane = "correctness".to_string();
@@ -698,8 +717,44 @@ mod tests {
 
         let case = &cases[0];
         assert!(case.success);
-        assert!(!case.perf_valid);
+        assert_eq!(case.perf_status, PerfStatus::ValidationOnly);
         assert!(case.elapsed_stats.is_none());
         assert_eq!(case.samples.len(), 1);
+    }
+
+    #[test]
+    fn finalize_cases_preserves_invalid_status_for_failed_correctness_runs() {
+        let mut case = timed_case_result();
+        case.success = false;
+        case.validation_passed = false;
+        case.perf_status = PerfStatus::Invalid;
+        case.elapsed_stats = None;
+
+        let cases = finalize_cases(
+            vec![case],
+            &[planned_case(Some(5.0))],
+            BenchmarkMode::Assert,
+            BenchmarkLane::Correctness,
+            &bench_context(),
+        )
+        .expect("finalization succeeds");
+
+        let case = &cases[0];
+        assert!(!case.success);
+        assert_eq!(case.perf_status, PerfStatus::Invalid);
+        assert!(case.elapsed_stats.is_none());
+    }
+
+    #[test]
+    fn assert_mode_requires_correctness_lane() {
+        let err = validate_execution_contract(BenchmarkMode::Assert, BenchmarkLane::Smoke)
+            .expect_err("assert mode outside correctness must fail");
+        assert!(
+            matches!(err, BenchError::InvalidArgument(_)),
+            "unexpected error: {err}"
+        );
+
+        validate_execution_contract(BenchmarkMode::Assert, BenchmarkLane::Correctness)
+            .expect("correctness lane should be allowed");
     }
 }

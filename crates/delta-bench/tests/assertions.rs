@@ -1,6 +1,6 @@
 use delta_bench::assertions::{apply_case_assertions, CaseAssertion};
 use delta_bench::results::{
-    CaseFailure, CaseResult, IterationSample, RuntimeIOMetrics, SampleMetrics,
+    CaseFailure, CaseResult, IterationSample, PerfStatus, RuntimeIOMetrics, SampleMetrics,
 };
 
 fn sample_with_hashes(
@@ -42,7 +42,11 @@ fn case_result(
         case: "test_case".to_string(),
         success,
         validation_passed: success,
-        perf_valid: success,
+        perf_status: if success {
+            PerfStatus::Trusted
+        } else {
+            PerfStatus::Invalid
+        },
         classification: classification.to_string(),
         samples,
         elapsed_stats: None,
@@ -80,7 +84,7 @@ fn expected_error_assertion_reclassifies_failure() {
 
     assert!(case.success);
     assert!(case.validation_passed);
-    assert!(!case.perf_valid);
+    assert_eq!(case.perf_status, PerfStatus::ValidationOnly);
     assert_eq!(case.classification, "expected_failure");
 }
 
@@ -97,7 +101,7 @@ fn expected_error_assertion_fails_when_case_unexpectedly_succeeds() {
 
     assert!(!case.success);
     assert!(!case.validation_passed);
-    assert!(!case.perf_valid);
+    assert_eq!(case.perf_status, PerfStatus::Invalid);
     assert_eq!(case.classification, "supported");
     let message = case
         .failure
@@ -129,7 +133,7 @@ fn exact_result_hash_assertion_fails_mismatch() {
 
     assert!(!case.success);
     assert!(!case.validation_passed);
-    assert!(!case.perf_valid);
+    assert_eq!(case.perf_status, PerfStatus::Invalid);
     assert_eq!(case.failure_kind.as_deref(), Some("assertion_mismatch"));
     let message = case
         .failure
@@ -168,7 +172,7 @@ fn exact_result_hash_assertion_checks_every_sample() {
 
     assert!(!case.success);
     assert!(!case.validation_passed);
-    assert!(!case.perf_valid);
+    assert_eq!(case.perf_status, PerfStatus::Invalid);
     assert_eq!(case.failure_kind.as_deref(), Some("assertion_mismatch"));
     let message = case
         .failure
@@ -201,7 +205,7 @@ fn schema_hash_assertion_uses_schema_hash_field_not_result_hash() {
         "schema hash assertion should pass when schema_hash matches"
     );
     assert!(case.validation_passed);
-    assert!(case.perf_valid);
+    assert_eq!(case.perf_status, PerfStatus::Trusted);
     assert!(case.failure.is_none());
 }
 
@@ -221,7 +225,7 @@ fn version_monotonicity_assertion_fails_on_decrease() {
 
     assert!(!case.success);
     assert!(!case.validation_passed);
-    assert!(!case.perf_valid);
+    assert_eq!(case.perf_status, PerfStatus::Invalid);
     assert_eq!(case.failure_kind.as_deref(), Some("assertion_mismatch"));
     let message = case
         .failure

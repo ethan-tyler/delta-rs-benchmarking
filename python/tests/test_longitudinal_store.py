@@ -91,6 +91,19 @@ def _result_payload_v4() -> dict:
     return payload
 
 
+def _result_payload_v5() -> dict:
+    payload = _result_payload_v4()
+    payload["schema_version"] = 5
+    payload["context"]["schema_version"] = 5
+    payload["context"]["runner"] = "rust"
+    payload["context"]["benchmark_mode"] = "perf"
+    payload["cases"][0]["perf_status"] = "trusted"
+    payload["cases"][1]["perf_status"] = "invalid"
+    payload["cases"][0].pop("perf_valid")
+    payload["cases"][1].pop("perf_valid")
+    return payload
+
+
 def _create_legacy_store_sqlite(store_dir: Path) -> None:
     store_dir.mkdir(parents=True, exist_ok=True)
     db_path = store_db_path(store_dir)
@@ -241,7 +254,7 @@ def _seed_legacy_store_sqlite(store_dir: Path) -> None:
 
 def test_ingest_is_append_safe_and_idempotent(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
-    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+    result_path.write_text(json.dumps(_result_payload_v5()), encoding="utf-8")
     store_dir = tmp_path / "store"
 
     first = ingest_benchmark_result(
@@ -264,7 +277,7 @@ def test_ingest_is_append_safe_and_idempotent(tmp_path: Path) -> None:
 
 def test_rows_include_reproducibility_metadata(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
-    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+    result_path.write_text(json.dumps(_result_payload_v5()), encoding="utf-8")
     store_dir = tmp_path / "store"
 
     ingest_benchmark_result(
@@ -282,10 +295,13 @@ def test_rows_include_reproducibility_metadata(tmp_path: Path) -> None:
     assert scan_all["suite"] == "read_scan"
     assert scan_all["scale"] == "sf1"
     assert scan_all["host"] == "bench-host"
+    assert scan_all["benchmark_mode"] == "perf"
     assert scan_all["run_mode"] == "run-mode"
+    assert scan_all["perf_status"] == "trusted"
     assert scan_all["median_ms"] == 100.0
     assert scan_all["sample_values_ms"] == [100.0, 120.0, 90.0]
     assert failed["success"] is False
+    assert failed["perf_status"] == "invalid"
     assert failed["failure_reason"] == "failed op"
     assert failed["sample_values_ms"] == []
 
@@ -294,7 +310,7 @@ def test_ingest_dedupes_identical_payload_from_different_paths(tmp_path: Path) -
     first_path = tmp_path / "first.json"
     second_path = tmp_path / "nested" / "second.json"
     second_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = _result_payload_v4()
+    payload = _result_payload_v5()
     first_path.write_text(json.dumps(payload), encoding="utf-8")
     second_path.write_text(json.dumps(payload), encoding="utf-8")
     store_dir = tmp_path / "store"
@@ -320,7 +336,7 @@ def test_ingest_dedupes_identical_payload_from_different_paths(tmp_path: Path) -
 
 def test_ingest_rejects_legacy_jsonl_store_until_migrated(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
-    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+    result_path.write_text(json.dumps(_result_payload_v5()), encoding="utf-8")
     store_dir = tmp_path / "store"
     store_dir.mkdir(parents=True, exist_ok=True)
     (store_dir / "rows.jsonl").write_text("{}", encoding="utf-8")
@@ -340,7 +356,7 @@ def test_ingest_rejects_legacy_jsonl_store_until_migrated(tmp_path: Path) -> Non
 
 def test_ingest_uses_queryable_sqlite_backend(tmp_path: Path) -> None:
     result_path = tmp_path / "result.json"
-    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+    result_path.write_text(json.dumps(_result_payload_v5()), encoding="utf-8")
     store_dir = tmp_path / "store"
 
     first = ingest_benchmark_result(
@@ -359,7 +375,7 @@ def test_ingest_uses_queryable_sqlite_backend(tmp_path: Path) -> None:
     assert not (store_dir / "index.json").exists()
 
 
-def test_ingest_rejects_non_v2_payload(tmp_path: Path) -> None:
+def test_ingest_rejects_non_v5_payload(tmp_path: Path) -> None:
     payload = _result_payload_v3()
     payload["schema_version"] = 1
     payload["context"]["schema_version"] = 1
@@ -375,8 +391,41 @@ def test_ingest_rejects_non_v2_payload(tmp_path: Path) -> None:
         )
 
 
+def test_authoritative_longitudinal_ingest_rejects_schema_v4_payloads(
+    tmp_path: Path,
+) -> None:
+    result_path = tmp_path / "result-v4.json"
+    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="schema_version must be 5"):
+        ingest_benchmark_result(
+            store_dir=tmp_path / "store",
+            result_path=result_path,
+            revision="rev1",
+            commit_timestamp="2026-01-01T00:00:00+00:00",
+        )
+
+
+def test_authoritative_longitudinal_ingest_requires_perf_status(
+    tmp_path: Path,
+) -> None:
+    payload = _result_payload_v5()
+    payload["cases"][0].pop("perf_status")
+    payload["cases"][1].pop("perf_status")
+    result_path = tmp_path / "missing-perf-status.json"
+    result_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="perf_status"):
+        ingest_benchmark_result(
+            store_dir=tmp_path / "store",
+            result_path=result_path,
+            revision="rev1",
+            commit_timestamp="2026-01-01T00:00:00+00:00",
+        )
+
+
 def test_ingest_rejects_missing_case_classification(tmp_path: Path) -> None:
-    payload = _result_payload_v4()
+    payload = _result_payload_v5()
     payload["cases"][0].pop("classification")
     result_path = tmp_path / "missing-classification.json"
     result_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -399,9 +448,9 @@ def test_store_uses_public_benchmark_schema_loader() -> None:
     assert "from delta_bench_compare.compare import _load" not in source
 
 
-def test_v4_rows_preserve_compatibility_identity_fields(tmp_path: Path) -> None:
-    result_path = tmp_path / "result-v4.json"
-    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+def test_v5_rows_preserve_compatibility_identity_fields(tmp_path: Path) -> None:
+    result_path = tmp_path / "result-v5.json"
+    result_path.write_text(json.dumps(_result_payload_v5()), encoding="utf-8")
     store_dir = tmp_path / "store"
 
     ingest_benchmark_result(
@@ -416,6 +465,8 @@ def test_v4_rows_preserve_compatibility_identity_fields(tmp_path: Path) -> None:
     assert scan_all["lane"] == "macro"
     assert scan_all["measurement_kind"] == "end_to_end"
     assert scan_all["validation_level"] == "operational"
+    assert scan_all["benchmark_mode"] == "perf"
+    assert scan_all["perf_status"] == "trusted"
     assert scan_all["harness_revision"] == "harness-rev"
     assert scan_all["fixture_recipe_hash"] == "sha256:recipe"
     assert scan_all["compatibility_key"] == "sha256:compat"
@@ -427,7 +478,7 @@ def test_authoritative_longitudinal_ingest_rejects_schema_v3_payloads(
     result_path = tmp_path / "result-v3.json"
     result_path.write_text(json.dumps(_result_payload_v3()), encoding="utf-8")
 
-    with pytest.raises(ValueError, match="schema v4"):
+    with pytest.raises(ValueError, match="schema_version must be 5"):
         ingest_benchmark_result(
             store_dir=tmp_path / "store",
             result_path=result_path,
@@ -436,10 +487,10 @@ def test_authoritative_longitudinal_ingest_rejects_schema_v3_payloads(
         )
 
 
-def test_authoritative_longitudinal_ingest_requires_v4_context_identity(
+def test_authoritative_longitudinal_ingest_requires_v5_context_identity(
     tmp_path: Path,
 ) -> None:
-    payload = _result_payload_v4()
+    payload = _result_payload_v5()
     payload["context"].pop("fixture_recipe_hash")
     result_path = tmp_path / "missing-context.json"
     result_path.write_text(json.dumps(payload), encoding="utf-8")
@@ -456,12 +507,30 @@ def test_authoritative_longitudinal_ingest_requires_v4_context_identity(
 def test_authoritative_longitudinal_ingest_requires_case_identity_fields(
     tmp_path: Path,
 ) -> None:
-    payload = _result_payload_v4()
+    payload = _result_payload_v5()
     payload["cases"][0].pop("compatibility_key")
     result_path = tmp_path / "missing-case-identity.json"
     result_path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ValueError, match="compatibility_key"):
+        ingest_benchmark_result(
+            store_dir=tmp_path / "store",
+            result_path=result_path,
+            revision="rev1",
+            commit_timestamp="2026-01-01T00:00:00+00:00",
+        )
+
+
+@pytest.mark.parametrize("field", ["runner", "benchmark_mode"])
+def test_authoritative_longitudinal_ingest_requires_context_identity_fields(
+    tmp_path: Path, field: str
+) -> None:
+    payload = _result_payload_v5()
+    payload["context"].pop(field)
+    result_path = tmp_path / f"missing-{field}.json"
+    result_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=field):
         ingest_benchmark_result(
             store_dir=tmp_path / "store",
             result_path=result_path,
@@ -488,11 +557,11 @@ def test_load_rows_migrates_existing_legacy_sqlite_store(tmp_path: Path) -> None
     assert rows[0]["case_definition_hash"] is None
 
 
-def test_ingest_v4_result_migrates_existing_legacy_sqlite_store(tmp_path: Path) -> None:
+def test_ingest_v5_result_migrates_existing_legacy_sqlite_store(tmp_path: Path) -> None:
     store_dir = tmp_path / "store"
     _create_legacy_store_sqlite(store_dir)
-    result_path = tmp_path / "result-v4.json"
-    result_path.write_text(json.dumps(_result_payload_v4()), encoding="utf-8")
+    result_path = tmp_path / "result-v5.json"
+    result_path.write_text(json.dumps(_result_payload_v5()), encoding="utf-8")
 
     outcome = ingest_benchmark_result(
         store_dir=store_dir,

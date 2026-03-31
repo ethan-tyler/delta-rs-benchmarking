@@ -9,7 +9,7 @@ use crate::cli::TimingPhase;
 use crate::error::BenchResult;
 use crate::fingerprint::{hash_arrow_schema, hash_record_batches_unordered};
 use crate::results::{
-    CaseFailure, CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics,
+    CaseFailure, CaseResult, PerfStatus, RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics,
     FAILURE_KIND_EXECUTION_ERROR, FAILURE_KIND_UNSUPPORTED,
 };
 use crate::runner::{
@@ -94,7 +94,7 @@ pub(crate) async fn run_with_specs_and_sql_dir(
                     case: case_name,
                     success: false,
                     validation_passed: false,
-                    perf_valid: false,
+                    perf_status: PerfStatus::Invalid,
                     classification: "supported".to_string(),
                     samples: Vec::new(),
                     elapsed_stats: None,
@@ -253,7 +253,7 @@ fn skipped_case_result(case: String, skip_reason: Option<&str>) -> CaseResult {
         case,
         success: false,
         validation_passed: false,
-        perf_valid: false,
+        perf_status: PerfStatus::Invalid,
         classification: "supported".to_string(),
         samples: Vec::new(),
         elapsed_stats: None,

@@ -13,7 +13,7 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 - [Longitudinal State and Store](#longitudinal-state-and-store)
 - [Datasets and Scales](#datasets-and-scales)
 - [Fixture Tables](#fixture-tables)
-- [Result Schema v4](#result-schema-v4)
+- [Result Schema v5](#result-schema-v5)
 - [Manifest Format](#manifest-format)
 - [Backend Profiles](#backend-profiles)
 
@@ -29,7 +29,7 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 | **Fixture**            | Deterministic test data generated from a seed. Includes Delta tables, JSON row snapshots, and a manifest.                                                             |
 | **Fixture profile**    | Controls how fixtures are generated: `Standard` (normal), `ManyVersions` (12 commits for version history), `TpcdsDuckdb` (DuckDB TPC-DS source).                      |
 | **Label**              | A run identifier used in result paths (e.g., `results/<label>/<suite>.json`). Must match `[A-Za-z0-9._-]` and cannot be `.` or `..`.                                  |
-| **Schema v4**          | The normalized JSON result format for authoritative benchmark output. Includes context identity, cases, per-sample metrics, and run summaries.                        |
+| **Schema v5**          | The normalized JSON result format for authoritative benchmark output. Includes context identity, benchmark mode, cases, per-sample metrics, and run summaries.         |
 | **Manifest**           | A YAML or JSON file that declares which benchmark cases to execute and what assertions to validate.                                                                   |
 | **Backend profile**    | A `.env` file under `backends/` with storage configuration defaults (S3 bucket, locking, region).                                                                     |
 | **Lane**               | A benchmark execution contract such as `smoke`, `correctness`, or `macro`. Longitudinal release history also uses separate release lanes such as `rust` and `python`. |
@@ -258,7 +258,7 @@ These apply to all `delta-bench` subcommands and are passed through `bench.sh`:
 | `--results-dir`      | `DELTA_BENCH_RESULTS`          | `results`   | Path to result output directory                        |
 | `--label`            | `DELTA_BENCH_LABEL`            | `local`     | Run identifier in result paths                         |
 | `--git-sha`          | —                              | —           | Git SHA to record in result metadata                   |
-| `--harness-revision` | `DELTA_BENCH_HARNESS_REVISION` | repo `HEAD` | Harness revision recorded in schema v4 identity fields |
+| `--harness-revision` | `DELTA_BENCH_HARNESS_REVISION` | repo `HEAD` | Harness revision recorded in schema v5 identity fields |
 | `--storage-backend`  | `DELTA_BENCH_STORAGE_BACKEND`  | `local`     | Storage backend: `local` or `s3`                       |
 | `--storage-option`   | —                              | —           | Repeatable `KEY=VALUE` storage options                 |
 | `--backend-profile`  | `DELTA_BENCH_BACKEND_PROFILE`  | —           | Profile name from `backends/*.env`                     |
@@ -284,7 +284,7 @@ Relative `DELTA_BENCH_FIXTURES` and `DELTA_BENCH_RESULTS` values are resolved ag
 | `--case-filter`      | —         | Substring filter for case names                                                                                                                                                                                                                                                                      |
 | `--runner`           | `all`     | Runner mode: `rust`, `python`, or `all`                                                                                                                                                                                                                                                              |
 | `--lane`             | `smoke`   | Benchmark lane: `smoke`, `correctness`, or `macro`. `smoke` is the default local workflow; `correctness` is the trusted semantic lane for correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`); `macro` is the perf lane for macro-safe cases. |
-| `--mode`             | `perf`    | Benchmark mode: `perf` records measurable timings; `assert` emits validation-only artifacts                                                                                                                                                                                                          |
+| `--mode`             | `perf`    | Benchmark mode: `perf` records measurable timings; `assert` emits validation-only artifacts and requires `--lane correctness`                                                                                                                                                                         |
 | `--timing-phase`     | `execute` | For phase-aware suites, isolate and record `load`, `plan`, `execute`, or `validate` time in `elapsed_ms`                                                                                                                                                                                             |
 | `--warmup`           | `1`       | Warmup iterations per case (not measured)                                                                                                                                                                                                                                                            |
 | `--iterations`       | `5`       | Measured iterations per case                                                                                                                                                                                                                                                                         |
@@ -317,7 +317,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--warmup`                   | `2`           | Warmup iterations per case                                                                                                                                                          |
 | `--iters`                    | `9`           | Measured iterations per case per run                                                                                                                                                |
 | `--prewarm-iters`            | `1`           | Unreported warmup iterations per ref                                                                                                                                                |
-| `--compare-runs`             | `3`           | Measured runs per ref before aggregation                                                                                                                                            |
+| `--compare-runs`             | `3`           | Measured runs per ref before aggregation. Decision mode requires `>= 5`.                                                                                                            |
 | `--measure-order`            | `alternate`   | Run interleaving: `base-first`, `candidate-first`, `alternate`                                                                                                                      |
 | `--aggregation`              | `median`      | Aggregation method: `min`, `median`, `p95`                                                                                                                                          |
 | `--compare-mode`             | `exploratory` | Comparison policy for `compare.py`: `exploratory` or `decision`                                                                                                                     |
@@ -348,11 +348,21 @@ Compare automation artifacts are written to `results/compare/<suite>/<base_sha>_
 
 `manifest.json` contains these top-level keys: `suite`, `base_sha`, `candidate_sha`, `base_json`, `candidate_json`, `stdout_report`, `markdown_report`, `comparison_json`, `hash_policy_report`, `compare_mode`, `aggregation`, and `noise_threshold`.
 
+Decision compare accepts only schema v5 aggregated inputs and fails closed when `--compare-runs` is below the required case minimum.
+
 ### `validate_perf_harness.sh` — Trust contract verification
 
 ```bash
 ./scripts/validate_perf_harness.sh [--sha <commit>] [--dataset-id <id>] [--artifact-dir <path>]
 ```
+
+### `publish_contract.sh` — Publish the operator contract bundle
+
+```bash
+./scripts/publish_contract.sh [--output-dir <path>]
+```
+
+Copies the current README, key docs, manifests, and wrapper entrypoints into `results/contracts/` (or a caller-selected output directory) and writes a machine-readable `manifest.json` that records the published contract bundle and result schema version.
 
 Runs the focused trust-contract suites used to justify trustworthy PR perf claims. By default the script writes a timestamped artifact tree under `results/validation/` and stores the Markdown summary at `summary.md` inside that directory. Use `--artifact-dir` to choose a stable directory such as `results/validation/latest`.
 
@@ -536,13 +546,13 @@ Additional fixture artifacts:
 - `rows.jsonl` — JSON-lines snapshot of the source row data
 - `manifest.json` — Fixture generation metadata (schema version, seed, scale, fingerprint)
 
-## Result Schema v4
+## Result Schema v5
 
 ### Top-level structure
 
 | Field            | Type   | Description                                    |
 | ---------------- | ------ | ---------------------------------------------- |
-| `schema_version` | u32    | Format version (currently 4)                   |
+| `schema_version` | u32    | Format version (currently 5)                   |
 | `context`        | object | Host, run configuration, and fidelity metadata |
 | `cases`          | array  | Array of benchmark case results                |
 
@@ -599,21 +609,21 @@ These are populated when running on cloud/hardened infrastructure.
 | `case`                   | string | Case name (e.g., `scan_full_narrow`)                                                                                                             |
 | `success`                | bool   | Whether the case satisfied workload validation                                                                                                   |
 | `validation_passed`      | bool   | Whether correctness/assertion validation passed                                                                                                  |
-| `perf_valid`             | bool   | Whether the case is valid for performance comparison. Smoke, correctness, assert, and correctness-tagged macro runs emit `false`.                |
+| `perf_status`            | string | Performance evidence status: `trusted`, `validation_only`, or `invalid`. Smoke, correctness, assert, and correctness-tagged macro runs are not `trusted`. |
 | `classification`         | string | `supported` or `expected_failure`                                                                                                                |
 | `samples`                | array  | Per-iteration timing and metrics                                                                                                                 |
 | `run_summary`            | object | Run-level summary consumed by automation and decision mode                                                                                       |
 | `run_summaries`          | array  | Aggregated list of run summaries when multiple runs are merged                                                                                   |
 | `suite_manifest_hash`    | string | Hash of the manifest file that defined the case                                                                                                  |
 | `case_definition_hash`   | string | Hash of the case definition in the manifest                                                                                                      |
-| `compatibility_key`      | string | Derived key for strict comparison compatibility. In schema v4 it hashes the full comparison identity plus case-definition and decision metadata. |
+| `compatibility_key`      | string | Derived key for strict comparison compatibility. In schema v5 it hashes the full comparison identity plus case-definition and decision metadata. |
 | `supports_decision`      | bool   | Whether the case participates in decision-grade compare mode                                                                                     |
 | `required_runs`          | u32    | Minimum runs required for decision mode                                                                                                          |
 | `decision_threshold_pct` | f64    | Regression threshold for decision mode                                                                                                           |
 | `decision_metric`        | string | Run summary metric used for decision mode                                                                                                        |
 | `failure_kind`           | string | Failure class such as `execution_error`, `assertion_mismatch`, `context_mismatch`, or `unsupported`                                              |
 | `failure`                | string | Error message if the case failed                                                                                                                 |
-| `elapsed_stats`          | object | Timing statistics across samples when `perf_valid=true` (see [Elapsed statistics](#elapsed-statistics))                                          |
+| `elapsed_stats`          | object | Timing statistics across samples when `perf_status=trusted` (see [Elapsed statistics](#elapsed-statistics))                                      |
 
 ### Sample-level fields
 
@@ -625,7 +635,7 @@ Each sample represents one measured iteration.
 | `metrics`            | object | Metric fields (see [Metrics Reference](#metrics-reference))                                                 |
 | `metrics.contention` | object | Optional nested contention metrics domain emitted by `concurrency`                                          |
 
-Schema v3 artifacts are still readable for exploratory analysis, but decision mode and authoritative longitudinal workflows require schema v4 with complete identity fields. Automated GitHub Actions perf workflows are currently macro-only and curated to `scan`.
+Schema v5 is the only authoritative result format. Decision mode, compare aggregation, and authoritative longitudinal workflows all require schema v5 with complete identity fields and explicit `perf_status`.
 
 ## Manifest Format
 

@@ -10,7 +10,7 @@ use crate::manifests::{
     load_manifest, DatasetAssertionPolicy, DatasetId, DEFAULT_PYTHON_MANIFEST_PATH,
     DEFAULT_RUST_MANIFEST_PATH,
 };
-use crate::results::{CaseFailure, CaseResult, FAILURE_KIND_EXECUTION_ERROR};
+use crate::results::{CaseFailure, CaseResult, PerfStatus, FAILURE_KIND_EXECUTION_ERROR};
 use crate::runner::CaseExecutionResult;
 use crate::storage::StorageConfig;
 
@@ -48,7 +48,7 @@ pub(crate) fn fixture_error_cases(case_names: Vec<String>, message: &str) -> Vec
             case,
             success: false,
             validation_passed: false,
-            perf_valid: false,
+            perf_status: PerfStatus::Invalid,
             classification: "supported".to_string(),
             samples: Vec::new(),
             elapsed_stats: None,

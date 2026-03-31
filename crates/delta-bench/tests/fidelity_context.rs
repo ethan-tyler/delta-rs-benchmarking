@@ -6,7 +6,7 @@ use std::fs;
 #[test]
 fn bench_context_serializes_optional_fidelity_fields() {
     let ctx = BenchContext {
-        schema_version: 4,
+        schema_version: 5,
         label: "local".to_string(),
         git_sha: Some("deadbeef".to_string()),
         created_at: Utc::now(),

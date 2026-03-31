@@ -10,16 +10,16 @@ OUT_DIR="${ROOT_DIR}/longitudinal/manifests"
 mkdir -p "${OUT_DIR}"
 
 "${SCRIPT_DIR}/longitudinal_bench.sh" select-revisions \
-  --repository "${DELTA_RS_DIR}" \
-  --strategy release-tags \
-  --release-tag-pattern '^rust-v\d+\.\d+\.\d+([+-].+)?$' \
-  --output "${OUT_DIR}/release-history-rust.json" >/dev/null
+	--repository "${DELTA_RS_DIR}" \
+	--strategy release-tags \
+	--release-tag-pattern '^rust-v\d+\.\d+\.\d+([+-].+)?$' \
+	--output "${OUT_DIR}/release-history-rust.json" >/dev/null
 
 "${SCRIPT_DIR}/longitudinal_bench.sh" select-revisions \
-  --repository "${DELTA_RS_DIR}" \
-  --strategy release-tags \
-  --release-tag-pattern '^python-v\d+\.\d+\.\d+([+-].+)?$' \
-  --output "${OUT_DIR}/release-history-python.json" >/dev/null
+	--repository "${DELTA_RS_DIR}" \
+	--strategy release-tags \
+	--release-tag-pattern '^python-v\d+\.\d+\.\d+([+-].+)?$' \
+	--output "${OUT_DIR}/release-history-python.json" >/dev/null
 
 python3 - "${OUT_DIR}" <<'PY'
 import json

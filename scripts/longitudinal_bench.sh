@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PYTHONPATH_DIR="${ROOT_DIR}/python${PYTHONPATH:+:${PYTHONPATH}}"
 
 usage() {
-  cat <<'EOF'
+	cat <<'EOF'
 Usage:
   ./scripts/longitudinal_bench.sh <command> [args...]
 
@@ -26,23 +26,23 @@ EOF
 }
 
 if [[ $# -lt 1 ]]; then
-  usage
-  exit 1
+	usage
+	exit 1
 fi
 
 cmd="$1"
 shift || true
 
 case "${cmd}" in
-  select-revisions|build-artifacts|run-matrix|ingest-results|report|prune|orchestrate)
-    PYTHONPATH="${PYTHONPATH_DIR}" python3 -m delta_bench_longitudinal.cli "${cmd}" "$@"
-    ;;
-  -h|--help|help)
-    usage
-    ;;
-  *)
-    echo "unknown command: ${cmd}" >&2
-    usage >&2
-    exit 1
-    ;;
+select-revisions | build-artifacts | run-matrix | ingest-results | report | prune | orchestrate)
+	PYTHONPATH="${PYTHONPATH_DIR}" python3 -m delta_bench_longitudinal.cli "${cmd}" "$@"
+	;;
+-h | --help | help)
+	usage
+	;;
+*)
+	echo "unknown command: ${cmd}" >&2
+	usage >&2
+	exit 1
+	;;
 esac

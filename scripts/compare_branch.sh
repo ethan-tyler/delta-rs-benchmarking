@@ -35,33 +35,33 @@ DATASET_ID="${BENCH_DATASET_ID:-}"
 TIMING_PHASE="${BENCH_TIMING_PHASE:-execute}"
 
 sanitize_label() {
-  local raw="${1:-}"
-  local sanitized
-  sanitized="$(printf '%s' "${raw}" | tr -c 'A-Za-z0-9._-' '_')"
-  sanitized="$(printf '%s' "${sanitized}" | sed -E 's/_+/_/g; s/^_+//; s/_+$//')"
-  if [[ -z "${sanitized}" || "${sanitized}" == "." || "${sanitized}" == ".." ]]; then
-    sanitized="label"
-  fi
-  printf '%s' "${sanitized}"
+	local raw="${1:-}"
+	local sanitized
+	sanitized="$(printf '%s' "${raw}" | tr -c 'A-Za-z0-9._-' '_')"
+	sanitized="$(printf '%s' "${sanitized}" | sed -E 's/_+/_/g; s/^_+//; s/_+$//')"
+	if [[ -z "${sanitized}" || "${sanitized}" == "." || "${sanitized}" == ".." ]]; then
+		sanitized="label"
+	fi
+	printf '%s' "${sanitized}"
 }
 
 is_positive_integer() {
-  [[ "${1:-}" =~ ^[1-9][0-9]*$ ]]
+	[[ "${1:-}" =~ ^[1-9][0-9]*$ ]]
 }
 
 is_non_negative_integer() {
-  [[ "${1:-}" =~ ^[0-9]+$ ]]
+	[[ "${1:-}" =~ ^[0-9]+$ ]]
 }
 
 TIMEOUT_BIN=""
 if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_BIN="timeout"
+	TIMEOUT_BIN="timeout"
 elif command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_BIN="gtimeout"
+	TIMEOUT_BIN="gtimeout"
 fi
 
 usage() {
-  cat <<EOF
+	cat <<EOF
 Usage:
   ./scripts/compare_branch.sh [options] <base_ref> <candidate_ref> [suite]
   ./scripts/compare_branch.sh [options] --current-vs-main [suite]
@@ -104,150 +104,150 @@ EOF
 }
 
 trusted_macro_compare_suite() {
-  local requested_suite="${1:-}"
-  case "${requested_suite}" in
-    scan|write_perf|tpcds|interop_py)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+	local requested_suite="${1:-}"
+	case "${requested_suite}" in
+	scan | write_perf | tpcds | interop_py)
+		return 0
+		;;
+	*)
+		return 1
+		;;
+	esac
 }
 
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --remote-runner)
-      REMOTE_RUNNER="$2"
-      shift 2
-      ;;
-    --remote-root)
-      RUNNER_ROOT="$2"
-      shift 2
-      ;;
-    --enforce-run-mode)
-      ENFORCE_RUN_MODE=1
-      shift
-      ;;
-    --require-no-public-ipv4)
-      REQUIRE_NO_PUBLIC_IPV4=1
-      shift
-      ;;
-    --require-egress-policy)
-      REQUIRE_EGRESS_POLICY=1
-      shift
-      ;;
-    --noise-threshold)
-      NOISE_THRESHOLD="$2"
-      shift 2
-      ;;
-    --aggregation)
-      AGGREGATION="$2"
-      shift 2
-      ;;
-    --compare-mode)
-      COMPARE_MODE="$2"
-      shift 2
-      ;;
-    --fail-on)
-      COMPARE_FAIL_ON="$2"
-      shift 2
-      ;;
-    --warmup)
-      BENCH_WARMUP="$2"
-      shift 2
-      ;;
-    --iters)
-      BENCH_ITERS="$2"
-      shift 2
-      ;;
-    --prewarm-iters)
-      BENCH_PREWARM_ITERS="$2"
-      shift 2
-      ;;
-    --compare-runs)
-      BENCH_COMPARE_RUNS="$2"
-      shift 2
-      ;;
-    --measure-order)
-      BENCH_MEASURE_ORDER="$2"
-      shift 2
-      ;;
-    --base-sha)
-      BASE_SHA_OVERRIDE="$2"
-      shift 2
-      ;;
-    --candidate-sha)
-      CANDIDATE_SHA_OVERRIDE="$2"
-      shift 2
-      ;;
-    --base-fetch-url)
-      BASE_FETCH_URL="$2"
-      shift 2
-      ;;
-    --candidate-fetch-url)
-      CANDIDATE_FETCH_URL="$2"
-      shift 2
-      ;;
-    --current-vs-main|--working-vs-upstream-main)
-      WORKING_VS_UPSTREAM_MAIN=1
-      shift
-      ;;
-    --upstream-remote)
-      UPSTREAM_REMOTE_OVERRIDE="$2"
-      shift 2
-      ;;
-    --storage-backend)
-      STORAGE_BACKEND="$2"
-      shift 2
-      ;;
-    --storage-option)
-      STORAGE_OPTIONS+=("$2")
-      shift 2
-      ;;
-    --backend-profile)
-      BACKEND_PROFILE="$2"
-      shift 2
-      ;;
-    --runner)
-      RUNNER_MODE="$2"
-      shift 2
-      ;;
-    --mode)
-      BENCHMARK_MODE="$2"
-      shift 2
-      ;;
-    --dataset-id)
-      DATASET_ID="$2"
-      shift 2
-      ;;
-    --timing-phase)
-      TIMING_PHASE="$2"
-      shift 2
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    --)
-      shift
-      break
-      ;;
-    -*)
-      echo "unknown option: $1" >&2
-      usage >&2
-      exit 1
-      ;;
-    *)
-      break
-      ;;
-  esac
+	case "$1" in
+	--remote-runner)
+		REMOTE_RUNNER="$2"
+		shift 2
+		;;
+	--remote-root)
+		RUNNER_ROOT="$2"
+		shift 2
+		;;
+	--enforce-run-mode)
+		ENFORCE_RUN_MODE=1
+		shift
+		;;
+	--require-no-public-ipv4)
+		REQUIRE_NO_PUBLIC_IPV4=1
+		shift
+		;;
+	--require-egress-policy)
+		REQUIRE_EGRESS_POLICY=1
+		shift
+		;;
+	--noise-threshold)
+		NOISE_THRESHOLD="$2"
+		shift 2
+		;;
+	--aggregation)
+		AGGREGATION="$2"
+		shift 2
+		;;
+	--compare-mode)
+		COMPARE_MODE="$2"
+		shift 2
+		;;
+	--fail-on)
+		COMPARE_FAIL_ON="$2"
+		shift 2
+		;;
+	--warmup)
+		BENCH_WARMUP="$2"
+		shift 2
+		;;
+	--iters)
+		BENCH_ITERS="$2"
+		shift 2
+		;;
+	--prewarm-iters)
+		BENCH_PREWARM_ITERS="$2"
+		shift 2
+		;;
+	--compare-runs)
+		BENCH_COMPARE_RUNS="$2"
+		shift 2
+		;;
+	--measure-order)
+		BENCH_MEASURE_ORDER="$2"
+		shift 2
+		;;
+	--base-sha)
+		BASE_SHA_OVERRIDE="$2"
+		shift 2
+		;;
+	--candidate-sha)
+		CANDIDATE_SHA_OVERRIDE="$2"
+		shift 2
+		;;
+	--base-fetch-url)
+		BASE_FETCH_URL="$2"
+		shift 2
+		;;
+	--candidate-fetch-url)
+		CANDIDATE_FETCH_URL="$2"
+		shift 2
+		;;
+	--current-vs-main | --working-vs-upstream-main)
+		WORKING_VS_UPSTREAM_MAIN=1
+		shift
+		;;
+	--upstream-remote)
+		UPSTREAM_REMOTE_OVERRIDE="$2"
+		shift 2
+		;;
+	--storage-backend)
+		STORAGE_BACKEND="$2"
+		shift 2
+		;;
+	--storage-option)
+		STORAGE_OPTIONS+=("$2")
+		shift 2
+		;;
+	--backend-profile)
+		BACKEND_PROFILE="$2"
+		shift 2
+		;;
+	--runner)
+		RUNNER_MODE="$2"
+		shift 2
+		;;
+	--mode)
+		BENCHMARK_MODE="$2"
+		shift 2
+		;;
+	--dataset-id)
+		DATASET_ID="$2"
+		shift 2
+		;;
+	--timing-phase)
+		TIMING_PHASE="$2"
+		shift 2
+		;;
+	-h | --help)
+		usage
+		exit 0
+		;;
+	--)
+		shift
+		break
+		;;
+	-*)
+		echo "unknown option: $1" >&2
+		usage >&2
+		exit 1
+		;;
+	*)
+		break
+		;;
+	esac
 done
 
 positional_refs=("$@")
-if (( ${#positional_refs[@]} > 3 )); then
-  usage >&2
-  exit 1
+if ((${#positional_refs[@]} > 3)); then
+	usage >&2
+	exit 1
 fi
 
 base_ref="${positional_refs[0]:-main}"
@@ -256,114 +256,116 @@ suite="${positional_refs[2]:-scan}"
 base_ref_mode="auto"
 candidate_ref_mode="auto"
 
-if (( WORKING_VS_UPSTREAM_MAIN != 0 )); then
-  if [[ -n "${BASE_SHA_OVERRIDE}" || -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
-    echo "--current-vs-main cannot be combined with --base-sha/--candidate-sha" >&2
-    exit 1
-  fi
-  if (( ${#positional_refs[@]} > 1 )); then
-    echo "with --current-vs-main, provide at most one positional [suite]" >&2
-    usage >&2
-    exit 1
-  fi
-  base_ref=""
-  candidate_ref=""
-  suite="${positional_refs[0]:-scan}"
+if ((WORKING_VS_UPSTREAM_MAIN != 0)); then
+	if [[ -n "${BASE_SHA_OVERRIDE}" || -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
+		echo "--current-vs-main cannot be combined with --base-sha/--candidate-sha" >&2
+		exit 1
+	fi
+	if ((${#positional_refs[@]} > 1)); then
+		echo "with --current-vs-main, provide at most one positional [suite]" >&2
+		usage >&2
+		exit 1
+	fi
+	base_ref=""
+	candidate_ref=""
+	suite="${positional_refs[0]:-scan}"
 fi
 
 if [[ -n "${BASE_SHA_OVERRIDE}" ]]; then
-  base_ref="${BASE_SHA_OVERRIDE}"
-  base_ref_mode="commit"
+	base_ref="${BASE_SHA_OVERRIDE}"
+	base_ref_mode="commit"
 fi
 if [[ -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
-  candidate_ref="${CANDIDATE_SHA_OVERRIDE}"
-  candidate_ref_mode="commit"
+	candidate_ref="${CANDIDATE_SHA_OVERRIDE}"
+	candidate_ref_mode="commit"
 fi
 
 if [[ -n "${BASE_SHA_OVERRIDE}" && -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
-  case "${#positional_refs[@]}" in
-    0)
-      ;;
-    1)
-      suite="${positional_refs[0]}"
-      ;;
-    *)
-      echo "when using both --base-sha and --candidate-sha, provide at most one positional [suite]" >&2
-      usage >&2
-      exit 1
-      ;;
-  esac
+	case "${#positional_refs[@]}" in
+	0) ;;
+	1)
+		suite="${positional_refs[0]}"
+		;;
+	*)
+		echo "when using both --base-sha and --candidate-sha, provide at most one positional [suite]" >&2
+		usage >&2
+		exit 1
+		;;
+	esac
 fi
 
 if [[ -z "${candidate_ref}" && ${WORKING_VS_UPSTREAM_MAIN} -eq 0 ]]; then
-  usage >&2
-  exit 1
+	usage >&2
+	exit 1
 fi
 case "${AGGREGATION}" in
-  min|median|p95)
-    ;;
-  *)
-    echo "invalid --aggregation '${AGGREGATION}'; expected one of: min, median, p95" >&2
-    exit 1
-    ;;
+min | median | p95) ;;
+*)
+	echo "invalid --aggregation '${AGGREGATION}'; expected one of: min, median, p95" >&2
+	exit 1
+	;;
 esac
 
 case "${COMPARE_MODE}" in
-  exploratory|decision)
-    ;;
-  *)
-    echo "invalid --compare-mode '${COMPARE_MODE}'; expected exploratory or decision" >&2
-    exit 1
-    ;;
+exploratory | decision) ;;
+*)
+	echo "invalid --compare-mode '${COMPARE_MODE}'; expected exploratory or decision" >&2
+	exit 1
+	;;
 esac
 
 if ! trusted_macro_compare_suite "${suite}"; then
-  echo "suite '${suite}' is not supported for macro-lane branch compare." >&2
-  echo "compare_branch.sh supports only trusted perf suites: scan, write_perf, tpcds, interop_py." >&2
-  echo "use suite 'scan' for the curated default, or run unsupported stateful suites through purpose-built validation/longitudinal flows." >&2
-  exit 1
+	echo "suite '${suite}' is not supported for macro-lane branch compare." >&2
+	echo "compare_branch.sh supports only trusted perf suites: scan, write_perf, tpcds, interop_py." >&2
+	echo "use suite 'scan' for the curated default, or run unsupported stateful suites through purpose-built validation/longitudinal flows." >&2
+	exit 1
 fi
 
 if ! is_positive_integer "${BENCH_WARMUP}"; then
-  echo "invalid --warmup '${BENCH_WARMUP}'; expected positive integer" >&2
-  exit 1
+	echo "invalid --warmup '${BENCH_WARMUP}'; expected positive integer" >&2
+	exit 1
 fi
 
 if ! is_positive_integer "${BENCH_ITERS}"; then
-  echo "invalid --iters '${BENCH_ITERS}'; expected positive integer" >&2
-  exit 1
+	echo "invalid --iters '${BENCH_ITERS}'; expected positive integer" >&2
+	exit 1
 fi
 
 if ! is_non_negative_integer "${BENCH_PREWARM_ITERS}"; then
-  echo "invalid --prewarm-iters '${BENCH_PREWARM_ITERS}'; expected non-negative integer" >&2
-  exit 1
+	echo "invalid --prewarm-iters '${BENCH_PREWARM_ITERS}'; expected non-negative integer" >&2
+	exit 1
 fi
 
 if ! is_positive_integer "${BENCH_COMPARE_RUNS}"; then
-  echo "invalid --compare-runs '${BENCH_COMPARE_RUNS}'; expected positive integer" >&2
-  exit 1
+	echo "invalid --compare-runs '${BENCH_COMPARE_RUNS}'; expected positive integer" >&2
+	exit 1
+fi
+
+if [[ "${COMPARE_MODE}" == "decision" ]]; then
+	if ((BENCH_COMPARE_RUNS < 5)); then
+		echo "decision mode requires --compare-runs >= 5" >&2
+		exit 1
+	fi
 fi
 
 case "${BENCH_MEASURE_ORDER}" in
-  base-first|candidate-first|alternate)
-    ;;
-  *)
-    echo "invalid --measure-order '${BENCH_MEASURE_ORDER}'; expected base-first, candidate-first, or alternate" >&2
-    exit 1
-    ;;
+base-first | candidate-first | alternate) ;;
+*)
+	echo "invalid --measure-order '${BENCH_MEASURE_ORDER}'; expected base-first, candidate-first, or alternate" >&2
+	exit 1
+	;;
 esac
 
 case "${BENCHMARK_MODE}" in
-  perf)
-    ;;
-  assert)
-    echo "compare_branch.sh requires --mode perf; assert mode emits validation-only artifacts that cannot be compared" >&2
-    exit 1
-    ;;
-  *)
-    echo "invalid --mode '${BENCHMARK_MODE}'; expected perf or assert" >&2
-    exit 1
-    ;;
+perf) ;;
+assert)
+	echo "compare_branch.sh requires --mode perf; assert mode emits validation-only artifacts that cannot be compared" >&2
+	exit 1
+	;;
+*)
+	echo "invalid --mode '${BENCHMARK_MODE}'; expected perf or assert" >&2
+	exit 1
+	;;
 esac
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
@@ -371,19 +373,19 @@ RUNNER_RESULTS_DIR="${DELTA_BENCH_RESULTS:-${RUNNER_ROOT}/results}"
 compare_checkout_root="${DELTA_BENCH_COMPARE_CHECKOUT_ROOT:-${RUNNER_ROOT}/.delta-bench-compare-checkouts}"
 
 default_checkout_lock_file() {
-  local checkout_dir="${1:-}"
-  local checkout_parent
-  checkout_parent="$(dirname "${checkout_dir}")"
-  local checkout_name
-  checkout_name="$(basename "${checkout_dir}")"
-  checkout_name="${checkout_name#/}"
-  while [[ "${checkout_name}" == .* ]]; do
-    checkout_name="${checkout_name#.}"
-  done
-  if [[ -z "${checkout_name}" ]]; then
-    checkout_name="delta-rs-under-test"
-  fi
-  printf '%s/.%s.delta_bench_checkout.lock\n' "${checkout_parent}" "${checkout_name}"
+	local checkout_dir="${1:-}"
+	local checkout_parent
+	checkout_parent="$(dirname "${checkout_dir}")"
+	local checkout_name
+	checkout_name="$(basename "${checkout_dir}")"
+	checkout_name="${checkout_name#/}"
+	while [[ "${checkout_name}" == .* ]]; do
+		checkout_name="${checkout_name#.}"
+	done
+	if [[ -z "${checkout_name}" ]]; then
+		checkout_name="delta-rs-under-test"
+	fi
+	printf '%s/.%s.delta_bench_checkout.lock\n' "${checkout_parent}" "${checkout_name}"
 }
 
 DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_DIR}")}"
@@ -394,153 +396,153 @@ export DELTA_BENCH_CHECKOUT_LOCK_FILE
 export DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS
 storage_args=(--storage-backend "${STORAGE_BACKEND}")
 if [[ ${#STORAGE_OPTIONS[@]} -gt 0 ]]; then
-  for option in "${STORAGE_OPTIONS[@]}"; do
-    storage_args+=(--storage-option "${option}")
-  done
+	for option in "${STORAGE_OPTIONS[@]}"; do
+		storage_args+=(--storage-option "${option}")
+	done
 fi
 profile_args=()
 if [[ -n "${BACKEND_PROFILE}" ]]; then
-  profile_args+=(--backend-profile "${BACKEND_PROFILE}")
+	profile_args+=(--backend-profile "${BACKEND_PROFILE}")
 fi
 
 is_commit_sha() {
-  local ref="${1:-}"
-  [[ "${ref}" =~ ^[0-9a-fA-F]{7,40}$ ]]
+	local ref="${1:-}"
+	[[ "${ref}" =~ ^[0-9a-fA-F]{7,40}$ ]]
 }
 
 branch_ref_exists() {
-  local ref="${1:-}"
-  exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/heads/${ref}" || \
-    exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/remotes/origin/${ref}"
+	local ref="${1:-}"
+	exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/heads/${ref}" ||
+		exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/remotes/origin/${ref}"
 }
 
 print_ref_not_found_guidance() {
-  local ref="${1:-}"
-  echo "benchmark ref '${ref}' not found in delta-rs checkout '${DELTA_RS_DIR}'." >&2
-  echo 'use an existing branch (inspect with: git -C "${DELTA_RS_DIR}" branch -a), or pin SHAs with --base-sha/--candidate-sha.' >&2
+	local ref="${1:-}"
+	echo "benchmark ref '${ref}' not found in delta-rs checkout '${DELTA_RS_DIR}'." >&2
+	echo 'use an existing branch (inspect with: git -C "${DELTA_RS_DIR}" branch -a), or pin SHAs with --base-sha/--candidate-sha.' >&2
 }
 
 ensure_known_ref_mode() {
-  local ref="${1:-}"
-  local mode="${2:-auto}"
-  if [[ "${mode}" == "commit" ]]; then
-    return 0
-  fi
-  if branch_ref_exists "${ref}"; then
-    return 0
-  fi
-  if is_commit_sha "${ref}"; then
-    return 0
-  fi
-  print_ref_not_found_guidance "${ref}"
-  return 1
+	local ref="${1:-}"
+	local mode="${2:-auto}"
+	if [[ "${mode}" == "commit" ]]; then
+		return 0
+	fi
+	if branch_ref_exists "${ref}"; then
+		return 0
+	fi
+	if is_commit_sha "${ref}"; then
+		return 0
+	fi
+	print_ref_not_found_guidance "${ref}"
+	return 1
 }
 
 prepare_delta_rs_ref() {
-  local ref="${1:-}"
-  local mode="${2:-auto}"
-  local fetch_url="${3:-}"
-  if [[ "${mode}" == "commit" ]]; then
-    run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
-    return
-  fi
-  if branch_ref_exists "${ref}"; then
-    run_step env DELTA_RS_BRANCH="${ref}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
-    return
-  fi
-  if is_commit_sha "${ref}"; then
-    run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
-    return
-  fi
-  print_ref_not_found_guidance "${ref}"
-  return 1
+	local ref="${1:-}"
+	local mode="${2:-auto}"
+	local fetch_url="${3:-}"
+	if [[ "${mode}" == "commit" ]]; then
+		run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+		return
+	fi
+	if branch_ref_exists "${ref}"; then
+		run_step env DELTA_RS_BRANCH="${ref}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+		return
+	fi
+	if is_commit_sha "${ref}"; then
+		run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+		return
+	fi
+	print_ref_not_found_guidance "${ref}"
+	return 1
 }
 
 pin_ref_to_commit() {
-  local ref="${1:-}"
-  local mode="${2:-auto}"
-  local fetch_url="${3:-}"
-  prepare_delta_rs_ref "${ref}" "${mode}" "${fetch_url}" >/dev/null
-  exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD
+	local ref="${1:-}"
+	local mode="${2:-auto}"
+	local fetch_url="${3:-}"
+	prepare_delta_rs_ref "${ref}" "${mode}" "${fetch_url}" >/dev/null
+	exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD
 }
 
 if [[ -n "${BASE_SHA_OVERRIDE}" ]] && ! is_commit_sha "${BASE_SHA_OVERRIDE}"; then
-  echo "invalid --base-sha '${BASE_SHA_OVERRIDE}'; expected 7-40 hex characters" >&2
-  exit 1
+	echo "invalid --base-sha '${BASE_SHA_OVERRIDE}'; expected 7-40 hex characters" >&2
+	exit 1
 fi
 if [[ -n "${CANDIDATE_SHA_OVERRIDE}" ]] && ! is_commit_sha "${CANDIDATE_SHA_OVERRIDE}"; then
-  echo "invalid --candidate-sha '${CANDIDATE_SHA_OVERRIDE}'; expected 7-40 hex characters" >&2
-  exit 1
+	echo "invalid --candidate-sha '${CANDIDATE_SHA_OVERRIDE}'; expected 7-40 hex characters" >&2
+	exit 1
 fi
 
 run_with_timeout() {
-  if [[ -n "${TIMEOUT_BIN}" ]]; then
-    "${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "$@"
-    return
-  fi
-  "$@"
+	if [[ -n "${TIMEOUT_BIN}" ]]; then
+		"${TIMEOUT_BIN}" "${BENCH_TIMEOUT_SECONDS}" "$@"
+		return
+	fi
+	"$@"
 }
 
 run_with_retry() {
-  local attempt=1
-  while true; do
-    if "$@"; then
-      return 0
-    fi
-    if (( attempt >= BENCH_RETRY_ATTEMPTS )); then
-      return 1
-    fi
-    attempt=$((attempt + 1))
-    sleep "${BENCH_RETRY_DELAY_SECONDS}"
-  done
+	local attempt=1
+	while true; do
+		if "$@"; then
+			return 0
+		fi
+		if ((attempt >= BENCH_RETRY_ATTEMPTS)); then
+			return 1
+		fi
+		attempt=$((attempt + 1))
+		sleep "${BENCH_RETRY_DELAY_SECONDS}"
+	done
 }
 
 run_step() {
-  run_with_retry exec_on_runner "$@"
+	run_with_retry exec_on_runner "$@"
 }
 
 run_step_no_retry() {
-  exec_on_runner "$@"
+	exec_on_runner "$@"
 }
 
 exec_on_runner() {
-  if [[ -n "${REMOTE_RUNNER}" ]]; then
-    local remote_cmd=""
-    local arg
-    for arg in "$@"; do
-      remote_cmd+=$(printf '%q ' "${arg}")
-    done
-    local full_cmd
-    full_cmd=$(printf "cd %q && %s" "${RUNNER_ROOT}" "${remote_cmd}")
-    run_with_timeout ssh "${REMOTE_RUNNER}" "bash -lc $(printf '%q' "${full_cmd}")"
-  else
-    (
-      cd "${RUNNER_ROOT}"
-      run_with_timeout "$@"
-    )
-  fi
+	if [[ -n "${REMOTE_RUNNER}" ]]; then
+		local remote_cmd=""
+		local arg
+		for arg in "$@"; do
+			remote_cmd+=$(printf '%q ' "${arg}")
+		done
+		local full_cmd
+		full_cmd=$(printf "cd %q && %s" "${RUNNER_ROOT}" "${remote_cmd}")
+		run_with_timeout ssh "${REMOTE_RUNNER}" "bash -lc $(printf '%q' "${full_cmd}")"
+	else
+		(
+			cd "${RUNNER_ROOT}"
+			run_with_timeout "$@"
+		)
+	fi
 }
 
 shell_join() {
-  local joined=""
-  local arg
-  for arg in "$@"; do
-    joined+=$(printf '%q ' "${arg}")
-  done
-  printf '%s' "${joined% }"
+	local joined=""
+	local arg
+	for arg in "$@"; do
+		joined+=$(printf '%q ' "${arg}")
+	done
+	printf '%s' "${joined% }"
 }
 
 run_command_to_file() {
-  local output_path="$1"
-  shift
-  local cmd=("$@")
-  local command_string
-  command_string="$(shell_join "${cmd[@]}")"
-  run_step bash -lc "set -euo pipefail; ${command_string} > $(printf '%q' "${output_path}")"
+	local output_path="$1"
+	shift
+	local cmd=("$@")
+	local command_string
+	command_string="$(shell_join "${cmd[@]}")"
+	run_step bash -lc "set -euo pipefail; ${command_string} > $(printf '%q' "${output_path}")"
 }
 
 path_is_within_dir() {
-  python3 - "$1" "$2" <<'PY'
+	python3 - "$1" "$2" <<'PY'
 import os
 import sys
 
@@ -555,223 +557,223 @@ PY
 }
 
 ensure_checkout_lock_path_safe_for_initial_clone() {
-  if [[ -n "${REMOTE_RUNNER}" ]]; then
-    return
-  fi
-  if [[ -d "${DELTA_RS_DIR}/.git" ]]; then
-    return
-  fi
-  if path_is_within_dir "${DELTA_BENCH_CHECKOUT_LOCK_FILE}" "${DELTA_RS_DIR}"; then
-    echo "DELTA_BENCH_CHECKOUT_LOCK_FILE must be outside DELTA_RS_DIR before initial clone: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
-    exit 1
-  fi
+	if [[ -n "${REMOTE_RUNNER}" ]]; then
+		return
+	fi
+	if [[ -d "${DELTA_RS_DIR}/.git" ]]; then
+		return
+	fi
+	if path_is_within_dir "${DELTA_BENCH_CHECKOUT_LOCK_FILE}" "${DELTA_RS_DIR}"; then
+		echo "DELTA_BENCH_CHECKOUT_LOCK_FILE must be outside DELTA_RS_DIR before initial clone: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+		exit 1
+	fi
 }
 
 release_checkout_lock() {
-  if [[ -n "${CHECKOUT_LOCK_FD}" ]]; then
-    eval "exec ${CHECKOUT_LOCK_FD}>&-" >/dev/null 2>&1 || true
-    CHECKOUT_LOCK_FD=""
-  fi
-  if [[ -n "${CHECKOUT_LOCK_DIR}" ]]; then
-    rm -f "${CHECKOUT_LOCK_DIR}/pid" >/dev/null 2>&1 || true
-    rmdir "${CHECKOUT_LOCK_DIR}" >/dev/null 2>&1 || true
-    CHECKOUT_LOCK_DIR=""
-  fi
+	if [[ -n "${CHECKOUT_LOCK_FD}" ]]; then
+		eval "exec ${CHECKOUT_LOCK_FD}>&-" >/dev/null 2>&1 || true
+		CHECKOUT_LOCK_FD=""
+	fi
+	if [[ -n "${CHECKOUT_LOCK_DIR}" ]]; then
+		rm -f "${CHECKOUT_LOCK_DIR}/pid" >/dev/null 2>&1 || true
+		rmdir "${CHECKOUT_LOCK_DIR}" >/dev/null 2>&1 || true
+		CHECKOUT_LOCK_DIR=""
+	fi
 }
 
 acquire_checkout_lock() {
-  if [[ -n "${REMOTE_RUNNER}" ]]; then
-    return
-  fi
-  if [[ "${DELTA_BENCH_CHECKOUT_LOCK_HELD:-0}" == "1" ]]; then
-    return
-  fi
+	if [[ -n "${REMOTE_RUNNER}" ]]; then
+		return
+	fi
+	if [[ "${DELTA_BENCH_CHECKOUT_LOCK_HELD:-0}" == "1" ]]; then
+		return
+	fi
 
-  ensure_checkout_lock_path_safe_for_initial_clone
+	ensure_checkout_lock_path_safe_for_initial_clone
 
-  if command -v flock >/dev/null 2>&1; then
-    mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
-    exec {CHECKOUT_LOCK_FD}>"${DELTA_BENCH_CHECKOUT_LOCK_FILE}"
-    if ! flock -w "${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}" "${CHECKOUT_LOCK_FD}"; then
-      echo "failed to acquire checkout lock within ${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
-      exit 1
-    fi
-    export DELTA_BENCH_CHECKOUT_LOCK_HELD=1
-    return
-  fi
+	if command -v flock >/dev/null 2>&1; then
+		mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
+		exec {CHECKOUT_LOCK_FD}>"${DELTA_BENCH_CHECKOUT_LOCK_FILE}"
+		if ! flock -w "${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}" "${CHECKOUT_LOCK_FD}"; then
+			echo "failed to acquire checkout lock within ${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+			exit 1
+		fi
+		export DELTA_BENCH_CHECKOUT_LOCK_HELD=1
+		return
+	fi
 
-  mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
-  local lock_dir="${DELTA_BENCH_CHECKOUT_LOCK_FILE}.dir"
-  local deadline=$((SECONDS + DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS))
-  while true; do
-    if mkdir "${lock_dir}" >/dev/null 2>&1; then
-      CHECKOUT_LOCK_DIR="${lock_dir}"
-      printf '%s\n' "$$" > "${CHECKOUT_LOCK_DIR}/pid" || true
-      export DELTA_BENCH_CHECKOUT_LOCK_HELD=1
-      return
-    fi
-    if (( SECONDS >= deadline )); then
-      echo "failed to acquire checkout lock within ${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
-      exit 1
-    fi
-    sleep 1
-  done
+	mkdir -p "$(dirname "${DELTA_BENCH_CHECKOUT_LOCK_FILE}")"
+	local lock_dir="${DELTA_BENCH_CHECKOUT_LOCK_FILE}.dir"
+	local deadline=$((SECONDS + DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS))
+	while true; do
+		if mkdir "${lock_dir}" >/dev/null 2>&1; then
+			CHECKOUT_LOCK_DIR="${lock_dir}"
+			printf '%s\n' "$$" >"${CHECKOUT_LOCK_DIR}/pid" || true
+			export DELTA_BENCH_CHECKOUT_LOCK_HELD=1
+			return
+		fi
+		if ((SECONDS >= deadline)); then
+			echo "failed to acquire checkout lock within ${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_CHECKOUT_LOCK_FILE}" >&2
+			exit 1
+		fi
+		sleep 1
+	done
 }
 
 acquire_checkout_lock
 
 cleanup_harness_overlay_untracked() {
-  local managed_paths=(
-    "crates/delta-bench"
-    "bench/manifests"
-    "backends"
-    "python/delta_bench_interop"
-    "python/delta_bench_tpcds"
-  )
-  local path
-  for path in "${managed_paths[@]}"; do
-    # Keep delta-rs checkout reusable and avoid stash-pop collisions after compare runs.
-    exec_on_runner git -C "${DELTA_RS_DIR}" clean -fd -- "${path}" >/dev/null 2>&1 || true
-  done
-  release_checkout_lock
+	local managed_paths=(
+		"crates/delta-bench"
+		"bench/manifests"
+		"backends"
+		"python/delta_bench_interop"
+		"python/delta_bench_tpcds"
+	)
+	local path
+	for path in "${managed_paths[@]}"; do
+		# Keep delta-rs checkout reusable and avoid stash-pop collisions after compare runs.
+		exec_on_runner git -C "${DELTA_RS_DIR}" clean -fd -- "${path}" >/dev/null 2>&1 || true
+	done
+	release_checkout_lock
 }
 
 trap cleanup_harness_overlay_untracked EXIT
 
-if (( WORKING_VS_UPSTREAM_MAIN != 0 )); then
-  if ! exec_on_runner test -d "${DELTA_RS_DIR}/.git"; then
-    run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
-  fi
+if ((WORKING_VS_UPSTREAM_MAIN != 0)); then
+	if ! exec_on_runner test -d "${DELTA_RS_DIR}/.git"; then
+		run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+	fi
 
-  working_head_sha="$(exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD)"
+	working_head_sha="$(exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD)"
 
-  upstream_remote="${UPSTREAM_REMOTE_OVERRIDE:-}"
-  if [[ -z "${upstream_remote}" ]]; then
-    if exec_on_runner git -C "${DELTA_RS_DIR}" remote get-url upstream >/dev/null 2>&1; then
-      upstream_remote="upstream"
-    else
-      upstream_remote="origin"
-    fi
-  fi
+	upstream_remote="${UPSTREAM_REMOTE_OVERRIDE:-}"
+	if [[ -z "${upstream_remote}" ]]; then
+		if exec_on_runner git -C "${DELTA_RS_DIR}" remote get-url upstream >/dev/null 2>&1; then
+			upstream_remote="upstream"
+		else
+			upstream_remote="origin"
+		fi
+	fi
 
-  if ! exec_on_runner git -C "${DELTA_RS_DIR}" remote get-url "${upstream_remote}" >/dev/null 2>&1; then
-    echo "remote '${upstream_remote}' is not configured in delta-rs checkout '${DELTA_RS_DIR}'." >&2
-    exit 1
-  fi
+	if ! exec_on_runner git -C "${DELTA_RS_DIR}" remote get-url "${upstream_remote}" >/dev/null 2>&1; then
+		echo "remote '${upstream_remote}' is not configured in delta-rs checkout '${DELTA_RS_DIR}'." >&2
+		exit 1
+	fi
 
-  run_step git -C "${DELTA_RS_DIR}" fetch "${upstream_remote}" main
-  upstream_main_sha="$(exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify "refs/remotes/${upstream_remote}/main^{commit}")"
+	run_step git -C "${DELTA_RS_DIR}" fetch "${upstream_remote}" main
+	upstream_main_sha="$(exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify "refs/remotes/${upstream_remote}/main^{commit}")"
 
-  candidate_ref="${working_head_sha}"
-  base_ref="${upstream_main_sha}"
-  candidate_ref_mode="commit"
-  base_ref_mode="commit"
+	candidate_ref="${working_head_sha}"
+	base_ref="${upstream_main_sha}"
+	candidate_ref_mode="commit"
+	base_ref_mode="commit"
 fi
 
 run_security_check() {
-  local check_cmd=(./scripts/security_check.sh)
-  if (( ENFORCE_RUN_MODE != 0 )); then
-    check_cmd+=(--enforce-run-mode)
-  fi
-  if (( REQUIRE_NO_PUBLIC_IPV4 != 0 )); then
-    check_cmd+=(--require-no-public-ipv4)
-  fi
-  if (( REQUIRE_EGRESS_POLICY != 0 )); then
-    check_cmd+=(--require-egress-policy)
-  fi
+	local check_cmd=(./scripts/security_check.sh)
+	if ((ENFORCE_RUN_MODE != 0)); then
+		check_cmd+=(--enforce-run-mode)
+	fi
+	if ((REQUIRE_NO_PUBLIC_IPV4 != 0)); then
+		check_cmd+=(--require-no-public-ipv4)
+	fi
+	if ((REQUIRE_EGRESS_POLICY != 0)); then
+		check_cmd+=(--require-egress-policy)
+	fi
 
-  if [[ -n "${DELTA_BENCH_EGRESS_POLICY_SHA256:-}" ]]; then
-    run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_EGRESS_POLICY_SHA256="${DELTA_BENCH_EGRESS_POLICY_SHA256}" "${check_cmd[@]}"
-  else
-    run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" "${check_cmd[@]}"
-  fi
+	if [[ -n "${DELTA_BENCH_EGRESS_POLICY_SHA256:-}" ]]; then
+		run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" DELTA_BENCH_EGRESS_POLICY_SHA256="${DELTA_BENCH_EGRESS_POLICY_SHA256}" "${check_cmd[@]}"
+	else
+		run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" "${check_cmd[@]}"
+	fi
 }
 
 phase() {
-  local step="$1"
-  local total="$2"
-  local desc="$3"
-  printf '\n=== [%d/%d] %s ===\n\n' "${step}" "${total}" "${desc}"
+	local step="$1"
+	local total="$2"
+	local desc="$3"
+	printf '\n=== [%d/%d] %s ===\n\n' "${step}" "${total}" "${desc}"
 }
 
 checkout_dir_for_ref() {
-  local ref="${1:-}"
-  printf '%s/%s\n' "${compare_checkout_root}" "${ref}"
+	local ref="${1:-}"
+	printf '%s/%s\n' "${compare_checkout_root}" "${ref}"
 }
 
 prepare_ref_checkout_once() {
-  local ref="$1"
-  local checkout_dir="$2"
-  local fetch_url="${3:-}"
-  local fetch_source="${fetch_url:-${DELTA_RS_DIR}}"
+	local ref="$1"
+	local checkout_dir="$2"
+	local fetch_url="${3:-}"
+	local fetch_source="${fetch_url:-${DELTA_RS_DIR}}"
 
-  run_step env DELTA_RS_DIR="${checkout_dir}" DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_source}" ./scripts/prepare_delta_rs.sh
-  run_step env DELTA_RS_DIR="${checkout_dir}" ./scripts/sync_harness_to_delta_rs.sh
+	run_step env DELTA_RS_DIR="${checkout_dir}" DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_source}" ./scripts/prepare_delta_rs.sh
+	run_step env DELTA_RS_DIR="${checkout_dir}" ./scripts/sync_harness_to_delta_rs.sh
 }
 
 run_benchmark_suite_for_checkout() {
-  local checkout_dir="$1"
-  local label="$2"
-  local warmup="$3"
-  local iters="$4"
-  local no_summary_table="${5:-0}"
+	local checkout_dir="$1"
+	local label="$2"
+	local warmup="$3"
+	local iters="$4"
+	local no_summary_table="${5:-0}"
 
-  local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --lane macro --mode "${BENCHMARK_MODE}" --warmup "${warmup}" --iters "${iters}")
-  if [[ -n "${DATASET_ID}" ]]; then
-    run_cmd+=(--dataset-id "${DATASET_ID}")
-  fi
-  run_cmd+=(--timing-phase "${TIMING_PHASE}")
-  run_cmd+=("${storage_args[@]}")
-  if [[ ${#profile_args[@]} -gt 0 ]]; then
-    run_cmd+=("${profile_args[@]}")
-  fi
-  if (( no_summary_table != 0 )); then
-    run_cmd+=(--no-summary-table)
-  fi
+	local run_cmd=(./scripts/bench.sh run --scale sf1 --suite "${suite}" --runner "${RUNNER_MODE}" --lane macro --mode "${BENCHMARK_MODE}" --warmup "${warmup}" --iters "${iters}")
+	if [[ -n "${DATASET_ID}" ]]; then
+		run_cmd+=(--dataset-id "${DATASET_ID}")
+	fi
+	run_cmd+=(--timing-phase "${TIMING_PHASE}")
+	run_cmd+=("${storage_args[@]}")
+	if [[ ${#profile_args[@]} -gt 0 ]]; then
+		run_cmd+=("${profile_args[@]}")
+	fi
+	if ((no_summary_table != 0)); then
+		run_cmd+=(--no-summary-table)
+	fi
 
-  run_step_no_retry env DELTA_RS_DIR="${checkout_dir}" DELTA_BENCH_EXEC_ROOT="${checkout_dir}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${label}" "${run_cmd[@]}"
+	run_step_no_retry env DELTA_RS_DIR="${checkout_dir}" DELTA_BENCH_EXEC_ROOT="${checkout_dir}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${label}" "${run_cmd[@]}"
 }
 
 run_order_for_iteration() {
-  local idx="$1"
-  case "${BENCH_MEASURE_ORDER}" in
-    base-first)
-      printf 'base candidate\n'
-      ;;
-    candidate-first)
-      printf 'candidate base\n'
-      ;;
-    alternate)
-      if (( idx % 2 == 1 )); then
-        printf 'base candidate\n'
-      else
-        printf 'candidate base\n'
-      fi
-      ;;
-  esac
+	local idx="$1"
+	case "${BENCH_MEASURE_ORDER}" in
+	base-first)
+		printf 'base candidate\n'
+		;;
+	candidate-first)
+		printf 'candidate base\n'
+		;;
+	alternate)
+		if ((idx % 2 == 1)); then
+			printf 'base candidate\n'
+		else
+			printf 'candidate base\n'
+		fi
+		;;
+	esac
 }
 
 aggregate_run_labels() {
-  local out_label="$1"
-  shift
-  local labels=("$@")
-  if (( ${#labels[@]} == 0 )); then
-    echo "internal error: aggregate_run_labels called without labels for ${out_label}" >&2
-    exit 1
-  fi
+	local out_label="$1"
+	shift
+	local labels=("$@")
+	if ((${#labels[@]} == 0)); then
+		echo "internal error: aggregate_run_labels called without labels for ${out_label}" >&2
+		exit 1
+	fi
 
-  local input_paths=()
-  local label
-  for label in "${labels[@]}"; do
-    input_paths+=("${RUNNER_RESULTS_DIR}/${label}/${suite}.json")
-  done
+	local input_paths=()
+	local label
+	for label in "${labels[@]}"; do
+		input_paths+=("${RUNNER_RESULTS_DIR}/${label}/${suite}.json")
+	done
 
-  local out_json="${RUNNER_RESULTS_DIR}/${out_label}/${suite}.json"
-  run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.aggregate --output "${out_json}" --label "${out_label}" "${input_paths[@]}"
+	local out_json="${RUNNER_RESULTS_DIR}/${out_label}/${suite}.json"
+	run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.aggregate --output "${out_json}" --label "${out_label}" "${input_paths[@]}"
 }
 
 # Calculate total phases for progress display
-total_phases=$(( 1 + (BENCH_PREWARM_ITERS > 0 ? 1 : 0) + BENCH_COMPARE_RUNS + 1 + 1 ))
+total_phases=$((1 + (BENCH_PREWARM_ITERS > 0 ? 1 : 0) + BENCH_COMPARE_RUNS + 1 + 1))
 current_phase=1
 
 phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"
@@ -779,7 +781,7 @@ current_phase=$((current_phase + 1))
 
 run_security_check
 if ! exec_on_runner test -d "${DELTA_RS_DIR}/.git"; then
-  run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+	run_step env DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
 fi
 
 ensure_known_ref_mode "${base_ref}" "${base_ref_mode}"
@@ -803,42 +805,42 @@ prepare_ref_checkout_once "${base_ref}" "${base_checkout_dir}" "${BASE_FETCH_URL
 prepare_ref_checkout_once "${candidate_ref}" "${candidate_checkout_dir}" "${CANDIDATE_FETCH_URL}"
 data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)
 if [[ -n "${DATASET_ID}" ]]; then
-  data_cmd+=(--dataset-id "${DATASET_ID}")
+	data_cmd+=(--dataset-id "${DATASET_ID}")
 fi
 data_cmd+=("${storage_args[@]}")
 if [[ ${#profile_args[@]} -gt 0 ]]; then
-  data_cmd+=("${profile_args[@]}")
+	data_cmd+=("${profile_args[@]}")
 fi
 run_step_no_retry env DELTA_RS_DIR="${base_checkout_dir}" DELTA_BENCH_EXEC_ROOT="${base_checkout_dir}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${base_label}" "${data_cmd[@]}"
 
-if (( BENCH_PREWARM_ITERS > 0 )); then
-  phase "${current_phase}" "${total_phases}" "Prewarm runs (${BENCH_PREWARM_ITERS} iterations, results discarded)"
-  current_phase=$((current_phase + 1))
-  run_benchmark_suite_for_checkout "${base_checkout_dir}" "${base_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
-  run_benchmark_suite_for_checkout "${candidate_checkout_dir}" "${cand_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
+if ((BENCH_PREWARM_ITERS > 0)); then
+	phase "${current_phase}" "${total_phases}" "Prewarm runs (${BENCH_PREWARM_ITERS} iterations, results discarded)"
+	current_phase=$((current_phase + 1))
+	run_benchmark_suite_for_checkout "${base_checkout_dir}" "${base_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
+	run_benchmark_suite_for_checkout "${candidate_checkout_dir}" "${cand_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
 fi
 
 base_run_labels=()
 cand_run_labels=()
 run_idx=1
-while (( run_idx <= BENCH_COMPARE_RUNS )); do
-  phase "${current_phase}" "${total_phases}" "Measured run ${run_idx}/${BENCH_COMPARE_RUNS}"
-  current_phase=$((current_phase + 1))
-  order="$(run_order_for_iteration "${run_idx}")"
-  for side in ${order}; do
-    if [[ "${side}" == "base" ]]; then
-      run_label="${base_label}-r${run_idx}"
-      echo "  -> base (${base_ref:0:10}...)"
-      run_benchmark_suite_for_checkout "${base_checkout_dir}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1
-      base_run_labels+=("${run_label}")
-    else
-      run_label="${cand_label}-r${run_idx}"
-      echo "  -> candidate (${candidate_ref:0:10}...)"
-      run_benchmark_suite_for_checkout "${candidate_checkout_dir}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1
-      cand_run_labels+=("${run_label}")
-    fi
-  done
-  run_idx=$((run_idx + 1))
+while ((run_idx <= BENCH_COMPARE_RUNS)); do
+	phase "${current_phase}" "${total_phases}" "Measured run ${run_idx}/${BENCH_COMPARE_RUNS}"
+	current_phase=$((current_phase + 1))
+	order="$(run_order_for_iteration "${run_idx}")"
+	for side in ${order}; do
+		if [[ "${side}" == "base" ]]; then
+			run_label="${base_label}-r${run_idx}"
+			echo "  -> base (${base_ref:0:10}...)"
+			run_benchmark_suite_for_checkout "${base_checkout_dir}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1
+			base_run_labels+=("${run_label}")
+		else
+			run_label="${cand_label}-r${run_idx}"
+			echo "  -> candidate (${candidate_ref:0:10}...)"
+			run_benchmark_suite_for_checkout "${candidate_checkout_dir}" "${run_label}" "${BENCH_WARMUP}" "${BENCH_ITERS}" 1
+			cand_run_labels+=("${run_label}")
+		fi
+	done
+	run_idx=$((run_idx + 1))
 done
 
 phase "${current_phase}" "${total_phases}" "Aggregating results"
@@ -861,7 +863,7 @@ manifest_json="${compare_artifact_dir}/manifest.json"
 
 compare_args=(--mode "${COMPARE_MODE}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
 if [[ -n "${COMPARE_FAIL_ON}" ]]; then
-  compare_args+=(--fail-on "${COMPARE_FAIL_ON}")
+	compare_args+=(--fail-on "${COMPARE_FAIL_ON}")
 fi
 
 compare_render_args=(--mode "${COMPARE_MODE}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}")
@@ -874,20 +876,20 @@ run_command_to_file "${compare_markdown}" "${compare_cmd[@]}" "${compare_render_
 run_command_to_file "${compare_json}" "${compare_cmd[@]}" "${compare_render_args[@]}" --format json
 run_command_to_file "${hash_policy_txt}" "${hash_policy_cmd[@]}"
 run_step env \
-  COMPARE_MANIFEST_PATH="${manifest_json}" \
-  COMPARE_SUITE="${suite}" \
-  COMPARE_BASE_SHA="${base_ref}" \
-  COMPARE_CANDIDATE_SHA="${candidate_ref}" \
-  COMPARE_BASE_JSON="${base_json}" \
-  COMPARE_CANDIDATE_JSON="${cand_json}" \
-  COMPARE_STDOUT_REPORT="${compare_stdout}" \
-  COMPARE_MARKDOWN_REPORT="${compare_markdown}" \
-  COMPARE_COMPARISON_JSON="${compare_json}" \
-  COMPARE_HASH_POLICY_REPORT="${hash_policy_txt}" \
-  COMPARE_MODE_VALUE="${COMPARE_MODE}" \
-  COMPARE_AGGREGATION="${AGGREGATION}" \
-  COMPARE_NOISE_THRESHOLD="${NOISE_THRESHOLD}" \
-  python3 -c 'import json, os, pathlib; pathlib.Path(os.environ["COMPARE_MANIFEST_PATH"]).write_text(json.dumps({"suite": os.environ["COMPARE_SUITE"], "base_sha": os.environ["COMPARE_BASE_SHA"], "candidate_sha": os.environ["COMPARE_CANDIDATE_SHA"], "base_json": os.environ["COMPARE_BASE_JSON"], "candidate_json": os.environ["COMPARE_CANDIDATE_JSON"], "stdout_report": os.environ["COMPARE_STDOUT_REPORT"], "markdown_report": os.environ["COMPARE_MARKDOWN_REPORT"], "comparison_json": os.environ["COMPARE_COMPARISON_JSON"], "hash_policy_report": os.environ["COMPARE_HASH_POLICY_REPORT"], "compare_mode": os.environ["COMPARE_MODE_VALUE"], "aggregation": os.environ["COMPARE_AGGREGATION"], "noise_threshold": float(os.environ["COMPARE_NOISE_THRESHOLD"])}, indent=2) + "\n", encoding="utf-8")'
+	COMPARE_MANIFEST_PATH="${manifest_json}" \
+	COMPARE_SUITE="${suite}" \
+	COMPARE_BASE_SHA="${base_ref}" \
+	COMPARE_CANDIDATE_SHA="${candidate_ref}" \
+	COMPARE_BASE_JSON="${base_json}" \
+	COMPARE_CANDIDATE_JSON="${cand_json}" \
+	COMPARE_STDOUT_REPORT="${compare_stdout}" \
+	COMPARE_MARKDOWN_REPORT="${compare_markdown}" \
+	COMPARE_COMPARISON_JSON="${compare_json}" \
+	COMPARE_HASH_POLICY_REPORT="${hash_policy_txt}" \
+	COMPARE_MODE_VALUE="${COMPARE_MODE}" \
+	COMPARE_AGGREGATION="${AGGREGATION}" \
+	COMPARE_NOISE_THRESHOLD="${NOISE_THRESHOLD}" \
+	python3 -c 'import json, os, pathlib; pathlib.Path(os.environ["COMPARE_MANIFEST_PATH"]).write_text(json.dumps({"suite": os.environ["COMPARE_SUITE"], "base_sha": os.environ["COMPARE_BASE_SHA"], "candidate_sha": os.environ["COMPARE_CANDIDATE_SHA"], "base_json": os.environ["COMPARE_BASE_JSON"], "candidate_json": os.environ["COMPARE_CANDIDATE_JSON"], "stdout_report": os.environ["COMPARE_STDOUT_REPORT"], "markdown_report": os.environ["COMPARE_MARKDOWN_REPORT"], "comparison_json": os.environ["COMPARE_COMPARISON_JSON"], "hash_policy_report": os.environ["COMPARE_HASH_POLICY_REPORT"], "compare_mode": os.environ["COMPARE_MODE_VALUE"], "aggregation": os.environ["COMPARE_AGGREGATION"], "noise_threshold": float(os.environ["COMPARE_NOISE_THRESHOLD"])}, indent=2) + "\n", encoding="utf-8")'
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.hash_policy "${base_json}" "${cand_json}"

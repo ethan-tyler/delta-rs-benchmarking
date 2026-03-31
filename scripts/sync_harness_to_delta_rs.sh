@@ -16,16 +16,16 @@ SRC_TPCDS_PY="${ROOT_DIR}/python/delta_bench_tpcds"
 DEST_TPCDS_PY="${DELTA_RS_DIR}/python/delta_bench_tpcds"
 
 if [[ ! -d "${DELTA_RS_DIR}/.git" ]]; then
-  echo "delta-rs checkout not found at ${DELTA_RS_DIR}. Run ./scripts/prepare_delta_rs.sh first."
-  exit 1
+	echo "delta-rs checkout not found at ${DELTA_RS_DIR}. Run ./scripts/prepare_delta_rs.sh first."
+	exit 1
 fi
 
 mkdir -p "${DEST_CRATE}"
 
 rsync -a --delete \
-  --exclude 'target/' \
-  --exclude 'Cargo.toml.delta-rs' \
-  "${SRC_CRATE}/" "${DEST_CRATE}/"
+	--exclude 'target/' \
+	--exclude 'Cargo.toml.delta-rs' \
+	"${SRC_CRATE}/" "${DEST_CRATE}/"
 
 cp "${SRC_CRATE}/Cargo.toml.delta-rs" "${DEST_CRATE}/Cargo.toml"
 

@@ -50,7 +50,7 @@ cases:
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:5ef7b8a21b333742fc17e83337a4b549acdf8275b77c6fb34743587b5100a7d3
+    value: sha256:b333362484714c71fa268b017d1c773a466e417959ec16336a749be670961eea
   - type: schema_hash
     value: sha256:5acd94043ee7628611eb2eece7f69a0d5b4c0a644d15a7ece2dce6344bda7af1
 - id: scan_pruning_miss

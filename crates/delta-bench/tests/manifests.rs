@@ -291,6 +291,31 @@ fn p0_rust_manifest_excludes_unqualified_scan_case_from_authoritative_lane() {
 }
 
 #[test]
+fn scan_pruning_hit_manifest_uses_requalified_exact_result_hash() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+
+    let scan_pruning_hit = manifest
+        .cases
+        .iter()
+        .find(|case| case.id == "scan_pruning_hit")
+        .expect("scan_pruning_hit should stay listed for explicit review");
+    let exact_result_hash = scan_pruning_hit
+        .assertions
+        .iter()
+        .find_map(|assertion| match assertion {
+            ManifestAssertion::ExactResultHash { value } => Some(value.as_str()),
+            _ => None,
+        })
+        .expect("scan_pruning_hit should keep an exact_result_hash assertion");
+
+    assert_eq!(
+        exact_result_hash,
+        "sha256:b333362484714c71fa268b017d1c773a466e417959ec16336a749be670961eea"
+    );
+}
+
+#[test]
 fn p0_rust_manifest_case_ids_match_suite_case_lists() {
     let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");

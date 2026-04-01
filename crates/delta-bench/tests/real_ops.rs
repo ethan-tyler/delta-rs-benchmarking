@@ -3,6 +3,9 @@ use delta_bench::data::fixtures::generate_fixtures;
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::{merge, optimize_vacuum, run_target, scan};
 
+const REQUALIFIED_SCAN_PRUNING_HIT_RESULT_HASH: &str =
+    "sha256:b333362484714c71fa268b017d1c773a466e417959ec16336a749be670961eea";
+
 #[tokio::test]
 async fn generated_fixtures_support_real_scan_suite() {
     let temp = tempfile::tempdir().expect("tempdir");
@@ -101,6 +104,11 @@ async fn scan_pruning_hit_scans_fewer_files_than_miss() {
         .first()
         .and_then(|sample| sample.metrics.as_ref())
         .expect("expected metrics for miss case");
+    assert_eq!(
+        hit_metrics.result_hash.as_deref(),
+        Some(REQUALIFIED_SCAN_PRUNING_HIT_RESULT_HASH),
+        "scan_pruning_hit should stay on the requalified exact-result contract"
+    );
 
     let mut compared = false;
     if let (Some(hit_scanned), Some(miss_scanned)) =

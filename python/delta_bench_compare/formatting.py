@@ -302,20 +302,27 @@ def _table_lines_plain(
     return lines
 
 
+def _is_invalid_row(row: ComparisonRow) -> bool:
+    return row.status == "incomparable" and row.change.startswith("invalid")
+
+
 def _group_rows(comparison: Comparison) -> list[tuple[str, list[ComparisonRow]]]:
     slower = [row for row in comparison.rows if row.status == "regression"]
     faster = [row for row in comparison.rows if row.status == "improvement"]
     stable = [row for row in comparison.rows if row.status == "no_change"]
+    invalid = [row for row in comparison.rows if _is_invalid_row(row)]
     needs_attention = [
         row
         for row in comparison.rows
         if row.status
         in {"incomparable", "expected_failure", "new", "removed", "inconclusive"}
+        and row not in invalid
     ]
     return [
         ("Regressions (slower)", slower),
         ("Improvements (faster)", faster),
         ("Stable (no change)", stable),
+        ("Comparison aborted / invalid", invalid),
         ("Needs Attention", needs_attention),
     ]
 

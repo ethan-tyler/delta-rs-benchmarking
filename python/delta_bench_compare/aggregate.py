@@ -13,6 +13,8 @@ from .schema import (
     load_benchmark_payload,
 )
 
+VALID_AGGREGATE_MODES = {"exploratory", "decision"}
+
 
 def _compute_elapsed_stats(samples: list[dict[str, Any]]) -> dict[str, float] | None:
     elapsed = [
@@ -203,12 +205,18 @@ def _aggregate_payloads_v5(
     return first
 
 
-def aggregate_payloads(payloads: list[dict[str, Any]], label: str) -> dict[str, Any]:
+def aggregate_payloads(
+    payloads: list[dict[str, Any]], label: str, mode: str = "decision"
+) -> dict[str, Any]:
     if not payloads:
         raise ValueError("at least one payload is required for aggregation")
+    if mode not in VALID_AGGREGATE_MODES:
+        raise ValueError(
+            f"unknown aggregate mode '{mode}'; expected one of: exploratory, decision"
+        )
 
     invalid_cases = invalid_perf_case_names(payloads)
-    if invalid_cases:
+    if invalid_cases and mode == "decision":
         raise ValueError(
             "aggregate requires perf_status=trusted inputs; invalid cases present: "
             + ", ".join(invalid_cases)
@@ -225,11 +233,16 @@ def main() -> None:
     )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--label", required=True)
+    parser.add_argument(
+        "--mode",
+        choices=sorted(VALID_AGGREGATE_MODES),
+        default="decision",
+    )
     parser.add_argument("inputs", nargs="+", type=Path)
     args = parser.parse_args()
 
     payloads = [load_benchmark_payload(path) for path in args.inputs]
-    aggregated = aggregate_payloads(payloads, label=args.label)
+    aggregated = aggregate_payloads(payloads, label=args.label, mode=args.mode)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(aggregated, indent=2) + "\n", encoding="utf-8")
     print(f"wrote aggregated result: {args.output}")

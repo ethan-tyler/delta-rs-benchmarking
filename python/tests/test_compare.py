@@ -218,7 +218,7 @@ def test_compare_runs_rejects_invalid_perf_cases() -> None:
     cand = _run([{"case": "a", "samples": [{"elapsed_ms": 90.0}]}])
 
     with pytest.raises(ValueError, match="perf_status=trusted"):
-        compare_runs(base, cand, threshold=0.05)
+        compare_runs(base, cand, threshold=0.05, mode="decision")
 
 
 def test_compare_runs_rejects_context_mismatch() -> None:
@@ -719,6 +719,134 @@ def test_aggregate_payloads_reject_invalid_perf_cases() -> None:
         aggregate_payloads([run_a, run_b], label="merged-run")
 
 
+def test_aggregate_payloads_exploratory_mode_keeps_invalid_cases_and_reports_them() -> (
+    None
+):
+    baseline_run_a = _run(
+        [
+            {
+                "case": "scan_good",
+                "samples": [{"elapsed_ms": 100.0}],
+            },
+            {
+                "case": "scan_bad",
+                "success": False,
+                "validation_passed": False,
+                "perf_status": "invalid",
+                "failure_kind": "assertion_mismatch",
+                "failure": {"message": "hash mismatch"},
+                "samples": [],
+            },
+        ]
+    )
+    baseline_run_b = _run(
+        [
+            {
+                "case": "scan_good",
+                "samples": [{"elapsed_ms": 98.0}],
+            },
+            {
+                "case": "scan_bad",
+                "success": False,
+                "validation_passed": False,
+                "perf_status": "invalid",
+                "failure_kind": "assertion_mismatch",
+                "failure": {"message": "hash mismatch"},
+                "samples": [],
+            },
+        ]
+    )
+    candidate_run_a = _run(
+        [
+            {
+                "case": "scan_good",
+                "samples": [{"elapsed_ms": 90.0}],
+            },
+            {
+                "case": "scan_bad",
+                "success": False,
+                "validation_passed": False,
+                "perf_status": "invalid",
+                "failure_kind": "assertion_mismatch",
+                "failure": {"message": "hash mismatch"},
+                "samples": [],
+            },
+        ]
+    )
+    candidate_run_b = _run(
+        [
+            {
+                "case": "scan_good",
+                "samples": [{"elapsed_ms": 89.0}],
+            },
+            {
+                "case": "scan_bad",
+                "success": False,
+                "validation_passed": False,
+                "perf_status": "invalid",
+                "failure_kind": "assertion_mismatch",
+                "failure": {"message": "hash mismatch"},
+                "samples": [],
+            },
+        ]
+    )
+
+    baseline = aggregate_payloads(
+        [baseline_run_a, baseline_run_b],
+        label="baseline-merged",
+        mode="exploratory",
+    )
+    candidate = aggregate_payloads(
+        [candidate_run_a, candidate_run_b],
+        label="candidate-merged",
+        mode="exploratory",
+    )
+
+    invalid_case = next(case for case in baseline["cases"] if case["case"] == "scan_bad")
+    assert invalid_case["perf_status"] == "invalid"
+    assert invalid_case["failure_kind"] == "assertion_mismatch"
+    assert invalid_case["failure"] == {"message": "hash mismatch"}
+
+    comparison = compare_runs(
+        baseline,
+        candidate,
+        threshold=0.05,
+        aggregation="median",
+        mode="exploratory",
+    )
+    rows = {row.case: row for row in comparison.rows}
+
+    assert rows["scan_good"].status == "improvement"
+    assert rows["scan_bad"].status == "incomparable"
+    assert "invalid" in rows["scan_bad"].change
+
+    from delta_bench_compare.compare import render_text
+
+    out = render_text(comparison)
+    assert "Comparison aborted / invalid" in out
+    assert "scan_bad" in out
+
+
+def test_aggregate_payloads_decision_mode_rejects_invalid_perf_cases() -> None:
+    run_a = _run(
+        [
+            {
+                "case": "scan_case",
+                "success": False,
+                "validation_passed": False,
+                "perf_status": "invalid",
+                "failure_kind": "execution_error",
+                "failure": {"message": "boom"},
+                "samples": [],
+            }
+        ]
+    )
+    run_b = _run([{"case": "scan_case", "samples": [{"elapsed_ms": 90.0}]}])
+
+    with pytest.raises(ValueError, match="perf_status=trusted"):
+        aggregate_payloads([run_a, run_b], label="merged-run", mode="decision")
+
+
 def test_aggregate_payloads_rejects_inconsistent_classification() -> None:
     run_a = _run(
         [
@@ -914,7 +1042,7 @@ def test_compare_cli_rejects_invalid_perf_input_without_traceback(
     baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
     candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
 
-    result = _run_compare_cli(baseline_path, candidate_path)
+    result = _run_compare_cli(baseline_path, candidate_path, "--mode", "decision")
 
     assert result.returncode == 1
     assert result.stdout == ""

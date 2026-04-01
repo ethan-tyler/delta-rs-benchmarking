@@ -33,7 +33,7 @@ The compare pipeline runs the macro lane in `--mode perf`. By default `compare_b
 
 Before treating a machine or workflow as trustworthy for perf claims, rerun `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
 
-> **Automation scope.** PR comments support `run benchmark scan` (exploratory) and `run benchmark decision scan` (decision-grade). Automated macro perf is curated to `scan` only — specifically `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` is disabled until requalified. Stateful Rust suites are correctness-trusted; forcing them through macro lane produces operational but not `perf_status=trusted` results. GitHub-hosted CI stays on smoke and correctness lanes.
+> **Automation scope.** PR comments support `run benchmark scan` (exploratory) and `run benchmark decision scan` (decision-grade). Automated macro perf is curated to `scan` only — specifically `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_hit` is requalified on the current `tiny_smoke` contract; `scan_pruning_miss` remains disabled until it is requalified. Stateful Rust suites are correctness-trusted; forcing them through macro lane produces operational but not `perf_status=trusted` results. GitHub-hosted CI stays on smoke and correctness lanes.
 
 ## Comparison Methods
 
@@ -49,16 +49,16 @@ Use this when you want to check your branch against main without specifying exac
 
 ### Named branch-to-branch
 
-Compare any two branches or refs that exist in the delta-rs checkout:
+Compare any two branches or refs that exist in the clean source checkout used for compare pinning:
 
 ```bash
 ./scripts/compare_branch.sh main <candidate_ref> scan
 ```
 
-The `<candidate_ref>` must exist in `.delta-rs-under-test`. To see available refs:
+The `<candidate_ref>` must exist in `.delta-rs-source` (or your overridden `DELTA_RS_SOURCE_DIR`). To see available refs:
 
 ```bash
-git -C .delta-rs-under-test branch -a
+git -C .delta-rs-source branch -a
 ```
 
 ### Immutable SHA compare (recommended for long runs)
@@ -86,18 +86,27 @@ If a trusted PR head SHA lives on a fork remote instead of `origin`, pass the fo
 
 Use `--base-fetch-url` the same way when the base SHA is only reachable from a non-`origin` remote. Prefer the full 40-character SHA when you use an alternate fetch URL. If you only have an abbreviated SHA and it is not directly advertised by the alternate remote, set `DELTA_RS_FETCH_REF` to an advertised branch/ref so the checkout can fetch that history first. The lower-level checkout contract is also available through `prepare_delta_rs.sh` via `DELTA_RS_FETCH_URL` and `DELTA_RS_FETCH_REF`.
 
+By default compare keeps two local delta-rs roots with different responsibilities:
+
+- `.delta-rs-source/` or `DELTA_RS_SOURCE_DIR` stays clean and is used only for branch lookup, immutable SHA pinning, and seeding per-SHA compare checkouts.
+- `.delta-rs-under-test/` or `DELTA_RS_DIR` is the mutable execution checkout that receives synced harness files.
+
+This means compare no longer requires `.delta-rs-under-test/` to stay clean between runs.
+
+`--current-vs-main` is the one exception to the seeding rule: its candidate prepared checkout is fetched from `.delta-rs-under-test/` so the current local HEAD remains reachable even when it has not been copied into `.delta-rs-source/`.
+
 ## What Compare Does Under the Hood
 
 When you run a comparison, the script executes these steps in order:
 
-1. **Pins immutable refs** -- updates `.delta-rs-under-test`, and for immutable SHAs can fall back to a trusted alternate remote URL before resolving the base and candidate refs.
-2. **Prepares per-ref worktrees** -- creates one synced checkout per pinned SHA under `.delta-bench-compare-checkouts/` and reuses those prepared directories for prewarm and measured runs instead of flipping one checkout back and forth.
+1. **Pins immutable refs** -- updates `.delta-rs-source` (or `DELTA_RS_SOURCE_DIR`), and for immutable SHAs can fall back to a trusted alternate remote URL before resolving the base and candidate refs.
+2. **Prepares per-ref worktrees** -- creates one synced checkout per pinned SHA under `.delta-bench-compare-checkouts/` by cloning/fetching from the clean source checkout. `--current-vs-main` keeps the candidate side reachable from `.delta-rs-under-test/`. The workflow then reuses those prepared directories for prewarm and measured runs instead of flipping one checkout back and forth.
 3. **Generates fixtures** -- creates deterministic test data using the base revision, ensuring both sides benchmark against identical input.
 4. **Runs prewarm iterations** (optional) -- executes unreported warmup iterations for both refs to prime caches and stabilize thermal state.
 5. **Runs measured iterations** -- executes the configured number of measured benchmark runs for base and candidate in the configured order (alternating by default).
 6. **Aggregates results** -- combines all measured runs for each side into a single JSON payload using the configured aggregation method (median by default).
 7. **Writes compare artifacts** -- stores `stdout.txt`, `summary.md`, `comparison.json`, `hash-policy.txt`, and `manifest.json` under `results/compare/<suite>/<base>__<candidate>/`.
-8. **Prints the report** -- classifies each case and prints grouped output for valid perf comparisons only. Invalid or mismatched inputs fail closed before comparison.
+8. **Prints the report** -- classifies each case and prints grouped output. Exploratory mode keeps trusted cases even when one case is invalid and renders those aborted cases in a dedicated section. Decision mode still fails closed on any invalid or mismatched input.
 
 ## Tuning Your Comparison
 
@@ -129,6 +138,8 @@ These control execution behavior at the script level:
 | `BENCH_TIMEOUT_SECONDS`     | `3600`  | Maximum time per benchmark step before timeout. |
 | `BENCH_RETRY_ATTEMPTS`      | `2`     | Number of retries for transient failures.       |
 | `BENCH_RETRY_DELAY_SECONDS` | `5`     | Delay between retries.                          |
+| `DELTA_RS_SOURCE_DIR`       | `.delta-rs-source` | Clean checkout used for compare ref resolution and per-SHA checkout seeding. |
+| `DELTA_BENCH_MIN_FREE_GB`   | `20`    | Local-only minimum free-space floor enforced before compare checkout prep. |
 
 ### Adding metric columns to the report
 
@@ -167,10 +178,17 @@ For PR merge decisions and release validation, follow these practices to minimiz
 
 1. **Use immutable refs.** Pass `--base-sha` and `--candidate-sha` (or `--current-vs-main`) so the revisions cannot shift during the run.
 2. **Run on an idle machine.** Keep the system otherwise quiet and use the same backend/profile for both refs.
-3. **Keep alternating order.** The default `--measure-order alternate` reduces drift from cache warming, thermal throttling, and background processes by interleaving base and candidate runs.
-4. **Use median aggregation.** The default `median` is robust to outliers. Switch to `p95` only when analyzing tail latency.
-5. **Watch for noise.** If `cv_pct` (coefficient of variation) exceeds 10% for a case, the measurement is noisy. Rerun with higher `--compare-runs` or `--iters` to increase sample size.
-6. **Revalidate the harness before using the output as evidence.** Run `./scripts/validate_perf_harness.sh` and inspect the refreshed `summary.md` in its artifact directory against the operator guidance in `docs/validation.md`. If you want a stable local path, use `--artifact-dir results/validation/latest`.
+3. **Keep local disk headroom above the preflight floor.** `compare_branch.sh` fails closed below `20` GiB free by default. Clear stale `target/` trees or cached compare checkouts before long local compare sessions, or raise/lower the floor explicitly with `DELTA_BENCH_MIN_FREE_GB` when your machine contract differs.
+4. **Use a shared Cargo target directory locally.** If you hit per-checkout target instability, standardize local compares on:
+
+```bash
+export CARGO_TARGET_DIR="$PWD/target"
+```
+
+5. **Keep alternating order.** The default `--measure-order alternate` reduces drift from cache warming, thermal throttling, and background processes by interleaving base and candidate runs.
+6. **Use median aggregation.** The default `median` is robust to outliers. Switch to `p95` only when analyzing tail latency.
+7. **Watch for noise.** If `cv_pct` (coefficient of variation) exceeds 10% for a case, the measurement is noisy. Rerun with higher `--compare-runs` or `--iters` to increase sample size.
+8. **Revalidate the harness before using the output as evidence.** Run `./scripts/validate_perf_harness.sh` and inspect the refreshed `summary.md` in its artifact directory against the operator guidance in `docs/validation.md`. If you want a stable local path, use `--artifact-dir results/validation/latest`.
 
 Decision-grade command with the current explicit trust contract:
 
@@ -203,7 +221,7 @@ The comparison report groups benchmark cases into four sections:
 | **Regressions**        | Cases where the candidate is slower than the base beyond the noise threshold. Investigate before merging.     |
 | **Improvements**       | Cases where the candidate is faster than the base beyond the noise threshold.                                 |
 | **Stable**             | Cases where performance is within the noise threshold. No action needed.                                      |
-| **Comparison aborted** | Any invalid workload or mismatched benchmark context. Compare fails closed instead of producing a perf claim. |
+| **Comparison aborted / invalid** | Exploratory mode reports invalid workloads here without discarding the rest of the artifact. Decision mode still fails closed instead of producing a perf claim. |
 
 Key metrics to look at:
 

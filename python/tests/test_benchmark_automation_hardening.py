@@ -462,6 +462,15 @@ def test_bench_docs_explain_harness_root_path_resolution_when_exec_root_differs(
     ) in getting_started
 
 
+def test_reference_docs_cover_compare_source_checkout_and_preflight_controls() -> None:
+    reference = REFERENCE_DOC.read_text(encoding="utf-8")
+    getting_started = GETTING_STARTED_DOC.read_text(encoding="utf-8")
+
+    assert "DELTA_RS_SOURCE_DIR" in reference
+    assert "DELTA_BENCH_MIN_FREE_GB" in reference
+    assert "delta-rs-source" in getting_started
+
+
 def test_scan_phase_criterion_bench_covers_multiple_pr_sensitive_cases() -> None:
     bench = SCAN_PHASE_BENCH.read_text(encoding="utf-8")
     for case_name in ("scan_filter_flag", "scan_projection_region", "scan_pruning_hit"):
@@ -668,6 +677,7 @@ def test_compare_branch_supports_working_branch_vs_upstream_main_shortcut() -> N
     assert "--current-vs-main" in script
     assert "--working-vs-upstream-main" in script
     assert "--upstream-remote <name>" in script
+    assert 'DELTA_RS_SOURCE_DIR="${DELTA_RS_SOURCE_DIR:-${RUNNER_ROOT}/.delta-rs-source}"' in script
     assert re.search(r"WORKING_VS_UPSTREAM_MAIN=0", script)
     assert re.search(r"UPSTREAM_REMOTE_OVERRIDE=\"\"", script)
     assert re.search(
@@ -679,7 +689,7 @@ def test_compare_branch_supports_working_branch_vs_upstream_main_shortcut() -> N
         script,
     )
     assert re.search(
-        r"git -C \"\$\{DELTA_RS_DIR\}\" fetch \"\$\{upstream_remote\}\" main",
+        r"git -C \"\$\{DELTA_RS_SOURCE_DIR\}\" fetch \"\$\{upstream_remote\}\" main",
         script,
     )
 
@@ -707,11 +717,21 @@ def test_compare_branch_emits_clear_missing_ref_guidance() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "benchmark ref '${ref}' not found in delta-rs checkout" in script
     assert "--candidate-sha" in script
-    assert 'git -C "${DELTA_RS_DIR}" branch -a' in script
+    assert 'git -C "${DELTA_RS_SOURCE_DIR}" branch -a' in script
     assert re.search(
         r'ensure_known_ref_mode "\$\{candidate_ref\}" "\$\{candidate_ref_mode\}"[\s\S]*base_ref="\$\(pin_ref_to_commit "\$\{base_ref\}"',
         script,
     )
+
+
+def test_compare_branch_defines_local_compare_preflight_for_disk_headroom() -> (
+    None
+):
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert 'DELTA_BENCH_MIN_FREE_GB="${DELTA_BENCH_MIN_FREE_GB:-20}"' in script
+    assert "run_local_compare_preflight" in script
+    assert re.search(r'df -Pk "\$\{RUNNER_ROOT\}"', script)
+    assert 'export CARGO_TARGET_DIR="$PWD/target"' in script
 
 
 def test_prepare_delta_rs_supports_immutable_ref_checkout() -> None:
@@ -924,6 +944,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", required=True)
 parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
 parser.add_argument("inputs", nargs="+")
 args = parser.parse_args()
 
@@ -999,6 +1020,1160 @@ print("hash policy ok")
             entry["ref"] == candidate_sha and entry["fetch_url"] == str(fork_repo)
             for entry in prep_entries
         )
+
+
+def test_compare_branch_fails_closed_when_sha_pinning_misses_requested_commit() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        managed_checkout = temp_root / ".delta-rs-under-test"
+        (managed_checkout / ".git").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench" / "Cargo.toml").write_text(
+            "dirty overlay\n", encoding="utf-8"
+        )
+
+        stale_head = "1111111111111111111111111111111111111111"
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        (managed_checkout / ".bench-current-sha").write_text(
+            f"{stale_head}\n", encoding="utf-8"
+        )
+
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+
+mkdir -p "${{DELTA_RS_DIR}}"
+if [[ "${{DELTA_RS_DIR}}" == {str(managed_checkout)!r} ]] && [[ -n "${{DELTA_RS_REF:-}}" ]]; then
+  echo "simulated checkout transition failure for ${{DELTA_RS_REF}}" >&2
+  exit 42
+fi
+
+mkdir -p "${{DELTA_RS_DIR}}/.git"
+ref="${{DELTA_RS_REF:-${{DELTA_RS_BRANCH:-}}}}"
+if [[ -z "${{ref}}" ]]; then
+  ref="{stale_head}"
+fi
+printf '%s\\n' "${{ref}}" > "${{DELTA_RS_DIR}}/.bench-current-sha"
+printf 'delta-rs checkout ready: %s\\n' "${{DELTA_RS_DIR}}"
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+suite = value(args, "--suite", "scan")
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    target_dir = results_dir / label
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps({"label": label, "suite": suite}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.parse_known_args()
+print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(managed_checkout)
+        env["DELTA_RS_SOURCE_DIR"] = str(managed_checkout)
+        env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode != 0
+        assert "requested commit" in result.stderr
+        assert "was not pinned" in result.stderr
+        assert f"Pinned base ref: {base_sha} -> {stale_head}" not in result.stdout
+        assert f"Pinned candidate ref: {candidate_sha} -> {stale_head}" not in result.stdout
+
+
+def test_compare_branch_accepts_abbreviated_sha_pins_when_source_checkout_resolves_full_commits() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        managed_checkout = temp_root / ".delta-rs-under-test"
+        source_checkout = temp_root / ".delta-rs-source"
+        (managed_checkout / ".git").mkdir(parents=True)
+        (source_checkout / ".git").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench" / "Cargo.toml").write_text(
+            "dirty overlay\n", encoding="utf-8"
+        )
+
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        base_short = base_sha[:12]
+        candidate_short = candidate_sha[:12]
+
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+(checkout_dir / ".git").mkdir(exist_ok=True)
+ref = os.environ.get("DELTA_RS_REF") or os.environ.get("DELTA_RS_BRANCH") or ""
+resolved = {{
+    {base_short!r}: {base_sha!r},
+    {candidate_short!r}: {candidate_sha!r},
+}}.get(ref, ref or "0" * 40)
+(checkout_dir / ".bench-current-sha").write_text(f"{{resolved}}\\n", encoding="utf-8")
+print(f"delta-rs checkout ready: {{checkout_dir}}")
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+suite = value(args, "--suite", "scan")
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    target_dir = results_dir / label
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps({"label": label, "suite": suite}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    remote)
+      if [[ "${2:-}" == "get-url" ]]; then
+        exit 0
+      fi
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.parse_known_args()
+print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_BENCH_MIN_FREE_GB"] = "1"
+        env["DELTA_RS_DIR"] = str(managed_checkout)
+        env["DELTA_RS_SOURCE_DIR"] = str(source_checkout)
+        env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_short,
+                "--candidate-sha",
+                candidate_short,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert f"Pinned base ref: {base_short} -> {base_sha}" in result.stdout
+        assert (
+            f"Pinned candidate ref: {candidate_short} -> {candidate_sha}"
+            in result.stdout
+        )
+
+
+def test_compare_branch_prefers_hex_like_branch_refs_over_commit_interpretation_when_branch_exists() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        managed_checkout = temp_root / ".delta-rs-under-test"
+        source_checkout = temp_root / ".delta-rs-source"
+        (managed_checkout / ".git").mkdir(parents=True)
+        (source_checkout / ".git").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench" / "Cargo.toml").write_text(
+            "dirty overlay\n", encoding="utf-8"
+        )
+
+        main_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        hex_branch_name = "deadbeefcafe"
+        hex_branch_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+(checkout_dir / ".git").mkdir(exist_ok=True)
+ref = os.environ.get("DELTA_RS_REF") or os.environ.get("DELTA_RS_BRANCH") or ""
+resolved = {{
+    "main": {main_sha!r},
+    {hex_branch_name!r}: {hex_branch_sha!r},
+}}.get(ref, ref or "0" * 40)
+(checkout_dir / ".bench-current-sha").write_text(f"{{resolved}}\\n", encoding="utf-8")
+print(f"delta-rs checkout ready: {{checkout_dir}}")
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+suite = value(args, "--suite", "scan")
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    target_dir = results_dir / label
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps({"label": label, "suite": suite}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${{1:-}}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${{1:-}}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    remote)
+      if [[ "${{2:-}}" == "get-url" ]]; then
+        exit 0
+      fi
+      ;;
+    show-ref)
+      case "${{@: -1}}" in
+        refs/heads/main|refs/remotes/origin/main|refs/heads/{hex_branch_name}|refs/remotes/origin/{hex_branch_name})
+          exit 0
+          ;;
+        *)
+          exit 1
+          ;;
+      esac
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${{repo}}/.bench-current-sha"
+        exit 0
+      fi
+      if [[ "${{@: -1}}" == "main^{{commit}}" ]]; then
+        printf '%s\\n' {main_sha!r}
+        exit 0
+      fi
+      if [[ "${{@: -1}}" == "{hex_branch_name}^{{commit}}" ]]; then
+        printf '%s\\n' {hex_branch_sha!r}
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.parse_known_args()
+print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_BENCH_MIN_FREE_GB"] = "1"
+        env["DELTA_RS_DIR"] = str(managed_checkout)
+        env["DELTA_RS_SOURCE_DIR"] = str(source_checkout)
+        env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+
+        result = subprocess.run(
+            ["bash", str(compare_copy), "main", hex_branch_name, "scan"],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert f"Pinned base ref: main -> {main_sha}" in result.stdout
+        assert (
+            f"Pinned candidate ref: {hex_branch_name} -> {hex_branch_sha}"
+            in result.stdout
+        )
+
+
+def test_compare_branch_uses_clean_source_checkout_for_immutable_sha_resolution() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        managed_checkout = temp_root / ".delta-rs-under-test"
+        source_checkout = temp_root / ".delta-rs-source"
+        compare_checkout_root = temp_root / ".delta-bench-compare-checkouts"
+        (managed_checkout / ".git").mkdir(parents=True)
+        (source_checkout / ".git").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench" / "Cargo.toml").write_text(
+            "dirty overlay\n", encoding="utf-8"
+        )
+
+        prep_log = temp_root / "prep-log.jsonl"
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+ref = os.environ.get("DELTA_RS_REF") or os.environ.get("DELTA_RS_BRANCH") or ""
+fetch_url = os.environ.get("DELTA_RS_FETCH_URL", "")
+
+with open({str(prep_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(
+        json.dumps(
+            {{
+                "dir": os.environ["DELTA_RS_DIR"],
+                "ref": os.environ.get("DELTA_RS_REF"),
+                "branch": os.environ.get("DELTA_RS_BRANCH"),
+                "fetch_url": fetch_url,
+            }}
+        )
+        + "\\n"
+    )
+
+if checkout_dir == Path({str(managed_checkout)!r}) and ref:
+    print("dirty managed checkout cannot resolve immutable refs", file=sys.stderr)
+    raise SystemExit(42)
+
+if checkout_dir.parent == Path({str(compare_checkout_root)!r}) and fetch_url != {str(source_checkout)!r}:
+    print(
+        "per-ref compare checkouts must clone from the clean source checkout",
+        file=sys.stderr,
+    )
+    raise SystemExit(43)
+
+(checkout_dir / ".git").mkdir(exist_ok=True)
+resolved_ref = ref or "0000000000000000000000000000000000000000"
+(checkout_dir / ".bench-current-sha").write_text(f"{{resolved_ref}}\\n", encoding="utf-8")
+print(f"delta-rs checkout ready: {{checkout_dir}}")
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+suite = value(args, "--suite", "scan")
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    target_dir = results_dir / label
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps({"label": label, "suite": suite}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.parse_known_args()
+print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(managed_checkout)
+        env["DELTA_RS_SOURCE_DIR"] = str(source_checkout)
+        env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(compare_checkout_root)
+        env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        prep_entries = [
+            json.loads(line)
+            for line in prep_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        pin_entries = [
+            entry
+            for entry in prep_entries
+            if entry["dir"] == str(source_checkout)
+            and entry["ref"] in {base_sha, candidate_sha}
+        ]
+        assert [entry["ref"] for entry in pin_entries] == [base_sha, candidate_sha]
+        prepared_entries = [
+            entry
+            for entry in prep_entries
+            if Path(entry["dir"]).resolve().parent == compare_checkout_root.resolve()
+        ]
+        assert [entry["fetch_url"] for entry in prepared_entries] == [
+            str(source_checkout),
+            str(source_checkout),
+        ]
+
+
+def test_compare_branch_workflow_keeps_exploratory_artifacts_when_one_case_is_invalid() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        managed_checkout = temp_root / ".delta-rs-under-test"
+        source_checkout = temp_root / ".delta-rs-source"
+        compare_checkout_root = temp_root / ".delta-bench-compare-checkouts"
+        (managed_checkout / ".git").mkdir(parents=True)
+        (source_checkout / ".git").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench").mkdir(parents=True)
+        (managed_checkout / "crates" / "delta-bench" / "Cargo.toml").write_text(
+            "dirty overlay\n", encoding="utf-8"
+        )
+
+        prep_log = temp_root / "prep-log.jsonl"
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+ref = os.environ.get("DELTA_RS_REF") or os.environ.get("DELTA_RS_BRANCH") or ""
+fetch_url = os.environ.get("DELTA_RS_FETCH_URL", "")
+
+with open({str(prep_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(
+        json.dumps(
+            {{
+                "dir": os.environ["DELTA_RS_DIR"],
+                "ref": os.environ.get("DELTA_RS_REF"),
+                "branch": os.environ.get("DELTA_RS_BRANCH"),
+                "fetch_url": fetch_url,
+            }}
+        )
+        + "\\n"
+    )
+
+if checkout_dir == Path({str(managed_checkout)!r}) and ref:
+    print("dirty managed checkout should not be used for compare pinning", file=sys.stderr)
+    raise SystemExit(42)
+
+if checkout_dir.parent == Path({str(compare_checkout_root)!r}) and fetch_url != {str(source_checkout)!r}:
+    print("per-ref compare checkout must be seeded from clean source checkout", file=sys.stderr)
+    raise SystemExit(43)
+
+(checkout_dir / ".git").mkdir(exist_ok=True)
+resolved_ref = ref or "0000000000000000000000000000000000000000"
+(checkout_dir / ".bench-current-sha").write_text(f"{{resolved_ref}}\\n", encoding="utf-8")
+print(f"delta-rs checkout ready: {{checkout_dir}}")
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+suite = value(args, "--suite", "scan")
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    target_dir = results_dir / label
+    target_dir.mkdir(parents=True, exist_ok=True)
+    trusted_ms = 100.0 if label.startswith("base-") else 90.0
+    payload = {
+        "schema_version": 5,
+        "context": {
+            "schema_version": 5,
+            "label": label,
+            "suite": suite,
+            "benchmark_mode": "perf",
+            "timing_phase": "execute",
+            "dataset_id": "tiny_smoke",
+            "dataset_fingerprint": "sha256:fixture",
+            "runner": "rust",
+            "scale": "sf1",
+            "storage_backend": "local",
+            "backend_profile": "local",
+            "lane": "macro",
+            "measurement_kind": "phase_breakdown",
+            "validation_level": "operational",
+            "harness_revision": "harness-rev",
+            "fixture_recipe_hash": "sha256:recipe",
+            "fidelity_fingerprint": "sha256:fidelity",
+        },
+        "cases": [
+            {
+                "case": "scan_full_narrow",
+                "success": True,
+                "validation_passed": True,
+                "perf_status": "trusted",
+                "classification": "supported",
+                "samples": [{"elapsed_ms": trusted_ms, "metrics": {"files_scanned": 10}}],
+                "run_summary": {
+                    "sample_count": 1,
+                    "invalid_sample_count": 0,
+                    "median_ms": trusted_ms,
+                    "host_label": "bench-host",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "compatibility_key": "sha256:good",
+                "supports_decision": True,
+                "required_runs": 5,
+                "decision_threshold_pct": 5.0,
+                "decision_metric": "median",
+            },
+            {
+                "case": "scan_pruning_hit",
+                "success": False,
+                "validation_passed": False,
+                "perf_status": "invalid",
+                "classification": "supported",
+                "samples": [],
+                "run_summary": {
+                    "sample_count": 0,
+                    "invalid_sample_count": 0,
+                    "host_label": "bench-host",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "compatibility_key": "sha256:bad",
+                "supports_decision": True,
+                "required_runs": 5,
+                "decision_threshold_pct": 5.0,
+                "decision_metric": "median",
+                "failure_kind": "assertion_mismatch",
+                "failure": {"message": "stale hash"},
+            },
+        ],
+    }
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps(payload),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_root = temp_root / "python"
+        python_root.mkdir(parents=True)
+        shutil.copytree(REPO_ROOT / "python" / "delta_bench_compare", python_root / "delta_bench_compare")
+
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        results_dir = temp_root / "results"
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(managed_checkout)
+        env["DELTA_RS_SOURCE_DIR"] = str(source_checkout)
+        env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(compare_checkout_root)
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert "Traceback" not in result.stderr
+        artifact_dir = results_dir / "compare" / "scan" / f"{base_sha}__{candidate_sha}"
+        stdout_report = (artifact_dir / "stdout.txt").read_text(encoding="utf-8")
+        markdown_report = (artifact_dir / "summary.md").read_text(encoding="utf-8")
+        assert "Comparison aborted / invalid" in stdout_report
+        assert "scan_pruning_hit" in stdout_report
+        assert "Comparison aborted / invalid" in markdown_report
+        prep_entries = [
+            json.loads(line)
+            for line in prep_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        pin_entries = [
+            entry
+            for entry in prep_entries
+            if entry["dir"] == str(source_checkout)
+            and entry["ref"] in {base_sha, candidate_sha}
+        ]
+        assert [entry["ref"] for entry in pin_entries] == [base_sha, candidate_sha]
 
 
 def test_prepare_delta_rs_cleans_untracked_harness_overlay_before_checkout() -> None:
@@ -1226,6 +2401,8 @@ exit 99
 def test_gitignore_ignores_checkout_lock_artifacts() -> None:
     gitignore = GITIGNORE.read_text(encoding="utf-8")
     assert ".DS_Store" in gitignore
+    assert ".delta-rs-source/" in gitignore
+    assert ".delta-bench-compare-checkouts/" in gitignore
     assert "*.delta_bench_checkout.lock" in gitignore
     assert "*.delta_bench_checkout.lock.dir/" in gitignore
     assert "Best-in-Class Benchmark Suite" not in gitignore
@@ -1486,6 +2663,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", required=True)
 parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
 parser.add_argument("inputs", nargs="+")
 args = parser.parse_args()
 
@@ -1689,6 +2867,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", required=True)
 parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
 parser.add_argument("inputs", nargs="+")
 args = parser.parse_args()
 
@@ -1933,6 +3112,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", required=True)
 parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
 parser.add_argument("inputs", nargs="+")
 args = parser.parse_args()
 
@@ -2314,6 +3494,7 @@ from pathlib import Path
 parser = argparse.ArgumentParser()
 parser.add_argument("--output", required=True)
 parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
 parser.add_argument("inputs", nargs="+")
 args = parser.parse_args()
 
@@ -2783,6 +3964,17 @@ def test_compare_branch_acquires_checkout_lock_for_full_run() -> None:
     assert re.search(r"export DELTA_BENCH_CHECKOUT_LOCK_HELD=1", script)
 
 
+def test_compare_branch_acquires_source_checkout_lock_for_full_run() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE" in script
+    assert "acquire_source_checkout_lock" in script
+    assert "release_source_checkout_lock" in script
+    assert re.search(
+        r'DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE="\$\{DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE:-\$\(default_checkout_lock_file \"\$\{DELTA_RS_SOURCE_DIR\}\"\)\}"',
+        script,
+    )
+
+
 def test_prepare_delta_rs_honors_existing_checkout_lock() -> None:
     script = PREPARE_DELTA_RS.read_text(encoding="utf-8")
     assert "DELTA_BENCH_CHECKOUT_LOCK_FILE" in script
@@ -2884,6 +4076,7 @@ def test_cleanup_local_help_lists_all_flags() -> None:
         "--results",
         "--compare-checkouts",
         "--fixtures",
+        "--delta-rs-source",
         "--delta-rs-under-test",
         "--allow-outside-root",
         "--keep-last <N>",
@@ -3138,6 +4331,43 @@ def test_cleanup_local_checkout_target_removes_root_checkout_lock_artifacts() ->
 
         assert apply_run.returncode == 0
         assert not checkout_dir.exists()
+        assert not lock_file.exists()
+        assert not lock_dir.exists()
+
+
+def test_cleanup_local_source_checkout_target_removes_root_checkout_lock_artifacts() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        source_dir = root / ".delta-rs-source"
+        source_dir.mkdir(parents=True)
+        lock_file = root / ".delta-rs-source.delta_bench_checkout.lock"
+        lock_dir = root / ".delta-rs-source.delta_bench_checkout.lock.dir"
+        lock_file.write_text("", encoding="utf-8")
+        lock_dir.mkdir()
+        (lock_dir / "pid").write_text("123\n", encoding="utf-8")
+
+        env = os.environ.copy()
+        env["DELTA_RS_SOURCE_DIR"] = str(source_dir)
+
+        apply_run = subprocess.run(
+            [
+                "bash",
+                str(LOCAL_CLEANUP),
+                "--apply",
+                "--delta-rs-source",
+                "--allow-outside-root",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert apply_run.returncode == 0
+        assert not source_dir.exists()
         assert not lock_file.exists()
         assert not lock_dir.exists()
 

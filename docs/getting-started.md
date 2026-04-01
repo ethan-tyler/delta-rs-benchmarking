@@ -15,9 +15,9 @@ This guide walks you through setting up the benchmark harness, running your firs
 
 ## How the Harness Works
 
-This repository is a standalone benchmark harness that wraps [delta-rs](https://github.com/delta-io/delta-rs). It manages its own checkout of delta-rs at `.delta-rs-under-test/`, generates deterministic test data (fixtures), runs benchmark suites against that checkout, and writes structured JSON results.
+This repository is a standalone benchmark harness that wraps [delta-rs](https://github.com/delta-io/delta-rs). It manages a mutable execution checkout at `.delta-rs-under-test/`, a clean source checkout for compare pinning at `.delta-rs-source/`, generates deterministic test data (fixtures), runs benchmark suites against prepared checkouts, and writes structured JSON results.
 
-You never need to modify delta-rs source from this repo. The harness syncs itself into the delta-rs workspace, runs benchmarks there, and collects results back here.
+You never need to modify delta-rs source from this repo. The harness syncs itself into the mutable delta-rs workspace, runs benchmarks there, and collects results back here. Compare workflows resolve immutable refs through the clean source checkout so `.delta-rs-under-test/` can carry synced harness files without breaking SHA pinning.
 
 The main scripts are:
 
@@ -28,7 +28,7 @@ The main scripts are:
 | `bench.sh`                    | Generates fixtures and runs benchmark suites               |
 | `compare_branch.sh`           | Runs benchmarks against two revisions, compares them, and writes compare artifacts |
 
-Branch compare writes an automation-friendly bundle under `results/compare/<suite>/<base>__<candidate>/`, including `summary.md`, versioned `comparison.json`, `hash-policy.txt`, and `manifest.json`. If a trusted immutable SHA lives on a fork remote, pass `--candidate-fetch-url <clone-url>` or `--base-fetch-url <clone-url>` and prefer the full 40-character SHA.
+Branch compare writes an automation-friendly bundle under `results/compare/<suite>/<base>__<candidate>/`, including `summary.md`, versioned `comparison.json`, `hash-policy.txt`, and `manifest.json`. Immutable refs are resolved through `DELTA_RS_SOURCE_DIR` (default: `.delta-rs-source/`). If a trusted immutable SHA lives on a fork remote, pass `--candidate-fetch-url <clone-url>` or `--base-fetch-url <clone-url>` and prefer the full 40-character SHA.
 
 ## Prerequisites
 
@@ -41,7 +41,7 @@ The harness can manage its own delta-rs clone. This is the simplest way to get s
 ./scripts/sync_harness_to_delta_rs.sh
 ```
 
-The first command clones delta-rs into `.delta-rs-under-test/`. The second copies the benchmark crate and configuration into that workspace so Cargo can find it.
+The first command clones delta-rs into `.delta-rs-under-test/`. The second copies the benchmark crate and configuration into that workspace so Cargo can find it. `compare_branch.sh` creates a separate clean source checkout at `.delta-rs-source/` on demand unless you override `DELTA_RS_SOURCE_DIR`.
 
 ### Bring your own delta-rs clone
 
@@ -58,6 +58,8 @@ DELTA_BENCH_EXEC_ROOT=/path/to/your/delta-rs \
 ```
 
 Relative `DELTA_BENCH_FIXTURES` and `DELTA_BENCH_RESULTS` values still stay anchored to this harness repository, even when `DELTA_BENCH_EXEC_ROOT` points at a separate delta-rs checkout. Use absolute paths if you want fixtures or results to live somewhere else.
+
+If you want compare pinning to reuse a specific clean clone, set `DELTA_RS_SOURCE_DIR` to that checkout. Keep it unsynced and disposable; the harness uses it only to resolve immutable refs and seed per-SHA compare worktrees.
 
 ### Python interop dependencies
 
@@ -214,6 +216,7 @@ Apply targeted cleanup:
 ./scripts/cleanup_local.sh --apply --results --keep-last 5 --older-than-days 14
 ./scripts/cleanup_local.sh --apply --compare-checkouts --keep-last 5
 ./scripts/cleanup_local.sh --apply --fixtures
+./scripts/cleanup_local.sh --apply --delta-rs-source
 ./scripts/cleanup_local.sh --apply --delta-rs-under-test
 ```
 
@@ -222,6 +225,7 @@ Apply targeted cleanup:
 | `--results`             | JSON result files under `results/`                     |
 | `--compare-checkouts`   | Cached compare worktrees under `.delta-bench-compare-checkouts/` |
 | `--fixtures`            | Generated fixture data under `fixtures/`               |
+| `--delta-rs-source`     | The clean source checkout used for compare pinning     |
 | `--delta-rs-under-test` | The managed delta-rs checkout                          |
 | `--keep-last N`         | Retain the N most recent result or compare-checkout entries |
 | `--older-than-days N`   | Only remove items older than N days                    |
@@ -236,6 +240,23 @@ Apply targeted cleanup:
 ```
 
 This diagnoses common issues: missing checkout, un-synced harness, Cargo resolution failures.
+
+**Local compare runs fail early with a disk-space error:**
+
+`compare_branch.sh` now performs a local-only free-space preflight before it starts preparing compare checkouts. By default it requires at least `20` GiB free under the repo root and fails closed when that floor is missed. Override the floor with `DELTA_BENCH_MIN_FREE_GB` only when you have a tighter local contract and understand the tradeoff.
+
+For local branch comparisons, standardize Cargo artifacts in one shared target directory:
+
+```bash
+export CARGO_TARGET_DIR="$PWD/target"
+```
+
+If you are close to the free-space floor, clear stale `target/` trees and cached compare worktrees before retrying:
+
+```bash
+./scripts/cleanup_local.sh --apply --compare-checkouts
+rm -rf target
+```
 
 **Need help with a specific command:**
 

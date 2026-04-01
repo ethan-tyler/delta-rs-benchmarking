@@ -22,6 +22,7 @@ from .model import (
 )
 from .schema import (
     case_classification,
+    case_perf_status,
     ensure_matching_contexts,
     invalid_perf_case_names,
     load_benchmark_payload,
@@ -241,6 +242,28 @@ def _display_change_for_status(
     return status
 
 
+def _invalid_perf_change(baseline_case: dict | None, candidate_case: dict | None) -> str:
+    details: list[str] = []
+    for side, case in (("baseline", baseline_case), ("candidate", candidate_case)):
+        if case is None:
+            continue
+        perf_status = case_perf_status(case)
+        if perf_status == "trusted":
+            continue
+        detail = f"{side} {perf_status}"
+        failure_kind = case.get("failure_kind")
+        if failure_kind:
+            detail += f" / {failure_kind}"
+        failure = case.get("failure") or {}
+        message = failure.get("message")
+        if message:
+            detail += f": {message}"
+        details.append(detail)
+    if not details:
+        return "invalid"
+    return "invalid: " + " | ".join(details)
+
+
 def compare_runs(
     baseline: dict,
     candidate: dict,
@@ -262,7 +285,7 @@ def compare_runs(
     baseline_cases = {c["case"]: c for c in baseline.get("cases", [])}
     candidate_cases = {c["case"]: c for c in candidate.get("cases", [])}
     invalid_cases = invalid_perf_case_names((baseline, candidate))
-    if invalid_cases:
+    if invalid_cases and mode == "decision":
         raise ValueError(
             "compare requires perf_status=trusted inputs; invalid cases present: "
             + ", ".join(invalid_cases)
@@ -313,6 +336,30 @@ def compare_runs(
 
         if b is None or c is None:
             raise ValueError(f"inconsistent comparison state for case '{name}'")
+        baseline_perf_status = case_perf_status(b)
+        candidate_perf_status = case_perf_status(c)
+        if (
+            mode == "exploratory"
+            and (
+                baseline_perf_status != "trusted"
+                or candidate_perf_status != "trusted"
+            )
+        ):
+            incomparable += 1
+            rows.append(
+                ComparisonRow(
+                    case=name,
+                    baseline_ms=representative_ms(b, aggregation=aggregation),
+                    candidate_ms=representative_ms(c, aggregation=aggregation),
+                    status="incomparable",
+                    change=_invalid_perf_change(b, c),
+                    baseline_classification=baseline_classification,
+                    candidate_classification=candidate_classification,
+                    baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
+                    candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+                )
+            )
+            continue
         if (
             baseline_classification == "expected_failure"
             or candidate_classification == "expected_failure"

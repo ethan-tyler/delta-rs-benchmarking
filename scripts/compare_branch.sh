@@ -19,6 +19,7 @@ BENCH_WARMUP="${BENCH_WARMUP:-2}"
 BENCH_ITERS="${BENCH_ITERS:-9}"
 BENCH_PREWARM_ITERS="${BENCH_PREWARM_ITERS:-1}"
 BENCH_COMPARE_RUNS="${BENCH_COMPARE_RUNS:-3}"
+DELTA_BENCH_MIN_FREE_GB="${DELTA_BENCH_MIN_FREE_GB:-20}"
 BENCH_MEASURE_ORDER="${BENCH_MEASURE_ORDER:-alternate}"
 BASE_SHA_OVERRIDE=""
 CANDIDATE_SHA_OVERRIDE=""
@@ -369,6 +370,7 @@ assert)
 esac
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
+DELTA_RS_SOURCE_DIR="${DELTA_RS_SOURCE_DIR:-${RUNNER_ROOT}/.delta-rs-source}"
 RUNNER_RESULTS_DIR="${DELTA_BENCH_RESULTS:-${RUNNER_ROOT}/results}"
 compare_checkout_root="${DELTA_BENCH_COMPARE_CHECKOUT_ROOT:-${RUNNER_ROOT}/.delta-bench-compare-checkouts}"
 
@@ -392,8 +394,14 @@ DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-$(default_chec
 DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS:-7200}"
 CHECKOUT_LOCK_FD=""
 CHECKOUT_LOCK_DIR=""
+DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE="${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_SOURCE_DIR}")}"
+DELTA_BENCH_SOURCE_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_TIMEOUT_SECONDS:-${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS}}"
+SOURCE_CHECKOUT_LOCK_FD=""
+SOURCE_CHECKOUT_LOCK_DIR=""
 export DELTA_BENCH_CHECKOUT_LOCK_FILE
 export DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS
+export DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE
+export DELTA_BENCH_SOURCE_CHECKOUT_LOCK_TIMEOUT_SECONDS
 storage_args=(--storage-backend "${STORAGE_BACKEND}")
 if [[ ${#STORAGE_OPTIONS[@]} -gt 0 ]]; then
 	for option in "${STORAGE_OPTIONS[@]}"; do
@@ -412,14 +420,14 @@ is_commit_sha() {
 
 branch_ref_exists() {
 	local ref="${1:-}"
-	exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/heads/${ref}" ||
-		exec_on_runner git -C "${DELTA_RS_DIR}" show-ref --verify --quiet "refs/remotes/origin/${ref}"
+	exec_on_runner git -C "${DELTA_RS_SOURCE_DIR}" show-ref --verify --quiet "refs/heads/${ref}" ||
+		exec_on_runner git -C "${DELTA_RS_SOURCE_DIR}" show-ref --verify --quiet "refs/remotes/origin/${ref}"
 }
 
 print_ref_not_found_guidance() {
 	local ref="${1:-}"
-	echo "benchmark ref '${ref}' not found in delta-rs checkout '${DELTA_RS_DIR}'." >&2
-	echo 'use an existing branch (inspect with: git -C "${DELTA_RS_DIR}" branch -a), or pin SHAs with --base-sha/--candidate-sha.' >&2
+	echo "benchmark ref '${ref}' not found in delta-rs checkout '${DELTA_RS_SOURCE_DIR}' used for compare pinning." >&2
+	echo 'use an existing branch (inspect with: git -C "${DELTA_RS_SOURCE_DIR}" branch -a), or pin SHAs with --base-sha/--candidate-sha.' >&2
 }
 
 ensure_known_ref_mode() {
@@ -443,15 +451,15 @@ prepare_delta_rs_ref() {
 	local mode="${2:-auto}"
 	local fetch_url="${3:-}"
 	if [[ "${mode}" == "commit" ]]; then
-		run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+		run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_SOURCE_DIR}" ./scripts/prepare_delta_rs.sh
 		return
 	fi
 	if branch_ref_exists "${ref}"; then
-		run_step env DELTA_RS_BRANCH="${ref}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+		run_step env DELTA_RS_BRANCH="${ref}" DELTA_RS_DIR="${DELTA_RS_SOURCE_DIR}" ./scripts/prepare_delta_rs.sh
 		return
 	fi
 	if is_commit_sha "${ref}"; then
-		run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_DIR}" ./scripts/prepare_delta_rs.sh
+		run_step env DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_url}" DELTA_RS_DIR="${DELTA_RS_SOURCE_DIR}" ./scripts/prepare_delta_rs.sh
 		return
 	fi
 	print_ref_not_found_guidance "${ref}"
@@ -462,8 +470,31 @@ pin_ref_to_commit() {
 	local ref="${1:-}"
 	local mode="${2:-auto}"
 	local fetch_url="${3:-}"
-	prepare_delta_rs_ref "${ref}" "${mode}" "${fetch_url}" >/dev/null
-	exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify HEAD
+	local expected_commit_prefix=""
+	if [[ "${mode}" == "commit" ]]; then
+		expected_commit_prefix="$(printf '%s' "${ref}" | tr 'A-F' 'a-f')"
+	elif ! branch_ref_exists "${ref}" && is_commit_sha "${ref}"; then
+		expected_commit_prefix="$(printf '%s' "${ref}" | tr 'A-F' 'a-f')"
+	fi
+
+	if ! prepare_delta_rs_ref "${ref}" "${mode}" "${fetch_url}" >/dev/null; then
+		if [[ -n "${expected_commit_prefix}" ]]; then
+			echo "requested commit '${expected_commit_prefix}' was not pinned in '${DELTA_RS_SOURCE_DIR}'." >&2
+		else
+			echo "failed to prepare delta-rs ref '${ref}' in '${DELTA_RS_SOURCE_DIR}'." >&2
+		fi
+		return 1
+	fi
+
+	local resolved_ref
+	resolved_ref="$(exec_on_runner git -C "${DELTA_RS_SOURCE_DIR}" rev-parse --verify HEAD)"
+	local normalized_resolved_ref
+	normalized_resolved_ref="$(printf '%s' "${resolved_ref}" | tr 'A-F' 'a-f')"
+	if [[ -n "${expected_commit_prefix}" && "${normalized_resolved_ref#${expected_commit_prefix}}" == "${normalized_resolved_ref}" ]]; then
+		echo "requested commit '${expected_commit_prefix}' was not pinned in '${DELTA_RS_SOURCE_DIR}'; checkout resolved to '${resolved_ref}'." >&2
+		return 1
+	fi
+	printf '%s\n' "${resolved_ref}"
 }
 
 if [[ -n "${BASE_SHA_OVERRIDE}" ]] && ! is_commit_sha "${BASE_SHA_OVERRIDE}"; then
@@ -523,6 +554,38 @@ exec_on_runner() {
 	fi
 }
 
+run_local_compare_preflight() {
+	if [[ -n "${REMOTE_RUNNER}" ]]; then
+		return
+	fi
+	if ! is_positive_integer "${DELTA_BENCH_MIN_FREE_GB}"; then
+		echo "invalid DELTA_BENCH_MIN_FREE_GB '${DELTA_BENCH_MIN_FREE_GB}'; expected positive integer" >&2
+		exit 1
+	fi
+
+	local free_kb
+	free_kb="$(df -Pk "${RUNNER_ROOT}" | awk 'NR==2 {print $4}')"
+	if ! is_non_negative_integer "${free_kb}"; then
+		echo "failed to determine local compare disk headroom under '${RUNNER_ROOT}'." >&2
+		exit 1
+	fi
+
+	local free_gib
+	free_gib="$((free_kb / 1024 / 1024))"
+	echo "Local compare preflight: ${free_gib} GiB free under ${RUNNER_ROOT} (minimum ${DELTA_BENCH_MIN_FREE_GB} GiB)."
+	if [[ -n "${CARGO_TARGET_DIR:-}" ]]; then
+		echo "Local compare preflight: using CARGO_TARGET_DIR=${CARGO_TARGET_DIR}"
+	else
+		echo 'Local compare hint: if you hit per-checkout Cargo target instability, export CARGO_TARGET_DIR="$PWD/target".'
+	fi
+
+	if ((free_gib < DELTA_BENCH_MIN_FREE_GB)); then
+		echo "local compare requires at least ${DELTA_BENCH_MIN_FREE_GB} GiB free under '${RUNNER_ROOT}'; found ${free_gib} GiB." >&2
+		echo 'clear stale target/ trees or cached compare checkouts before retrying, and consider: export CARGO_TARGET_DIR="$PWD/target"' >&2
+		exit 1
+	fi
+}
+
 shell_join() {
 	local joined=""
 	local arg
@@ -569,6 +632,22 @@ ensure_checkout_lock_path_safe_for_initial_clone() {
 	fi
 }
 
+ensure_source_checkout_lock_path_safe_for_initial_clone() {
+	if [[ -n "${REMOTE_RUNNER}" ]]; then
+		return
+	fi
+	if [[ "${DELTA_RS_SOURCE_DIR}" == "${DELTA_RS_DIR}" || "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}" == "${DELTA_BENCH_CHECKOUT_LOCK_FILE}" ]]; then
+		return
+	fi
+	if [[ -d "${DELTA_RS_SOURCE_DIR}/.git" ]]; then
+		return
+	fi
+	if path_is_within_dir "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}" "${DELTA_RS_SOURCE_DIR}"; then
+		echo "DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE must be outside DELTA_RS_SOURCE_DIR before initial clone: ${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}" >&2
+		exit 1
+	fi
+}
+
 release_checkout_lock() {
 	if [[ -n "${CHECKOUT_LOCK_FD}" ]]; then
 		eval "exec ${CHECKOUT_LOCK_FD}>&-" >/dev/null 2>&1 || true
@@ -578,6 +657,18 @@ release_checkout_lock() {
 		rm -f "${CHECKOUT_LOCK_DIR}/pid" >/dev/null 2>&1 || true
 		rmdir "${CHECKOUT_LOCK_DIR}" >/dev/null 2>&1 || true
 		CHECKOUT_LOCK_DIR=""
+	fi
+}
+
+release_source_checkout_lock() {
+	if [[ -n "${SOURCE_CHECKOUT_LOCK_FD}" ]]; then
+		eval "exec ${SOURCE_CHECKOUT_LOCK_FD}>&-" >/dev/null 2>&1 || true
+		SOURCE_CHECKOUT_LOCK_FD=""
+	fi
+	if [[ -n "${SOURCE_CHECKOUT_LOCK_DIR}" ]]; then
+		rm -f "${SOURCE_CHECKOUT_LOCK_DIR}/pid" >/dev/null 2>&1 || true
+		rmdir "${SOURCE_CHECKOUT_LOCK_DIR}" >/dev/null 2>&1 || true
+		SOURCE_CHECKOUT_LOCK_DIR=""
 	fi
 }
 
@@ -620,6 +711,48 @@ acquire_checkout_lock() {
 	done
 }
 
+acquire_source_checkout_lock() {
+	if [[ -n "${REMOTE_RUNNER}" ]]; then
+		return
+	fi
+	if [[ "${DELTA_RS_SOURCE_DIR}" == "${DELTA_RS_DIR}" || "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}" == "${DELTA_BENCH_CHECKOUT_LOCK_FILE}" ]]; then
+		return
+	fi
+	if [[ "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_HELD:-0}" == "1" ]]; then
+		return
+	fi
+
+	ensure_source_checkout_lock_path_safe_for_initial_clone
+
+	if command -v flock >/dev/null 2>&1; then
+		mkdir -p "$(dirname "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}")"
+		exec {SOURCE_CHECKOUT_LOCK_FD}>"${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}"
+		if ! flock -w "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_TIMEOUT_SECONDS}" "${SOURCE_CHECKOUT_LOCK_FD}"; then
+			echo "failed to acquire source checkout lock within ${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}" >&2
+			exit 1
+		fi
+		export DELTA_BENCH_SOURCE_CHECKOUT_LOCK_HELD=1
+		return
+	fi
+
+	mkdir -p "$(dirname "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}")"
+	local lock_dir="${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}.dir"
+	local deadline=$((SECONDS + DELTA_BENCH_SOURCE_CHECKOUT_LOCK_TIMEOUT_SECONDS))
+	while true; do
+		if mkdir "${lock_dir}" >/dev/null 2>&1; then
+			SOURCE_CHECKOUT_LOCK_DIR="${lock_dir}"
+			printf '%s\n' "$$" >"${SOURCE_CHECKOUT_LOCK_DIR}/pid" || true
+			export DELTA_BENCH_SOURCE_CHECKOUT_LOCK_HELD=1
+			return
+		fi
+		if ((SECONDS >= deadline)); then
+			echo "failed to acquire source checkout lock within ${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_TIMEOUT_SECONDS}s: ${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}" >&2
+			exit 1
+		fi
+		sleep 1
+	done
+}
+
 acquire_checkout_lock
 
 cleanup_harness_overlay_untracked() {
@@ -635,10 +768,23 @@ cleanup_harness_overlay_untracked() {
 		# Keep delta-rs checkout reusable and avoid stash-pop collisions after compare runs.
 		exec_on_runner git -C "${DELTA_RS_DIR}" clean -fd -- "${path}" >/dev/null 2>&1 || true
 	done
+	release_source_checkout_lock
 	release_checkout_lock
 }
 
 trap cleanup_harness_overlay_untracked EXIT
+acquire_source_checkout_lock
+
+run_local_compare_preflight
+
+ensure_source_checkout() {
+	if exec_on_runner test -d "${DELTA_RS_SOURCE_DIR}/.git"; then
+		return
+	fi
+	run_step env DELTA_RS_DIR="${DELTA_RS_SOURCE_DIR}" ./scripts/prepare_delta_rs.sh
+}
+
+ensure_source_checkout
 
 if ((WORKING_VS_UPSTREAM_MAIN != 0)); then
 	if ! exec_on_runner test -d "${DELTA_RS_DIR}/.git"; then
@@ -649,25 +795,28 @@ if ((WORKING_VS_UPSTREAM_MAIN != 0)); then
 
 	upstream_remote="${UPSTREAM_REMOTE_OVERRIDE:-}"
 	if [[ -z "${upstream_remote}" ]]; then
-		if exec_on_runner git -C "${DELTA_RS_DIR}" remote get-url upstream >/dev/null 2>&1; then
+		if exec_on_runner git -C "${DELTA_RS_SOURCE_DIR}" remote get-url upstream >/dev/null 2>&1; then
 			upstream_remote="upstream"
 		else
 			upstream_remote="origin"
 		fi
 	fi
 
-	if ! exec_on_runner git -C "${DELTA_RS_DIR}" remote get-url "${upstream_remote}" >/dev/null 2>&1; then
-		echo "remote '${upstream_remote}' is not configured in delta-rs checkout '${DELTA_RS_DIR}'." >&2
+	if ! exec_on_runner git -C "${DELTA_RS_SOURCE_DIR}" remote get-url "${upstream_remote}" >/dev/null 2>&1; then
+		echo "remote '${upstream_remote}' is not configured in delta-rs checkout '${DELTA_RS_SOURCE_DIR}'." >&2
 		exit 1
 	fi
 
-	run_step git -C "${DELTA_RS_DIR}" fetch "${upstream_remote}" main
-	upstream_main_sha="$(exec_on_runner git -C "${DELTA_RS_DIR}" rev-parse --verify "refs/remotes/${upstream_remote}/main^{commit}")"
+	run_step git -C "${DELTA_RS_SOURCE_DIR}" fetch "${upstream_remote}" main
+	upstream_main_sha="$(exec_on_runner git -C "${DELTA_RS_SOURCE_DIR}" rev-parse --verify "refs/remotes/${upstream_remote}/main^{commit}")"
 
 	candidate_ref="${working_head_sha}"
 	base_ref="${upstream_main_sha}"
 	candidate_ref_mode="commit"
 	base_ref_mode="commit"
+	if [[ -z "${CANDIDATE_FETCH_URL}" ]]; then
+		CANDIDATE_FETCH_URL="${DELTA_RS_DIR}"
+	fi
 fi
 
 run_security_check() {
@@ -705,7 +854,7 @@ prepare_ref_checkout_once() {
 	local ref="$1"
 	local checkout_dir="$2"
 	local fetch_url="${3:-}"
-	local fetch_source="${fetch_url:-${DELTA_RS_DIR}}"
+	local fetch_source="${fetch_url:-${DELTA_RS_SOURCE_DIR}}"
 
 	run_step env DELTA_RS_DIR="${checkout_dir}" DELTA_RS_REF="${ref}" DELTA_RS_REF_TYPE="commit" DELTA_RS_FETCH_URL="${fetch_source}" ./scripts/prepare_delta_rs.sh
 	run_step env DELTA_RS_DIR="${checkout_dir}" ./scripts/sync_harness_to_delta_rs.sh
@@ -769,7 +918,7 @@ aggregate_run_labels() {
 	done
 
 	local out_json="${RUNNER_RESULTS_DIR}/${out_label}/${suite}.json"
-	run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.aggregate --output "${out_json}" --label "${out_label}" "${input_paths[@]}"
+	run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.aggregate --mode "${COMPARE_MODE}" --output "${out_json}" --label "${out_label}" "${input_paths[@]}"
 }
 
 # Calculate total phases for progress display

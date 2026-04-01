@@ -67,7 +67,7 @@ Read operations testing full scans, projections, filters, and partition pruning.
 
 For phase-aware suites, use `--timing-phase load|plan|execute|validate` to select which isolated phase populates `elapsed_ms`. Case IDs stay the same regardless of the selected phase.
 
-Authoritative decision runs use `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` is listed for exploratory use but disabled in `bench/manifests/core_rust.yaml` until its exact-result assertion is requalified.
+Authoritative decision runs use `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_hit` is requalified on the current `tiny_smoke` fixture contract. `scan_pruning_miss` is listed for exploratory use but disabled in `bench/manifests/core_rust.yaml` until its exact-result assertion is requalified.
 
 ### write (3 cases)
 
@@ -348,6 +348,8 @@ Compare automation artifacts are written to `results/compare/<suite>/<base_sha>_
 
 `manifest.json` contains these top-level keys: `suite`, `base_sha`, `candidate_sha`, `base_json`, `candidate_json`, `stdout_report`, `markdown_report`, `comparison_json`, `hash_policy_report`, `compare_mode`, `aggregation`, and `noise_threshold`.
 
+`compare_branch.sh` keeps a clean source checkout at `.delta-rs-source/` by default for branch lookup, immutable SHA pinning, and seeding per-SHA compare checkouts. `--current-vs-main` is the one exception: it seeds the candidate prepared checkout from `DELTA_RS_DIR` so the current local HEAD remains reachable even when it is not present in the clean source checkout.
+
 Decision compare accepts only schema v5 aggregated inputs and fails closed when `--compare-runs` is below the required case minimum.
 
 ### `validate_perf_harness.sh` — Trust contract verification
@@ -377,6 +379,7 @@ Subcommands: `select-revisions`, `build-artifacts`, `run-matrix`, `ingest-result
 | `--results`             | —       | Target result files                      |
 | `--compare-checkouts`   | —       | Target cached compare checkouts          |
 | `--fixtures`            | —       | Target fixture data                      |
+| `--delta-rs-source`     | —       | Target clean source checkout             |
 | `--delta-rs-under-test` | —       | Target managed checkout                  |
 | `--keep-last N`         | —       | Retain N most recent result or checkout entries |
 | `--older-than-days N`   | —       | Only remove items older than N days      |
@@ -445,6 +448,8 @@ These commands are the current repo-wide baseline for code, dependency, and self
 | `BENCH_RUNNER_MODE`         | —       | Runner mode for script-level workflows (`rust`, `python`, `all`)               |
 | `BENCH_BENCHMARK_MODE`      | `perf`  | Benchmark mode for script-level workflows (`perf`, `assert`)                   |
 | `BENCH_COMPARE_FAIL_ON`     | —       | Default `--fail-on` statuses for `compare_branch.sh` / `compare.py` automation |
+| `DELTA_RS_SOURCE_DIR`       | `${RUNNER_ROOT}/.delta-rs-source` | Clean checkout used for compare ref resolution and per-SHA checkout seeding |
+| `DELTA_BENCH_MIN_FREE_GB`   | `20`    | Local-only free-space floor enforced by `compare_branch.sh` before preparing compare checkouts |
 | `DELTA_BENCH_COMPARE_CHECKOUT_ROOT` | `${RUNNER_ROOT}/.delta-bench-compare-checkouts` | Root directory for per-ref prepared compare checkouts |
 
 ### delta-rs checkout preparation

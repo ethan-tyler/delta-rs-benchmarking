@@ -3886,6 +3886,7 @@ mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
         python_pkg = remote_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
 
         compare_log = remote_root / "compare-log.jsonl"
         write_executable(

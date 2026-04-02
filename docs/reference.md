@@ -344,7 +344,7 @@ Compare automation artifacts are written to `results/compare/<suite>/<base_sha>_
 | `hash-policy.txt` | Hash/schema compatibility report for the aggregated base and candidate payloads across all observed sample hashes |
 | `manifest.json` | JSON manifest with suite, SHAs, compare settings, methodology metadata, aggregated input paths, and artifact paths |
 
-`comparison.json` schema version `1` includes top-level `schema_version`, `metadata`, `summary`, and `rows`. Each row contains `case`, `status`, `display_change`, `baseline_ms`, `candidate_ms`, and `delta_pct`.
+`comparison.json` schema version `1` includes top-level `schema_version`, `metadata`, `summary`, and `rows`. Each row contains `case`, `status`, `display_change`, `baseline_ms`, `candidate_ms`, `delta_pct`, `decision_scope`, `scope_reason`, `spread_metric`, `baseline_spread_ms`, and `candidate_spread_ms`.
 
 `manifest.json` contains these top-level keys: `suite`, `base_sha`, `candidate_sha`, `base_json`, `candidate_json`, `stdout_report`, `markdown_report`, `comparison_json`, `hash_policy_report`, `compare_mode`, `aggregation`, `noise_threshold`, `methodology_profile`, `methodology_version`, and `methodology_settings`.
 

@@ -1019,6 +1019,185 @@ def test_render_text_groups_decision_mode_statuses() -> None:
     assert "scan_inconclusive" in out
 
 
+def test_compare_json_includes_decision_scope_and_spread_metric_fields() -> None:
+    from delta_bench_compare.compare import build_json_payload
+
+    baseline = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 120.0}]}])
+    candidate = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 110.0}]}])
+    baseline["cases"][0]["run_summaries"] = [
+        {"median_ms": 100.0},
+        {"median_ms": 110.0},
+        {"median_ms": 120.0},
+        {"median_ms": 130.0},
+        {"median_ms": 140.0},
+    ]
+    candidate["cases"][0]["run_summaries"] = [
+        {"median_ms": 90.0},
+        {"median_ms": 100.0},
+        {"median_ms": 110.0},
+        {"median_ms": 120.0},
+        {"median_ms": 130.0},
+    ]
+
+    comparison = compare_runs(
+        baseline,
+        candidate,
+        mode="decision",
+        spread_metric="iqr_ms",
+    )
+    payload = build_json_payload(
+        comparison,
+        mode="decision",
+        aggregation="median",
+        noise_threshold=0.05,
+    )
+
+    row = payload["rows"][0]
+    assert row["decision_scope"] == "macro"
+    assert row["scope_reason"] is None
+    assert row["spread_metric"] == "iqr_ms"
+    assert row["baseline_spread_ms"] == pytest.approx(20.0)
+    assert row["candidate_spread_ms"] == pytest.approx(20.0)
+
+
+def test_compare_runs_decision_scope_marks_sub_ms_rows_micro_only() -> None:
+    baseline = _run_v4([{"case": "scan_micro_case", "samples": [{"elapsed_ms": 0.6}]}])
+    candidate = _run_v4([{"case": "scan_micro_case", "samples": [{"elapsed_ms": 0.7}]}])
+    baseline["cases"][0]["run_summaries"] = [
+        {"median_ms": 0.40},
+        {"median_ms": 0.50},
+        {"median_ms": 0.60},
+        {"median_ms": 0.70},
+        {"median_ms": 0.80},
+    ]
+    candidate["cases"][0]["run_summaries"] = [
+        {"median_ms": 0.50},
+        {"median_ms": 0.60},
+        {"median_ms": 0.70},
+        {"median_ms": 0.80},
+        {"median_ms": 0.90},
+    ]
+
+    comparison = compare_runs(
+        baseline,
+        candidate,
+        mode="decision",
+        spread_metric="iqr_ms",
+        sub_ms_threshold_ms=1.0,
+        sub_ms_policy="micro_only",
+    )
+
+    row = comparison.rows[0]
+    assert row.decision_scope == "micro_only"
+    assert row.scope_reason == "sub_ms_threshold"
+    assert row.spread_metric == "iqr_ms"
+    assert comparison.summary.faster == 0
+    assert comparison.summary.slower == 0
+    assert comparison.summary.no_change == 0
+
+
+def test_render_text_places_micro_only_rows_in_out_of_scope_section() -> None:
+    baseline = _run_v4(
+        [
+            {"case": "scan_macro_regression", "samples": [{"elapsed_ms": 100.0}]},
+            {"case": "scan_micro_regression", "samples": [{"elapsed_ms": 0.6}]},
+        ]
+    )
+    candidate = _run_v4(
+        [
+            {"case": "scan_macro_regression", "samples": [{"elapsed_ms": 120.0}]},
+            {"case": "scan_micro_regression", "samples": [{"elapsed_ms": 0.7}]},
+        ]
+    )
+    baseline["cases"][0]["run_summaries"] = [{"median_ms": 100.0}] * 5
+    candidate["cases"][0]["run_summaries"] = [{"median_ms": 120.0}] * 5
+    baseline["cases"][1]["run_summaries"] = [
+        {"median_ms": 0.40},
+        {"median_ms": 0.50},
+        {"median_ms": 0.60},
+        {"median_ms": 0.70},
+        {"median_ms": 0.80},
+    ]
+    candidate["cases"][1]["run_summaries"] = [
+        {"median_ms": 0.50},
+        {"median_ms": 0.60},
+        {"median_ms": 0.70},
+        {"median_ms": 0.80},
+        {"median_ms": 0.90},
+    ]
+
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(
+        baseline,
+        candidate,
+        mode="decision",
+        spread_metric="iqr_ms",
+        sub_ms_threshold_ms=1.0,
+        sub_ms_policy="micro_only",
+    )
+    out = render_text(comparison)
+
+    assert "Out of Scope (micro only)" in out
+    regression_section = out.split("Regressions (slower)", 1)[1].split(
+        "Out of Scope (micro only)", 1
+    )[0]
+    assert "scan_macro_regression" in regression_section
+    assert "scan_micro_regression" not in regression_section
+    assert "scan_micro_regression" in out.split("Out of Scope (micro only)", 1)[1]
+
+
+def test_render_markdown_places_micro_only_rows_in_out_of_scope_section() -> None:
+    baseline = _run_v4(
+        [
+            {"case": "scan_macro_regression", "samples": [{"elapsed_ms": 100.0}]},
+            {"case": "scan_micro_regression", "samples": [{"elapsed_ms": 0.6}]},
+        ]
+    )
+    candidate = _run_v4(
+        [
+            {"case": "scan_macro_regression", "samples": [{"elapsed_ms": 120.0}]},
+            {"case": "scan_micro_regression", "samples": [{"elapsed_ms": 0.7}]},
+        ]
+    )
+    baseline["cases"][0]["run_summaries"] = [{"median_ms": 100.0}] * 5
+    candidate["cases"][0]["run_summaries"] = [{"median_ms": 120.0}] * 5
+    baseline["cases"][1]["run_summaries"] = [
+        {"median_ms": 0.40},
+        {"median_ms": 0.50},
+        {"median_ms": 0.60},
+        {"median_ms": 0.70},
+        {"median_ms": 0.80},
+    ]
+    candidate["cases"][1]["run_summaries"] = [
+        {"median_ms": 0.50},
+        {"median_ms": 0.60},
+        {"median_ms": 0.70},
+        {"median_ms": 0.80},
+        {"median_ms": 0.90},
+    ]
+
+    from delta_bench_compare.compare import render_markdown
+
+    comparison = compare_runs(
+        baseline,
+        candidate,
+        mode="decision",
+        spread_metric="iqr_ms",
+        sub_ms_threshold_ms=1.0,
+        sub_ms_policy="micro_only",
+    )
+    out = render_markdown(comparison)
+
+    assert "## Out of Scope (micro only)" in out
+    regression_section = out.split("## Regressions (slower)", 1)[1].split(
+        "## Out of Scope (micro only)", 1
+    )[0]
+    assert "scan_macro_regression" in regression_section
+    assert "scan_micro_regression" not in regression_section
+    assert "scan_micro_regression" in out.split("## Out of Scope (micro only)", 1)[1]
+
+
 def test_compare_cli_rejects_invalid_perf_input_without_traceback(
     tmp_path: Path,
 ) -> None:

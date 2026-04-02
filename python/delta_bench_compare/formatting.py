@@ -306,10 +306,27 @@ def _is_invalid_row(row: ComparisonRow) -> bool:
     return row.status == "incomparable" and row.change.startswith("invalid")
 
 
+def _is_micro_only_row(row: ComparisonRow) -> bool:
+    return row.decision_scope == "micro_only"
+
+
 def _group_rows(comparison: Comparison) -> list[tuple[str, list[ComparisonRow]]]:
-    slower = [row for row in comparison.rows if row.status == "regression"]
-    faster = [row for row in comparison.rows if row.status == "improvement"]
-    stable = [row for row in comparison.rows if row.status == "no_change"]
+    slower = [
+        row
+        for row in comparison.rows
+        if row.status == "regression" and not _is_micro_only_row(row)
+    ]
+    faster = [
+        row
+        for row in comparison.rows
+        if row.status == "improvement" and not _is_micro_only_row(row)
+    ]
+    stable = [
+        row
+        for row in comparison.rows
+        if row.status == "no_change" and not _is_micro_only_row(row)
+    ]
+    out_of_scope = [row for row in comparison.rows if _is_micro_only_row(row)]
     invalid = [row for row in comparison.rows if _is_invalid_row(row)]
     needs_attention = [
         row
@@ -317,11 +334,13 @@ def _group_rows(comparison: Comparison) -> list[tuple[str, list[ComparisonRow]]]
         if row.status
         in {"incomparable", "expected_failure", "new", "removed", "inconclusive"}
         and row not in invalid
+        and not _is_micro_only_row(row)
     ]
     return [
         ("Regressions (slower)", slower),
         ("Improvements (faster)", faster),
         ("Stable (no change)", stable),
+        ("Out of Scope (micro only)", out_of_scope),
         ("Comparison aborted / invalid", invalid),
         ("Needs Attention", needs_attention),
     ]

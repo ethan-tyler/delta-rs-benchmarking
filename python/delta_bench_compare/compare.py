@@ -30,6 +30,8 @@ from .schema import (
 
 VALID_AGGREGATIONS = {"min", "median", "p95"}
 VALID_COMPARE_MODES = {"exploratory", "decision"}
+VALID_SPREAD_METRICS = {"iqr_ms"}
+VALID_SUB_MS_POLICIES = {"micro_only"}
 COMPARISON_JSON_SCHEMA_VERSION = 1
 VALID_FAIL_ON_STATUSES = VALID_COMPARISON_STATUSES
 FAIL_ON_STATUS_ALIASES = {"no change": "no_change"}
@@ -172,6 +174,26 @@ def _run_metric_values(case: dict, metric: str) -> list[float]:
     return values
 
 
+def _iqr_ms(values: list[float]) -> float | None:
+    if not values:
+        return None
+    if len(values) == 1:
+        return 0.0
+    q1, _, q3 = statistics.quantiles(values, n=4, method="inclusive")
+    return q3 - q1
+
+
+def _spread_ms(case: dict, spread_metric: str | None) -> float | None:
+    if spread_metric is None:
+        return None
+    if spread_metric == "iqr_ms":
+        return _iqr_ms(_run_metric_values(case, "median"))
+    raise ValueError(
+        f"unknown spread metric '{spread_metric}'; expected one of: "
+        + ", ".join(sorted(VALID_SPREAD_METRICS))
+    )
+
+
 def _bootstrap_relative_change_ci(
     baseline_values: list[float],
     candidate_values: list[float],
@@ -242,6 +264,28 @@ def _display_change_for_status(
     return status
 
 
+def _decision_scope(
+    *,
+    mode: str,
+    baseline_ms: float | None,
+    candidate_ms: float | None,
+    sub_ms_threshold_ms: float | None,
+    sub_ms_policy: str | None,
+) -> tuple[str | None, str | None]:
+    if mode != "decision":
+        return None, None
+    if (
+        sub_ms_policy == "micro_only"
+        and sub_ms_threshold_ms is not None
+        and baseline_ms is not None
+        and candidate_ms is not None
+        and baseline_ms < sub_ms_threshold_ms
+        and candidate_ms < sub_ms_threshold_ms
+    ):
+        return "micro_only", "sub_ms_threshold"
+    return "macro", None
+
+
 def _invalid_perf_change(baseline_case: dict | None, candidate_case: dict | None) -> str:
     details: list[str] = []
     for side, case in (("baseline", baseline_case), ("candidate", candidate_case)):
@@ -264,12 +308,42 @@ def _invalid_perf_change(baseline_case: dict | None, candidate_case: dict | None
     return "invalid: " + " | ".join(details)
 
 
+def _update_summary_counts(
+    row: ComparisonRow,
+    *,
+    faster: int,
+    slower: int,
+    no_change: int,
+    incomparable: int,
+    new: int,
+    removed: int,
+) -> tuple[int, int, int, int, int, int]:
+    if row.decision_scope == "micro_only":
+        return faster, slower, no_change, incomparable, new, removed
+    if row.status == "improvement":
+        faster += 1
+    elif row.status == "regression":
+        slower += 1
+    elif row.status == "no_change":
+        no_change += 1
+    elif row.status in {"incomparable", "expected_failure", "inconclusive"}:
+        incomparable += 1
+    elif row.status == "new":
+        new += 1
+    elif row.status == "removed":
+        removed += 1
+    return faster, slower, no_change, incomparable, new, removed
+
+
 def compare_runs(
     baseline: dict,
     candidate: dict,
     threshold: float = 0.05,
     aggregation: str = "median",
     mode: str = "exploratory",
+    spread_metric: str | None = None,
+    sub_ms_threshold_ms: float | None = None,
+    sub_ms_policy: str | None = None,
 ) -> Comparison:
     if mode not in VALID_COMPARE_MODES:
         raise ValueError(
@@ -279,6 +353,18 @@ def compare_runs(
         raise ValueError(
             f"unknown aggregation '{aggregation}'; expected one of: min, median, p95"
         )
+    if spread_metric is not None and spread_metric not in VALID_SPREAD_METRICS:
+        raise ValueError(
+            f"unknown spread metric '{spread_metric}'; expected one of: "
+            + ", ".join(sorted(VALID_SPREAD_METRICS))
+        )
+    if sub_ms_policy is not None and sub_ms_policy not in VALID_SUB_MS_POLICIES:
+        raise ValueError(
+            f"unknown sub-ms policy '{sub_ms_policy}'; expected one of: "
+            + ", ".join(sorted(VALID_SUB_MS_POLICIES))
+        )
+    if sub_ms_threshold_ms is not None and sub_ms_threshold_ms < 0.0:
+        raise ValueError("sub-ms threshold must be non-negative")
 
     ensure_matching_contexts(baseline, candidate)
 
@@ -302,42 +388,77 @@ def compare_runs(
         candidate_classification = case_classification(c)
 
         if b is None and c is not None:
-            new += 1
-            rows.append(
-                ComparisonRow(
-                    case=name,
-                    baseline_ms=None,
-                    candidate_ms=representative_ms(c, aggregation=aggregation),
-                    status="new",
-                    change="new",
-                    baseline_classification=baseline_classification,
-                    candidate_classification=candidate_classification,
-                    baseline_metrics=None,
-                    candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+            row = ComparisonRow(
+                case=name,
+                baseline_ms=None,
+                candidate_ms=representative_ms(c, aggregation=aggregation),
+                status="new",
+                change="new",
+                baseline_classification=baseline_classification,
+                candidate_classification=candidate_classification,
+                spread_metric=spread_metric,
+                candidate_spread_ms=_spread_ms(c, spread_metric),
+                baseline_metrics=None,
+                candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+            )
+            rows.append(row)
+            faster, slower, no_change, incomparable, new, removed = (
+                _update_summary_counts(
+                    row,
+                    faster=faster,
+                    slower=slower,
+                    no_change=no_change,
+                    incomparable=incomparable,
+                    new=new,
+                    removed=removed,
                 )
             )
             continue
         if c is None and b is not None:
-            removed += 1
-            rows.append(
-                ComparisonRow(
-                    case=name,
-                    baseline_ms=representative_ms(b, aggregation=aggregation),
-                    candidate_ms=None,
-                    status="removed",
-                    change="removed",
-                    baseline_classification=baseline_classification,
-                    candidate_classification=candidate_classification,
-                    baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
-                    candidate_metrics=None,
+            row = ComparisonRow(
+                case=name,
+                baseline_ms=representative_ms(b, aggregation=aggregation),
+                candidate_ms=None,
+                status="removed",
+                change="removed",
+                baseline_classification=baseline_classification,
+                candidate_classification=candidate_classification,
+                spread_metric=spread_metric,
+                baseline_spread_ms=_spread_ms(b, spread_metric),
+                baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
+                candidate_metrics=None,
+            )
+            rows.append(row)
+            faster, slower, no_change, incomparable, new, removed = (
+                _update_summary_counts(
+                    row,
+                    faster=faster,
+                    slower=slower,
+                    no_change=no_change,
+                    incomparable=incomparable,
+                    new=new,
+                    removed=removed,
                 )
             )
             continue
 
         if b is None or c is None:
             raise ValueError(f"inconsistent comparison state for case '{name}'")
+
+        base_ms = representative_ms(b, aggregation=aggregation)
+        cand_ms = representative_ms(c, aggregation=aggregation)
+        baseline_spread_ms = _spread_ms(b, spread_metric)
+        candidate_spread_ms = _spread_ms(c, spread_metric)
+        decision_scope, scope_reason = _decision_scope(
+            mode=mode,
+            baseline_ms=base_ms,
+            candidate_ms=cand_ms,
+            sub_ms_threshold_ms=sub_ms_threshold_ms,
+            sub_ms_policy=sub_ms_policy,
+        )
         baseline_perf_status = case_perf_status(b)
         candidate_perf_status = case_perf_status(c)
+
         if (
             mode == "exploratory"
             and (
@@ -345,18 +466,32 @@ def compare_runs(
                 or candidate_perf_status != "trusted"
             )
         ):
-            incomparable += 1
-            rows.append(
-                ComparisonRow(
-                    case=name,
-                    baseline_ms=representative_ms(b, aggregation=aggregation),
-                    candidate_ms=representative_ms(c, aggregation=aggregation),
-                    status="incomparable",
-                    change=_invalid_perf_change(b, c),
-                    baseline_classification=baseline_classification,
-                    candidate_classification=candidate_classification,
-                    baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
-                    candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+            row = ComparisonRow(
+                case=name,
+                baseline_ms=base_ms,
+                candidate_ms=cand_ms,
+                status="incomparable",
+                change=_invalid_perf_change(b, c),
+                baseline_classification=baseline_classification,
+                candidate_classification=candidate_classification,
+                decision_scope=decision_scope,
+                scope_reason=scope_reason,
+                spread_metric=spread_metric,
+                baseline_spread_ms=baseline_spread_ms,
+                candidate_spread_ms=candidate_spread_ms,
+                baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
+                candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+            )
+            rows.append(row)
+            faster, slower, no_change, incomparable, new, removed = (
+                _update_summary_counts(
+                    row,
+                    faster=faster,
+                    slower=slower,
+                    no_change=no_change,
+                    incomparable=incomparable,
+                    new=new,
+                    removed=removed,
                 )
             )
             continue
@@ -364,18 +499,32 @@ def compare_runs(
             baseline_classification == "expected_failure"
             or candidate_classification == "expected_failure"
         ):
-            incomparable += 1
-            rows.append(
-                ComparisonRow(
-                    case=name,
-                    baseline_ms=representative_ms(b, aggregation=aggregation),
-                    candidate_ms=representative_ms(c, aggregation=aggregation),
-                    status="expected_failure",
-                    change="expected_failure",
-                    baseline_classification=baseline_classification,
-                    candidate_classification=candidate_classification,
-                    baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
-                    candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+            row = ComparisonRow(
+                case=name,
+                baseline_ms=base_ms,
+                candidate_ms=cand_ms,
+                status="expected_failure",
+                change="expected_failure",
+                baseline_classification=baseline_classification,
+                candidate_classification=candidate_classification,
+                decision_scope=decision_scope,
+                scope_reason=scope_reason,
+                spread_metric=spread_metric,
+                baseline_spread_ms=baseline_spread_ms,
+                candidate_spread_ms=candidate_spread_ms,
+                baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
+                candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+            )
+            rows.append(row)
+            faster, slower, no_change, incomparable, new, removed = (
+                _update_summary_counts(
+                    row,
+                    faster=faster,
+                    slower=slower,
+                    no_change=no_change,
+                    incomparable=incomparable,
+                    new=new,
+                    removed=removed,
                 )
             )
             continue
@@ -399,64 +548,15 @@ def compare_runs(
             candidate_values = _run_metric_values(c, metric)
             base_ms = statistics.median(baseline_values) if baseline_values else None
             cand_ms = statistics.median(candidate_values) if candidate_values else None
+            decision_scope, scope_reason = _decision_scope(
+                mode=mode,
+                baseline_ms=base_ms,
+                candidate_ms=cand_ms,
+                sub_ms_threshold_ms=sub_ms_threshold_ms,
+                sub_ms_policy=sub_ms_policy,
+            )
             status = _decision_change(c, baseline_values, candidate_values)
-            if status == "improvement":
-                faster += 1
-            elif status == "regression":
-                slower += 1
-            elif status == "no_change":
-                no_change += 1
-            else:
-                incomparable += 1
-            rows.append(
-                ComparisonRow(
-                    case=name,
-                    baseline_ms=base_ms,
-                    candidate_ms=cand_ms,
-                    status=status,
-                    change=_display_change_for_status(
-                        status,
-                        baseline_ms=base_ms,
-                        candidate_ms=cand_ms,
-                        threshold=threshold,
-                        mode=mode,
-                    ),
-                    baseline_classification=baseline_classification,
-                    candidate_classification=candidate_classification,
-                    baseline_metrics=None,
-                    candidate_metrics=None,
-                )
-            )
-            continue
-        base_ms = representative_ms(b, aggregation=aggregation)
-        cand_ms = representative_ms(c, aggregation=aggregation)
-
-        if base_ms is None or cand_ms is None:
-            incomparable += 1
-            rows.append(
-                ComparisonRow(
-                    case=name,
-                    baseline_ms=base_ms,
-                    candidate_ms=cand_ms,
-                    status="incomparable",
-                    change="incomparable",
-                    baseline_classification=baseline_classification,
-                    candidate_classification=candidate_classification,
-                    baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
-                    candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
-                )
-            )
-            continue
-
-        status = classify_change(base_ms, cand_ms, threshold)
-        if status == "improvement":
-            faster += 1
-        elif status == "regression":
-            slower += 1
-        else:
-            no_change += 1
-        rows.append(
-            ComparisonRow(
+            row = ComparisonRow(
                 case=name,
                 baseline_ms=base_ms,
                 candidate_ms=cand_ms,
@@ -470,9 +570,91 @@ def compare_runs(
                 ),
                 baseline_classification=baseline_classification,
                 candidate_classification=candidate_classification,
+                decision_scope=decision_scope,
+                scope_reason=scope_reason,
+                spread_metric=spread_metric,
+                baseline_spread_ms=baseline_spread_ms,
+                candidate_spread_ms=candidate_spread_ms,
+                baseline_metrics=None,
+                candidate_metrics=None,
+            )
+            rows.append(row)
+            faster, slower, no_change, incomparable, new, removed = (
+                _update_summary_counts(
+                    row,
+                    faster=faster,
+                    slower=slower,
+                    no_change=no_change,
+                    incomparable=incomparable,
+                    new=new,
+                    removed=removed,
+                )
+            )
+            continue
+
+        if base_ms is None or cand_ms is None:
+            row = ComparisonRow(
+                case=name,
+                baseline_ms=base_ms,
+                candidate_ms=cand_ms,
+                status="incomparable",
+                change="incomparable",
+                baseline_classification=baseline_classification,
+                candidate_classification=candidate_classification,
+                decision_scope=decision_scope,
+                scope_reason=scope_reason,
+                spread_metric=spread_metric,
+                baseline_spread_ms=baseline_spread_ms,
+                candidate_spread_ms=candidate_spread_ms,
                 baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
                 candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
             )
+            rows.append(row)
+            faster, slower, no_change, incomparable, new, removed = (
+                _update_summary_counts(
+                    row,
+                    faster=faster,
+                    slower=slower,
+                    no_change=no_change,
+                    incomparable=incomparable,
+                    new=new,
+                    removed=removed,
+                )
+            )
+            continue
+
+        status = classify_change(base_ms, cand_ms, threshold)
+        row = ComparisonRow(
+            case=name,
+            baseline_ms=base_ms,
+            candidate_ms=cand_ms,
+            status=status,
+            change=_display_change_for_status(
+                status,
+                baseline_ms=base_ms,
+                candidate_ms=cand_ms,
+                threshold=threshold,
+                mode=mode,
+            ),
+            baseline_classification=baseline_classification,
+            candidate_classification=candidate_classification,
+            decision_scope=decision_scope,
+            scope_reason=scope_reason,
+            spread_metric=spread_metric,
+            baseline_spread_ms=baseline_spread_ms,
+            candidate_spread_ms=candidate_spread_ms,
+            baseline_metrics=best_sample_metrics(b, aggregation=aggregation),
+            candidate_metrics=best_sample_metrics(c, aggregation=aggregation),
+        )
+        rows.append(row)
+        faster, slower, no_change, incomparable, new, removed = _update_summary_counts(
+            row,
+            faster=faster,
+            slower=slower,
+            no_change=no_change,
+            incomparable=incomparable,
+            new=new,
+            removed=removed,
         )
 
     summary = Summary(
@@ -578,6 +760,9 @@ def main() -> None:
     parser.add_argument(
         "--format", choices=["text", "markdown", "json"], default="text"
     )
+    parser.add_argument("--spread-metric", choices=sorted(VALID_SPREAD_METRICS))
+    parser.add_argument("--sub-ms-threshold-ms", type=float)
+    parser.add_argument("--sub-ms-policy", choices=sorted(VALID_SUB_MS_POLICIES))
     parser.add_argument("--include-metrics", action="store_true")
     parser.add_argument(
         "--fail-on",
@@ -606,6 +791,9 @@ def main() -> None:
             threshold=args.noise_threshold,
             aggregation=args.aggregation,
             mode=args.mode,
+            spread_metric=args.spread_metric,
+            sub_ms_threshold_ms=args.sub_ms_threshold_ms,
+            sub_ms_policy=args.sub_ms_policy,
         )
     except (ValueError, OSError) as exc:
         print(str(exc), file=sys.stderr)

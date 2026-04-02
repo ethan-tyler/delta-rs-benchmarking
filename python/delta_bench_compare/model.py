@@ -54,6 +54,11 @@ class ComparisonRow:
     change: str
     baseline_classification: str | None
     candidate_classification: str | None
+    decision_scope: str | None = None
+    scope_reason: str | None = None
+    spread_metric: str | None = None
+    baseline_spread_ms: float | None = None
+    candidate_spread_ms: float | None = None
     baseline_metrics: SampleMetricSnapshot | None = None
     candidate_metrics: SampleMetricSnapshot | None = None
 
@@ -82,6 +87,11 @@ class ComparisonRow:
             "delta_pct": self.delta_pct(),
             "baseline_classification": self.baseline_classification,
             "candidate_classification": self.candidate_classification,
+            "decision_scope": self.decision_scope,
+            "scope_reason": self.scope_reason,
+            "spread_metric": self.spread_metric,
+            "baseline_spread_ms": self.baseline_spread_ms,
+            "candidate_spread_ms": self.candidate_spread_ms,
         }
 
 

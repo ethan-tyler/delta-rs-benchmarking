@@ -221,6 +221,7 @@ The comparison report groups benchmark cases into four sections:
 | **Regressions**        | Cases where the candidate is slower than the base beyond the noise threshold. Investigate before merging.     |
 | **Improvements**       | Cases where the candidate is faster than the base beyond the noise threshold.                                 |
 | **Stable**             | Cases where performance is within the noise threshold. No action needed.                                      |
+| **Out of Scope (micro only)** | Decision-mode rows excluded from macro evidence because both sides are below the configured sub-millisecond threshold. |
 | **Comparison aborted / invalid** | Exploratory mode reports invalid workloads here without discarding the rest of the artifact. Decision mode still fails closed instead of producing a perf claim. |
 
 Key metrics to look at:
@@ -228,13 +229,14 @@ Key metrics to look at:
 - **Relative change (%)** -- how much faster or slower the candidate is compared to the base.
 - **cv_pct** -- coefficient of variation as a percentage. Below 5% is good. Above 10% means the measurement is noisy and you should increase `--compare-runs` or `--iters`.
 - **median_ms** -- the representative timing for each case.
+- **iqr_ms** -- the interquartile spread computed from per-run medians in decision-mode evidence. This is the fixed spread metric used by the `pr-macro` methodology profile.
 
 Automation-friendly compare artifacts live next to the aggregated run JSON:
 
 | Artifact | Purpose |
 | --- | --- |
 | `summary.md` | Markdown report for PR comments or artifact upload |
-| `comparison.json` | Versioned machine-readable compare payload with `schema_version`, `metadata`, `summary`, and `rows` |
+| `comparison.json` | Versioned machine-readable compare payload with `schema_version`, `metadata`, `summary`, and `rows`, including per-row scope and spread fields |
 | `hash-policy.txt` | Hash/schema compatibility report for the aggregated payload pair across all observed sample hashes |
 | `manifest.json` | Pointer file with suite, SHAs, compare settings, and artifact paths |
 

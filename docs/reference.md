@@ -342,11 +342,13 @@ Compare automation artifacts are written to `results/compare/<suite>/<base_sha>_
 | `summary.md` | Markdown compare report |
 | `comparison.json` | Versioned JSON compare payload with `schema_version`, `metadata`, `summary`, and `rows` |
 | `hash-policy.txt` | Hash/schema compatibility report for the aggregated base and candidate payloads across all observed sample hashes |
-| `manifest.json` | JSON manifest with suite, SHAs, compare settings, aggregated input paths, and artifact paths |
+| `manifest.json` | JSON manifest with suite, SHAs, compare settings, methodology metadata, aggregated input paths, and artifact paths |
 
 `comparison.json` schema version `1` includes top-level `schema_version`, `metadata`, `summary`, and `rows`. Each row contains `case`, `status`, `display_change`, `baseline_ms`, `candidate_ms`, and `delta_pct`.
 
-`manifest.json` contains these top-level keys: `suite`, `base_sha`, `candidate_sha`, `base_json`, `candidate_json`, `stdout_report`, `markdown_report`, `comparison_json`, `hash_policy_report`, `compare_mode`, `aggregation`, and `noise_threshold`.
+`manifest.json` contains these top-level keys: `suite`, `base_sha`, `candidate_sha`, `base_json`, `candidate_json`, `stdout_report`, `markdown_report`, `comparison_json`, `hash_policy_report`, `compare_mode`, `aggregation`, `noise_threshold`, `methodology_profile`, `methodology_version`, and `methodology_settings`.
+
+`methodology_settings` records the resolved compare settings used for the run: `compare_mode`, `warmup`, `iters`, `prewarm_iters`, `compare_runs`, `measure_order`, `timing_phase`, `aggregation`, `dataset_policy`, `spread_metric`, `sub_ms_threshold_ms`, and `sub_ms_policy`.
 
 `compare_branch.sh` keeps a clean source checkout at `.delta-rs-source/` by default for branch lookup, immutable SHA pinning, and seeding per-SHA compare checkouts. `--current-vs-main` is the one exception: it seeds the candidate prepared checkout from `DELTA_RS_DIR` so the current local HEAD remains reachable even when it is not present in the clean source checkout.
 

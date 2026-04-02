@@ -1205,21 +1205,47 @@ run_command_to_file "${compare_stdout}" "${compare_cmd[@]}" "${compare_render_ar
 run_command_to_file "${compare_markdown}" "${compare_cmd[@]}" "${compare_render_args[@]}" --format markdown
 run_command_to_file "${compare_json}" "${compare_cmd[@]}" "${compare_render_args[@]}" --format json
 run_command_to_file "${hash_policy_txt}" "${hash_policy_cmd[@]}"
-run_step env \
-	COMPARE_MANIFEST_PATH="${manifest_json}" \
-	COMPARE_SUITE="${suite}" \
-	COMPARE_BASE_SHA="${base_ref}" \
-	COMPARE_CANDIDATE_SHA="${candidate_ref}" \
-	COMPARE_BASE_JSON="${base_json}" \
-	COMPARE_CANDIDATE_JSON="${cand_json}" \
-	COMPARE_STDOUT_REPORT="${compare_stdout}" \
-	COMPARE_MARKDOWN_REPORT="${compare_markdown}" \
-	COMPARE_COMPARISON_JSON="${compare_json}" \
-	COMPARE_HASH_POLICY_REPORT="${hash_policy_txt}" \
-	COMPARE_MODE_VALUE="${COMPARE_MODE}" \
-	COMPARE_AGGREGATION="${AGGREGATION}" \
-	COMPARE_NOISE_THRESHOLD="${NOISE_THRESHOLD}" \
-	python3 -c 'import json, os, pathlib; pathlib.Path(os.environ["COMPARE_MANIFEST_PATH"]).write_text(json.dumps({"suite": os.environ["COMPARE_SUITE"], "base_sha": os.environ["COMPARE_BASE_SHA"], "candidate_sha": os.environ["COMPARE_CANDIDATE_SHA"], "base_json": os.environ["COMPARE_BASE_JSON"], "candidate_json": os.environ["COMPARE_CANDIDATE_JSON"], "stdout_report": os.environ["COMPARE_STDOUT_REPORT"], "markdown_report": os.environ["COMPARE_MARKDOWN_REPORT"], "comparison_json": os.environ["COMPARE_COMPARISON_JSON"], "hash_policy_report": os.environ["COMPARE_HASH_POLICY_REPORT"], "compare_mode": os.environ["COMPARE_MODE_VALUE"], "aggregation": os.environ["COMPARE_AGGREGATION"], "noise_threshold": float(os.environ["COMPARE_NOISE_THRESHOLD"])}, indent=2) + "\n", encoding="utf-8")'
+manifest_cmd=(env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.manifest \
+	--output "${manifest_json}" \
+	--suite "${suite}" \
+	--base-sha "${base_ref}" \
+	--candidate-sha "${candidate_ref}" \
+	--base-json "${base_json}" \
+	--candidate-json "${cand_json}" \
+	--stdout-report "${compare_stdout}" \
+	--markdown-report "${compare_markdown}" \
+	--comparison-json "${compare_json}" \
+	--hash-policy-report "${hash_policy_txt}" \
+	--compare-mode "${COMPARE_MODE}" \
+	--aggregation "${AGGREGATION}" \
+	--noise-threshold "${NOISE_THRESHOLD}" \
+	--methodology-compare-mode "${COMPARE_MODE}" \
+	--methodology-warmup "${BENCH_WARMUP}" \
+	--methodology-iters "${BENCH_ITERS}" \
+	--methodology-prewarm-iters "${BENCH_PREWARM_ITERS}" \
+	--methodology-compare-runs "${BENCH_COMPARE_RUNS}" \
+	--methodology-measure-order "${BENCH_MEASURE_ORDER}" \
+	--methodology-timing-phase "${TIMING_PHASE}" \
+	--methodology-aggregation "${AGGREGATION}")
+if [[ -n "${METHODOLOGY_PROFILE}" ]]; then
+	manifest_cmd+=(--methodology-profile "${METHODOLOGY_PROFILE}")
+fi
+if [[ -n "${METHODOLOGY_VERSION}" ]]; then
+	manifest_cmd+=(--methodology-version "${METHODOLOGY_VERSION}")
+fi
+if [[ -n "${DATASET_POLICY}" ]]; then
+	manifest_cmd+=(--methodology-dataset-policy "${DATASET_POLICY}")
+fi
+if [[ -n "${SPREAD_METRIC}" ]]; then
+	manifest_cmd+=(--methodology-spread-metric "${SPREAD_METRIC}")
+fi
+if [[ -n "${SUB_MS_THRESHOLD_MS}" ]]; then
+	manifest_cmd+=(--methodology-sub-ms-threshold-ms "${SUB_MS_THRESHOLD_MS}")
+fi
+if [[ -n "${SUB_MS_POLICY}" ]]; then
+	manifest_cmd+=(--methodology-sub-ms-policy "${SUB_MS_POLICY}")
+fi
+run_step "${manifest_cmd[@]}"
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.hash_policy "${base_json}" "${cand_json}"

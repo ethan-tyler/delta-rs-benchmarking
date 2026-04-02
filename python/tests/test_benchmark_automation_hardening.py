@@ -63,6 +63,15 @@ def copy_executable(source: Path, dest: Path) -> None:
     dest.chmod(0o755)
 
 
+def copy_compare_manifest_helper(dest_pkg: Path) -> None:
+    write_executable(
+        dest_pkg / "manifest.py",
+        (REPO_ROOT / "python" / "delta_bench_compare" / "manifest.py").read_text(
+            encoding="utf-8"
+        ),
+    )
+
+
 def configure_git_identity(repo: Path) -> None:
     subprocess.run(
         ["git", "-C", str(repo), "config", "user.email", "bench@example.com"],
@@ -949,6 +958,7 @@ exit 99
         python_pkg = temp_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
         write_executable(
             python_pkg / "aggregate.py",
             """#!/usr/bin/env python3
@@ -1167,6 +1177,7 @@ exit 99
         python_pkg = temp_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
         write_executable(
             python_pkg / "aggregate.py",
             """#!/usr/bin/env python3
@@ -1377,6 +1388,7 @@ exit 99
         python_pkg = temp_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
         write_executable(
             python_pkg / "aggregate.py",
             """#!/usr/bin/env python3
@@ -1603,6 +1615,7 @@ exit 99
         python_pkg = temp_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
         write_executable(
             python_pkg / "aggregate.py",
             """#!/usr/bin/env python3
@@ -1827,6 +1840,7 @@ exit 99
         python_pkg = temp_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
         write_executable(
             python_pkg / "aggregate.py",
             """#!/usr/bin/env python3
@@ -2668,6 +2682,7 @@ sys.exit(0)
         python_pkg = temp_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
         write_executable(
             python_pkg / "aggregate.py",
             """#!/usr/bin/env python3
@@ -2872,6 +2887,7 @@ exit 99
         python_pkg = temp_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
         write_executable(
             python_pkg / "aggregate.py",
             """#!/usr/bin/env python3
@@ -3003,6 +3019,273 @@ print("hash policy ok")
         assert Path(manifest["hash_policy_report"]).is_file()
 
 
+def test_compare_branch_manifest_records_methodology_profile_and_resolved_settings() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        methodology_dir = temp_root / "bench" / "methodologies"
+        methodology_dir.mkdir(parents=True)
+        methodology_dir.joinpath("pr-macro.env").write_text(
+            (REPO_ROOT / "bench" / "methodologies" / "pr-macro.env").read_text(
+                encoding="utf-8"
+            ),
+            encoding="utf-8",
+        )
+
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/.git"
+ref="${DELTA_RS_REF:-${DELTA_RS_BRANCH:-}}"
+if [[ -z "${ref}" ]]; then
+  ref="0000000000000000000000000000000000000000"
+fi
+printf '%s\n' "${ref}" > "${DELTA_RS_DIR}/.bench-current-sha"
+printf 'delta-rs checkout ready: %s\n' "${DELTA_RS_DIR}"
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+suite = value(args, "--suite", "scan")
+results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+label = os.environ["DELTA_BENCH_LABEL"]
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    target_dir = results_dir / label
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / f"{suite}.json").write_text(
+        json.dumps({"label": label, "suite": suite}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "clone" ]]; then
+  dest="${@: -1}"
+  mkdir -p "${dest}/.git"
+  exit 0
+fi
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.add_argument("--format", choices=["text", "markdown", "json"], default="text")
+parser.parse_known_args()
+args, _ = parser.parse_known_args()
+
+if args.format == "markdown":
+    print("# Compare Summary")
+elif args.format == "json":
+    print(
+        json.dumps(
+            {
+                "summary": {
+                    "faster": 1,
+                    "slower": 0,
+                    "no_change": 0,
+                    "incomparable": 0,
+                    "new": 0,
+                    "removed": 0,
+                },
+                "rows": [
+                    {
+                        "case": "a",
+                        "change": "1.11x faster",
+                        "baseline_ms": 100.0,
+                        "candidate_ms": 90.0,
+                        "delta_pct": -10.0,
+                    }
+                ],
+            }
+        )
+    )
+else:
+    print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        results_dir = temp_root / "results"
+        home_dir = temp_root / "home"
+        home_dir.mkdir()
+        (home_dir / ".bashrc").write_text(
+            'printf "startup-noise-bashrc\\n" >&2\n',
+            encoding="utf-8",
+        )
+        (home_dir / ".profile").write_text(
+            'printf "startup-noise-profile\\n" >&2\n',
+            encoding="utf-8",
+        )
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["HOME"] = str(home_dir)
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_BENCH_RESULTS"] = str(results_dir)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--methodology-profile",
+                "pr-macro",
+                "--warmup",
+                "7",
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        artifact_dir = results_dir / "compare" / "scan" / f"{base_sha}__{candidate_sha}"
+        manifest = json.loads(
+            (artifact_dir / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["methodology_profile"] == "pr-macro"
+        assert manifest["methodology_version"] == 1
+        assert manifest["methodology_settings"] == {
+            "compare_mode": "decision",
+            "warmup": 7,
+            "iters": 9,
+            "prewarm_iters": 1,
+            "compare_runs": 5,
+            "measure_order": "alternate",
+            "timing_phase": "execute",
+            "aggregation": "median",
+            "dataset_policy": "shared_run_scope",
+            "spread_metric": "iqr_ms",
+            "sub_ms_threshold_ms": 1.0,
+            "sub_ms_policy": "micro_only",
+        }
+
+
 def test_compare_branch_prepares_each_pinned_ref_once_and_reuses_checkout() -> None:
     with tempfile.TemporaryDirectory() as td:
         temp_root = Path(td)
@@ -3130,6 +3413,7 @@ exit 99
         python_pkg = temp_root / "python" / "delta_bench_compare"
         python_pkg.mkdir(parents=True)
         (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
         write_executable(
             python_pkg / "aggregate.py",
             """#!/usr/bin/env python3

@@ -2933,9 +2933,20 @@ print("hash policy ok")
         base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
         candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
         results_dir = temp_root / "results"
+        home_dir = temp_root / "home"
+        home_dir.mkdir()
+        (home_dir / ".bashrc").write_text(
+            'printf "startup-noise-bashrc\\n" >&2\n',
+            encoding="utf-8",
+        )
+        (home_dir / ".profile").write_text(
+            'printf "startup-noise-profile\\n" >&2\n',
+            encoding="utf-8",
+        )
 
         env = os.environ.copy()
         env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["HOME"] = str(home_dir)
         env["BENCH_RETRY_ATTEMPTS"] = "1"
         env["BENCH_PREWARM_ITERS"] = "0"
         env["BENCH_COMPARE_RUNS"] = "1"
@@ -2962,6 +2973,8 @@ print("hash policy ok")
         )
 
         assert result.returncode == 0, result.stderr or result.stdout
+        assert "startup-noise-bashrc" not in result.stderr
+        assert "startup-noise-profile" not in result.stderr
         artifact_dir = results_dir / "compare" / "scan" / f"{base_sha}__{candidate_sha}"
         manifest = json.loads(
             (artifact_dir / "manifest.json").read_text(encoding="utf-8")

@@ -601,7 +601,7 @@ run_command_to_file() {
 	local cmd=("$@")
 	local command_string
 	command_string="$(shell_join "${cmd[@]}")"
-	run_step bash -lc "set -euo pipefail; ${command_string} > $(printf '%q' "${output_path}")"
+	run_step bash -c "set -euo pipefail; ${command_string} > $(printf '%q' "${output_path}")"
 }
 
 path_is_within_dir() {

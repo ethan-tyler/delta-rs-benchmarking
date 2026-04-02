@@ -1362,6 +1362,57 @@ def test_compare_cli_json_output_is_versioned_and_machine_readable(
     assert payload["rows"][0]["delta_pct"] is None
 
 
+def test_compare_cli_and_spread_metadata_are_machine_readable(tmp_path: Path) -> None:
+    baseline = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 120.0}]}])
+    candidate = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 110.0}]}])
+    baseline["cases"][0]["run_summaries"] = [
+        {"median_ms": 100.0},
+        {"median_ms": 110.0},
+        {"median_ms": 120.0},
+        {"median_ms": 130.0},
+        {"median_ms": 140.0},
+    ]
+    candidate["cases"][0]["run_summaries"] = [
+        {"median_ms": 90.0},
+        {"median_ms": 100.0},
+        {"median_ms": 110.0},
+        {"median_ms": 120.0},
+        {"median_ms": 130.0},
+    ]
+
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = _run_compare_cli(
+        baseline_path,
+        candidate_path,
+        "--mode",
+        "decision",
+        "--format",
+        "json",
+        "--spread-metric",
+        "iqr_ms",
+        "--sub-ms-threshold-ms",
+        "1.0",
+        "--sub-ms-policy",
+        "micro_only",
+    )
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["metadata"] == {
+        "mode": "decision",
+        "aggregation": "median",
+        "noise_threshold": 0.05,
+        "spread_metric": "iqr_ms",
+        "sub_ms_threshold_ms": 1.0,
+        "sub_ms_policy": "micro_only",
+    }
+    assert payload["rows"][0]["spread_metric"] == "iqr_ms"
+
+
 def test_compare_cli_fail_on_regression_exits_non_zero(tmp_path: Path) -> None:
     baseline = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 1.0}]}])
     candidate = _run_v4([{"case": "scan_case", "samples": [{"elapsed_ms": 1.0}]}])

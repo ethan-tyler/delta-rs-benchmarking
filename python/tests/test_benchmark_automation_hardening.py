@@ -345,6 +345,20 @@ def test_compare_branch_derives_compare_and_manifest_args_from_shared_methodolog
     assert re.search(r"build_manifest_methodology_args\s*\n", script)
 
 
+def test_compare_branch_forwards_spread_metric_and_sub_ms_args_to_compare() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert re.search(
+        r'compare_common_args\+=\(--spread-metric "\$\{spread_metric\}"\)', script
+    )
+    assert re.search(
+        r'compare_common_args\+=\(--sub-ms-threshold-ms "\$\{sub_ms_threshold_ms\}"\)',
+        script,
+    )
+    assert re.search(
+        r'compare_common_args\+=\(--sub-ms-policy "\$\{sub_ms_policy\}"\)', script
+    )
+
+
 def test_compare_branch_defaults_to_exploratory_mode_curated_scan_and_macro_lane() -> (
     None
 ):

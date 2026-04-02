@@ -684,15 +684,25 @@ def build_json_payload(
     mode: str,
     aggregation: str,
     noise_threshold: float,
+    spread_metric: str | None = None,
+    sub_ms_threshold_ms: float | None = None,
+    sub_ms_policy: str | None = None,
 ) -> dict[str, object]:
     payload = comparison.to_json_dict()
+    metadata: dict[str, object] = {
+        "mode": mode,
+        "aggregation": aggregation,
+        "noise_threshold": noise_threshold,
+    }
+    if spread_metric is not None:
+        metadata["spread_metric"] = spread_metric
+    if sub_ms_threshold_ms is not None:
+        metadata["sub_ms_threshold_ms"] = sub_ms_threshold_ms
+    if sub_ms_policy is not None:
+        metadata["sub_ms_policy"] = sub_ms_policy
     return {
         "schema_version": COMPARISON_JSON_SCHEMA_VERSION,
-        "metadata": {
-            "mode": mode,
-            "aggregation": aggregation,
-            "noise_threshold": noise_threshold,
-        },
+        "metadata": metadata,
         **payload,
     }
 
@@ -809,6 +819,9 @@ def main() -> None:
                 mode=args.mode,
                 aggregation=args.aggregation,
                 noise_threshold=args.noise_threshold,
+                spread_metric=args.spread_metric,
+                sub_ms_threshold_ms=args.sub_ms_threshold_ms,
+                sub_ms_policy=args.sub_ms_policy,
             ),
             indent=2,
         )

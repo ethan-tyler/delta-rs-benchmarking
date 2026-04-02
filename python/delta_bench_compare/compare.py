@@ -286,7 +286,9 @@ def _decision_scope(
     return "macro", None
 
 
-def _invalid_perf_change(baseline_case: dict | None, candidate_case: dict | None) -> str:
+def _invalid_perf_change(
+    baseline_case: dict | None, candidate_case: dict | None
+) -> str:
     details: list[str] = []
     for side, case in (("baseline", baseline_case), ("candidate", candidate_case)):
         if case is None:
@@ -459,12 +461,8 @@ def compare_runs(
         baseline_perf_status = case_perf_status(b)
         candidate_perf_status = case_perf_status(c)
 
-        if (
-            mode == "exploratory"
-            and (
-                baseline_perf_status != "trusted"
-                or candidate_perf_status != "trusted"
-            )
+        if mode == "exploratory" and (
+            baseline_perf_status != "trusted" or candidate_perf_status != "trusted"
         ):
             row = ComparisonRow(
                 case=name,
@@ -745,6 +743,12 @@ def _parse_fail_on(raw: str) -> set[str]:
     return statuses
 
 
+def _matches_fail_on(row: ComparisonRow, fail_on_statuses: set[str]) -> bool:
+    if row.decision_scope == "micro_only":
+        return False
+    return row.status in fail_on_statuses
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compare delta-bench JSON results")
     parser.add_argument("paths", nargs="*", type=Path)
@@ -813,7 +817,7 @@ def main() -> None:
     else:
         output = render_text(comparison, include_metrics=args.include_metrics)
     print(output)
-    if any(row.status in fail_on_statuses for row in comparison.rows):
+    if any(_matches_fail_on(row, fail_on_statuses) for row in comparison.rows):
         raise SystemExit(2)
 
 

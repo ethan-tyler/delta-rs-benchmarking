@@ -174,7 +174,7 @@ load_methodology_profile() {
 			profile_sub_ms_policy="${value}"
 			;;
 		esac
-	done <<< "${profile_output}"
+	done <<<"${profile_output}"
 
 	if [[ -z "${profile_declared_name}" ]]; then
 		echo "methodology profile '${profile_name}' is missing METHODOLOGY_PROFILE" >&2
@@ -214,6 +214,128 @@ load_methodology_profile() {
 	fi
 	if ((AGGREGATION_EXPLICIT == 0)) && [[ -n "${profile_aggregation}" ]]; then
 		AGGREGATION="${profile_aggregation}"
+	fi
+}
+
+resolved_methodology_settings=()
+compare_common_args=()
+manifest_methodology_args=()
+
+build_resolved_methodology_settings() {
+	resolved_methodology_settings=(
+		profile "${METHODOLOGY_PROFILE}"
+		version "${METHODOLOGY_VERSION}"
+		compare_mode "${COMPARE_MODE}"
+		warmup "${BENCH_WARMUP}"
+		iters "${BENCH_ITERS}"
+		prewarm_iters "${BENCH_PREWARM_ITERS}"
+		compare_runs "${BENCH_COMPARE_RUNS}"
+		measure_order "${BENCH_MEASURE_ORDER}"
+		timing_phase "${TIMING_PHASE}"
+		aggregation "${AGGREGATION}"
+		dataset_policy "${DATASET_POLICY}"
+		spread_metric "${SPREAD_METRIC}"
+		sub_ms_threshold_ms "${SUB_MS_THRESHOLD_MS}"
+		sub_ms_policy "${SUB_MS_POLICY}"
+	)
+}
+
+resolved_methodology_setting() {
+	local key="${1:-}"
+	local idx=0
+	while ((idx < ${#resolved_methodology_settings[@]})); do
+		if [[ "${resolved_methodology_settings[$idx]}" == "${key}" ]]; then
+			printf '%s' "${resolved_methodology_settings[$((idx + 1))]}"
+			return 0
+		fi
+		idx=$((idx + 2))
+	done
+	return 1
+}
+
+build_compare_common_args() {
+	local compare_mode=""
+	local aggregation=""
+	local spread_metric=""
+	local sub_ms_threshold_ms=""
+	local sub_ms_policy=""
+
+	compare_mode="$(resolved_methodology_setting compare_mode)"
+	aggregation="$(resolved_methodology_setting aggregation)"
+	spread_metric="$(resolved_methodology_setting spread_metric)"
+	sub_ms_threshold_ms="$(resolved_methodology_setting sub_ms_threshold_ms)"
+	sub_ms_policy="$(resolved_methodology_setting sub_ms_policy)"
+
+	compare_common_args=(--mode "${compare_mode}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${aggregation}")
+	if [[ -n "${spread_metric}" ]]; then
+		compare_common_args+=(--spread-metric "${spread_metric}")
+	fi
+	if [[ -n "${sub_ms_threshold_ms}" ]]; then
+		compare_common_args+=(--sub-ms-threshold-ms "${sub_ms_threshold_ms}")
+	fi
+	if [[ -n "${sub_ms_policy}" ]]; then
+		compare_common_args+=(--sub-ms-policy "${sub_ms_policy}")
+	fi
+}
+
+build_manifest_methodology_args() {
+	local profile=""
+	local version=""
+	local compare_mode=""
+	local warmup=""
+	local iters=""
+	local prewarm_iters=""
+	local compare_runs=""
+	local measure_order=""
+	local timing_phase=""
+	local aggregation=""
+	local dataset_policy=""
+	local spread_metric=""
+	local sub_ms_threshold_ms=""
+	local sub_ms_policy=""
+
+	profile="$(resolved_methodology_setting profile)"
+	version="$(resolved_methodology_setting version)"
+	compare_mode="$(resolved_methodology_setting compare_mode)"
+	warmup="$(resolved_methodology_setting warmup)"
+	iters="$(resolved_methodology_setting iters)"
+	prewarm_iters="$(resolved_methodology_setting prewarm_iters)"
+	compare_runs="$(resolved_methodology_setting compare_runs)"
+	measure_order="$(resolved_methodology_setting measure_order)"
+	timing_phase="$(resolved_methodology_setting timing_phase)"
+	aggregation="$(resolved_methodology_setting aggregation)"
+	dataset_policy="$(resolved_methodology_setting dataset_policy)"
+	spread_metric="$(resolved_methodology_setting spread_metric)"
+	sub_ms_threshold_ms="$(resolved_methodology_setting sub_ms_threshold_ms)"
+	sub_ms_policy="$(resolved_methodology_setting sub_ms_policy)"
+
+	manifest_methodology_args=(
+		--methodology-compare-mode "${compare_mode}"
+		--methodology-warmup "${warmup}"
+		--methodology-iters "${iters}"
+		--methodology-prewarm-iters "${prewarm_iters}"
+		--methodology-compare-runs "${compare_runs}"
+		--methodology-measure-order "${measure_order}"
+		--methodology-timing-phase "${timing_phase}"
+		--methodology-aggregation "${aggregation}"
+	)
+	if [[ -n "${profile}" ]]; then
+		manifest_methodology_args+=(--methodology-profile "${profile}")
+	fi
+	if [[ -n "${version}" ]]; then
+		manifest_methodology_args+=(--methodology-version "${version}")
+	fi
+	if [[ -n "${dataset_policy}" ]]; then
+		manifest_methodology_args+=(--methodology-dataset-policy "${dataset_policy}")
+	fi
+	if [[ -n "${spread_metric}" ]]; then
+		manifest_methodology_args+=(--methodology-spread-metric "${spread_metric}")
+	fi
+	if [[ -n "${sub_ms_threshold_ms}" ]]; then
+		manifest_methodology_args+=(--methodology-sub-ms-threshold-ms "${sub_ms_threshold_ms}")
+	fi
+	if [[ -n "${sub_ms_policy}" ]]; then
+		manifest_methodology_args+=(--methodology-sub-ms-policy "${sub_ms_policy}")
 	fi
 }
 
@@ -549,6 +671,8 @@ assert)
 	exit 1
 	;;
 esac
+
+build_resolved_methodology_settings
 
 DELTA_RS_DIR="${DELTA_RS_DIR:-${RUNNER_ROOT}/.delta-rs-under-test}"
 DELTA_RS_SOURCE_DIR="${DELTA_RS_SOURCE_DIR:-${RUNNER_ROOT}/.delta-rs-source}"
@@ -1191,12 +1315,15 @@ compare_json="${compare_artifact_dir}/comparison.json"
 hash_policy_txt="${compare_artifact_dir}/hash-policy.txt"
 manifest_json="${compare_artifact_dir}/manifest.json"
 
-compare_args=(--mode "${COMPARE_MODE}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}" --format text)
+build_compare_common_args
+build_manifest_methodology_args
+
+compare_args=("${compare_common_args[@]}" --format text)
 if [[ -n "${COMPARE_FAIL_ON}" ]]; then
 	compare_args+=(--fail-on "${COMPARE_FAIL_ON}")
 fi
 
-compare_render_args=(--mode "${COMPARE_MODE}" --noise-threshold "${NOISE_THRESHOLD}" --aggregation "${AGGREGATION}")
+compare_render_args=("${compare_common_args[@]}")
 compare_cmd=(env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}")
 hash_policy_cmd=(env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.hash_policy "${base_json}" "${cand_json}")
 
@@ -1205,46 +1332,21 @@ run_command_to_file "${compare_stdout}" "${compare_cmd[@]}" "${compare_render_ar
 run_command_to_file "${compare_markdown}" "${compare_cmd[@]}" "${compare_render_args[@]}" --format markdown
 run_command_to_file "${compare_json}" "${compare_cmd[@]}" "${compare_render_args[@]}" --format json
 run_command_to_file "${hash_policy_txt}" "${hash_policy_cmd[@]}"
-manifest_cmd=(env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.manifest \
-	--output "${manifest_json}" \
-	--suite "${suite}" \
-	--base-sha "${base_ref}" \
-	--candidate-sha "${candidate_ref}" \
-	--base-json "${base_json}" \
-	--candidate-json "${cand_json}" \
-	--stdout-report "${compare_stdout}" \
-	--markdown-report "${compare_markdown}" \
-	--comparison-json "${compare_json}" \
-	--hash-policy-report "${hash_policy_txt}" \
-	--compare-mode "${COMPARE_MODE}" \
-	--aggregation "${AGGREGATION}" \
-	--noise-threshold "${NOISE_THRESHOLD}" \
-	--methodology-compare-mode "${COMPARE_MODE}" \
-	--methodology-warmup "${BENCH_WARMUP}" \
-	--methodology-iters "${BENCH_ITERS}" \
-	--methodology-prewarm-iters "${BENCH_PREWARM_ITERS}" \
-	--methodology-compare-runs "${BENCH_COMPARE_RUNS}" \
-	--methodology-measure-order "${BENCH_MEASURE_ORDER}" \
-	--methodology-timing-phase "${TIMING_PHASE}" \
-	--methodology-aggregation "${AGGREGATION}")
-if [[ -n "${METHODOLOGY_PROFILE}" ]]; then
-	manifest_cmd+=(--methodology-profile "${METHODOLOGY_PROFILE}")
-fi
-if [[ -n "${METHODOLOGY_VERSION}" ]]; then
-	manifest_cmd+=(--methodology-version "${METHODOLOGY_VERSION}")
-fi
-if [[ -n "${DATASET_POLICY}" ]]; then
-	manifest_cmd+=(--methodology-dataset-policy "${DATASET_POLICY}")
-fi
-if [[ -n "${SPREAD_METRIC}" ]]; then
-	manifest_cmd+=(--methodology-spread-metric "${SPREAD_METRIC}")
-fi
-if [[ -n "${SUB_MS_THRESHOLD_MS}" ]]; then
-	manifest_cmd+=(--methodology-sub-ms-threshold-ms "${SUB_MS_THRESHOLD_MS}")
-fi
-if [[ -n "${SUB_MS_POLICY}" ]]; then
-	manifest_cmd+=(--methodology-sub-ms-policy "${SUB_MS_POLICY}")
-fi
+manifest_cmd=(env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.manifest
+	--output "${manifest_json}"
+	--suite "${suite}"
+	--base-sha "${base_ref}"
+	--candidate-sha "${candidate_ref}"
+	--base-json "${base_json}"
+	--candidate-json "${cand_json}"
+	--stdout-report "${compare_stdout}"
+	--markdown-report "${compare_markdown}"
+	--comparison-json "${compare_json}"
+	--hash-policy-report "${hash_policy_txt}"
+	--compare-mode "${COMPARE_MODE}"
+	--aggregation "${AGGREGATION}"
+	--noise-threshold "${NOISE_THRESHOLD}")
+manifest_cmd+=("${manifest_methodology_args[@]}")
 run_step "${manifest_cmd[@]}"
 
 run_step env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.compare "${base_json}" "${cand_json}" "${compare_args[@]}"

@@ -802,7 +802,9 @@ def test_aggregate_payloads_exploratory_mode_keeps_invalid_cases_and_reports_the
         mode="exploratory",
     )
 
-    invalid_case = next(case for case in baseline["cases"] if case["case"] == "scan_bad")
+    invalid_case = next(
+        case for case in baseline["cases"] if case["case"] == "scan_bad"
+    )
     assert invalid_case["perf_status"] == "invalid"
     assert invalid_case["failure_kind"] == "assertion_mismatch"
     assert invalid_case["failure"] == {"message": "hash mismatch"}
@@ -1196,6 +1198,41 @@ def test_render_markdown_places_micro_only_rows_in_out_of_scope_section() -> Non
     assert "scan_macro_regression" in regression_section
     assert "scan_micro_regression" not in regression_section
     assert "scan_micro_regression" in out.split("## Out of Scope (micro only)", 1)[1]
+
+
+def test_compare_cli_fail_on_ignores_micro_only_rows(tmp_path: Path) -> None:
+    baseline = _run_v4(
+        [{"case": "scan_micro_regression", "samples": [{"elapsed_ms": 0.6}]}]
+    )
+    candidate = _run_v4(
+        [{"case": "scan_micro_regression", "samples": [{"elapsed_ms": 0.9}]}]
+    )
+    baseline["cases"][0]["run_summaries"] = [{"median_ms": 0.50}] * 5
+    candidate["cases"][0]["run_summaries"] = [{"median_ms": 0.90}] * 5
+
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = _run_compare_cli(
+        baseline_path,
+        candidate_path,
+        "--mode",
+        "decision",
+        "--spread-metric",
+        "iqr_ms",
+        "--sub-ms-threshold-ms",
+        "1.0",
+        "--sub-ms-policy",
+        "micro_only",
+        "--fail-on",
+        "regression",
+    )
+
+    assert result.returncode == 0
+    assert "Out of Scope (micro only)" in result.stdout
+    assert "scan_micro_regression" in result.stdout
 
 
 def test_compare_cli_rejects_invalid_perf_input_without_traceback(

@@ -308,7 +308,11 @@ def test_compare_branch_supports_aggregation_passthrough() -> None:
     assert "--aggregation <min|median|p95>" in script
     assert re.search(r"AGGREGATION=\"\$\{BENCH_AGGREGATION:-median\}\"", script)
     assert re.search(
-        r"compare_args=\(--mode \"\$\{COMPARE_MODE\}\" --noise-threshold \"\$\{NOISE_THRESHOLD\}\" --aggregation \"\$\{AGGREGATION\}\" --format text\)",
+        r'compare_common_args=\(--mode "\$\{compare_mode\}" --noise-threshold "\$\{NOISE_THRESHOLD\}" --aggregation "\$\{aggregation\}"\)',
+        script,
+    )
+    assert re.search(
+        r"compare_args=\(\"\\?\$\{compare_common_args\[@\]\}\" --format text\)",
         script,
     )
 
@@ -328,6 +332,19 @@ def test_compare_branch_accepts_pr_macro_methodology_profile_name() -> None:
     assert "pr-macro" in script
 
 
+def test_compare_branch_derives_compare_and_manifest_args_from_shared_methodology_settings() -> (
+    None
+):
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "build_resolved_methodology_settings()" in script
+    assert "resolved_methodology_settings=(" in script
+    assert "build_compare_common_args()" in script
+    assert "build_manifest_methodology_args()" in script
+    assert re.search(r"build_resolved_methodology_settings\s*\n", script)
+    assert re.search(r"build_compare_common_args\s*\n", script)
+    assert re.search(r"build_manifest_methodology_args\s*\n", script)
+
+
 def test_compare_branch_defaults_to_exploratory_mode_curated_scan_and_macro_lane() -> (
     None
 ):
@@ -338,7 +355,11 @@ def test_compare_branch_defaults_to_exploratory_mode_curated_scan_and_macro_lane
     assert re.search(r'suite="\$\{positional_refs\[0\]:-scan\}"', script)
     assert re.search(r"run_cmd=\(\./scripts/bench\.sh run .* --lane macro", script)
     assert re.search(
-        r'compare_args=\(--mode "\$\{COMPARE_MODE\}" --noise-threshold "\$\{NOISE_THRESHOLD\}" --aggregation "\$\{AGGREGATION\}" --format text\)',
+        r'compare_common_args=\(--mode "\$\{compare_mode\}" --noise-threshold "\$\{NOISE_THRESHOLD\}" --aggregation "\$\{aggregation\}"\)',
+        script,
+    )
+    assert re.search(
+        r'compare_args=\("?\$\{compare_common_args\[@\]\}"? --format text\)',
         script,
     )
 
@@ -358,22 +379,25 @@ def test_compare_branch_decision_mode_requires_at_least_five_runs() -> None:
 
 def test_bench_run_requires_correctness_lane_for_assert_mode() -> None:
     script = BENCH_SH.read_text(encoding="utf-8")
-    assert 'if [[ "${benchmark_mode}" == "assert" && "${lane}" != "correctness" ]]' in script
+    assert (
+        'if [[ "${benchmark_mode}" == "assert" && "${lane}" != "correctness" ]]'
+        in script
+    )
     assert "--mode assert requires --lane correctness" in script
 
 
 def test_perf_validation_workflow_entrypoint_exists_and_is_executable() -> None:
     assert VALIDATION_SCRIPT.exists(), "missing scripts/validate_perf_harness.sh"
-    assert (
-        VALIDATION_SCRIPT.stat().st_mode & 0o111
-    ), "scripts/validate_perf_harness.sh must be executable"
+    assert VALIDATION_SCRIPT.stat().st_mode & 0o111, (
+        "scripts/validate_perf_harness.sh must be executable"
+    )
 
 
 def test_publish_contract_entrypoint_exists_and_is_executable() -> None:
     assert PUBLISH_CONTRACT_SCRIPT.exists(), "missing scripts/publish_contract.sh"
-    assert (
-        PUBLISH_CONTRACT_SCRIPT.stat().st_mode & 0o111
-    ), "scripts/publish_contract.sh must be executable"
+    assert PUBLISH_CONTRACT_SCRIPT.stat().st_mode & 0o111, (
+        "scripts/publish_contract.sh must be executable"
+    )
 
 
 def test_publish_contract_captures_current_operator_docs_and_entrypoints(
@@ -701,7 +725,10 @@ def test_compare_branch_supports_working_branch_vs_upstream_main_shortcut() -> N
     assert "--current-vs-main" in script
     assert "--working-vs-upstream-main" in script
     assert "--upstream-remote <name>" in script
-    assert 'DELTA_RS_SOURCE_DIR="${DELTA_RS_SOURCE_DIR:-${RUNNER_ROOT}/.delta-rs-source}"' in script
+    assert (
+        'DELTA_RS_SOURCE_DIR="${DELTA_RS_SOURCE_DIR:-${RUNNER_ROOT}/.delta-rs-source}"'
+        in script
+    )
     assert re.search(r"WORKING_VS_UPSTREAM_MAIN=0", script)
     assert re.search(r"UPSTREAM_REMOTE_OVERRIDE=\"\"", script)
     assert re.search(
@@ -748,9 +775,7 @@ def test_compare_branch_emits_clear_missing_ref_guidance() -> None:
     )
 
 
-def test_compare_branch_defines_local_compare_preflight_for_disk_headroom() -> (
-    None
-):
+def test_compare_branch_defines_local_compare_preflight_for_disk_headroom() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert 'DELTA_BENCH_MIN_FREE_GB="${DELTA_BENCH_MIN_FREE_GB:-20}"' in script
     assert "run_local_compare_preflight" in script
@@ -1047,9 +1072,7 @@ print("hash policy ok")
         )
 
 
-def test_compare_branch_fails_closed_when_sha_pinning_misses_requested_commit() -> (
-    None
-):
+def test_compare_branch_fails_closed_when_sha_pinning_misses_requested_commit() -> None:
     with tempfile.TemporaryDirectory() as td:
         temp_root = Path(td)
         scripts_dir = temp_root / "scripts"
@@ -1252,7 +1275,10 @@ print("hash policy ok")
         assert "requested commit" in result.stderr
         assert "was not pinned" in result.stderr
         assert f"Pinned base ref: {base_sha} -> {stale_head}" not in result.stdout
-        assert f"Pinned candidate ref: {candidate_sha} -> {stale_head}" not in result.stdout
+        assert (
+            f"Pinned candidate ref: {candidate_sha} -> {stale_head}"
+            not in result.stdout
+        )
 
 
 def test_compare_branch_accepts_abbreviated_sha_pins_when_source_checkout_resolves_full_commits() -> (
@@ -2148,7 +2174,10 @@ exit 99
 
         python_root = temp_root / "python"
         python_root.mkdir(parents=True)
-        shutil.copytree(REPO_ROOT / "python" / "delta_bench_compare", python_root / "delta_bench_compare")
+        shutil.copytree(
+            REPO_ROOT / "python" / "delta_bench_compare",
+            python_root / "delta_bench_compare",
+        )
 
         base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
         candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
@@ -2916,6 +2945,8 @@ output_path.write_text(
             """#!/usr/bin/env python3
 import argparse
 import json
+import os
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument("base_json")
@@ -2923,6 +2954,11 @@ parser.add_argument("cand_json")
 parser.add_argument("--format", choices=["text", "markdown", "json"], default="text")
 parser.parse_known_args()
 args, _ = parser.parse_known_args()
+
+log_path = os.environ.get("COMPARE_ARG_LOG")
+if log_path:
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(sys.argv[1:]) + "\\n")
 
 if args.format == "markdown":
     print("# Compare Summary")
@@ -3172,6 +3208,8 @@ output_path.write_text(
             """#!/usr/bin/env python3
 import argparse
 import json
+import os
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument("base_json")
@@ -3179,6 +3217,11 @@ parser.add_argument("cand_json")
 parser.add_argument("--format", choices=["text", "markdown", "json"], default="text")
 parser.parse_known_args()
 args, _ = parser.parse_known_args()
+
+log_path = os.environ.get("COMPARE_ARG_LOG")
+if log_path:
+    with open(log_path, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(sys.argv[1:]) + "\\n")
 
 if args.format == "markdown":
     print("# Compare Summary")
@@ -3220,6 +3263,7 @@ print("hash policy ok")
         base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
         candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
         results_dir = temp_root / "results"
+        compare_arg_log = temp_root / "compare-argv.jsonl"
         home_dir = temp_root / "home"
         home_dir.mkdir()
         (home_dir / ".bashrc").write_text(
@@ -3241,6 +3285,7 @@ print("hash policy ok")
         env["BENCH_ITERS"] = "1"
         env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
         env["DELTA_BENCH_RESULTS"] = str(results_dir)
+        env["COMPARE_ARG_LOG"] = str(compare_arg_log)
 
         result = subprocess.run(
             [
@@ -3284,6 +3329,18 @@ print("hash policy ok")
             "sub_ms_threshold_ms": 1.0,
             "sub_ms_policy": "micro_only",
         }
+        compare_invocations = [
+            json.loads(line)
+            for line in compare_arg_log.read_text(encoding="utf-8").splitlines()
+        ]
+        assert len(compare_invocations) == 4
+        for argv in compare_invocations:
+            assert "--spread-metric" in argv
+            assert argv[argv.index("--spread-metric") + 1] == "iqr_ms"
+            assert "--sub-ms-threshold-ms" in argv
+            assert argv[argv.index("--sub-ms-threshold-ms") + 1] == "1.0"
+            assert "--sub-ms-policy" in argv
+            assert argv[argv.index("--sub-ms-policy") + 1] == "micro_only"
 
 
 def test_compare_branch_prepares_each_pinned_ref_once_and_reuses_checkout() -> None:

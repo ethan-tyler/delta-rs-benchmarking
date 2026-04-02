@@ -29,11 +29,17 @@ The fastest way to compare your current checkout against upstream `main`:
 
 This builds and benchmarks both your current checkout and the latest remote `main`, then prints a grouped report showing regressions, improvements, stable cases, and inconclusive results.
 
-The compare pipeline runs the macro lane in `--mode perf`. By default `compare_branch.sh` uses `--compare-mode exploratory`, which works for same-machine investigation but not automatic pass/fail decisions. Decision mode requires schema v5 payloads with complete compatibility identity and at least five measured runs per ref.
+For self-hosted PR evidence, load the harness-owned methodology profile instead of repeating raw decision knobs:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-macro scan
+```
+
+The compare pipeline runs the macro lane in `--mode perf`. By default `compare_branch.sh` uses `--compare-mode exploratory`, which works for same-machine investigation but not automatic pass/fail decisions. `--methodology-profile pr-macro` resolves the current PR decision contract: `compare_mode=decision`, `compare_runs=5`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only` for rows where both sides stay below the configured sub-millisecond threshold.
 
 Before treating a machine or workflow as trustworthy for perf claims, rerun `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
 
-> **Automation scope.** PR comments support `run benchmark scan` (exploratory) and `run benchmark decision scan` (decision-grade). Automated macro perf is curated to `scan` only — specifically `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_hit` is requalified on the current `tiny_smoke` contract; `scan_pruning_miss` remains disabled until it is requalified. Stateful Rust suites are correctness-trusted; forcing them through macro lane produces operational but not `perf_status=trusted` results. GitHub-hosted CI stays on smoke and correctness lanes.
+> **Automation scope.** PR comments support `run benchmark scan` (exploratory) and `run benchmark decision scan` (decision-grade). The decision path runs `./scripts/compare_branch.sh --methodology-profile pr-macro ...` on self-hosted hardware. Automated macro perf is curated to `scan` only — specifically `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_hit` is requalified on the current `tiny_smoke` contract; `scan_pruning_miss` remains disabled until it is requalified. Stateful Rust suites are correctness-trusted; forcing them through macro lane produces operational but not `perf_status=trusted` results. GitHub-hosted CI stays on smoke and correctness lanes.
 
 ## Comparison Methods
 
@@ -46,6 +52,12 @@ The simplest option. Compares whatever commit is checked out in `.delta-rs-under
 ```
 
 Use this when you want to check your branch against main without specifying exact SHAs.
+
+### Methodology profiles
+
+Use `--methodology-profile <name>` to load harness-owned compare defaults from `bench/methodologies/<name>.env`. Explicit CLI flags still win, so local operators can override a profile for ad hoc investigation without editing the profile itself.
+
+`pr-macro` is the current self-hosted PR decision profile. It resolves to decision mode, five measured runs per ref, median aggregation, `iqr_ms` spread reporting, and `micro_only` decision scope for sub-millisecond rows that should stay out of macro regression counts.
 
 ### Named branch-to-branch
 
@@ -123,11 +135,14 @@ These flags control the measurement itself:
 | `--measure-order`   | `alternate`   | Run interleaving: `base-first`, `candidate-first`, or `alternate`.                                                                            |
 | `--aggregation`     | `median`      | How to pick the representative sample: `min`, `median`, or `p95`.                                                                             |
 | `--noise-threshold` | `0.05`        | Minimum relative change to classify as regression or improvement.                                                                             |
+| `--methodology-profile` | —         | Load a harness-owned methodology profile such as `pr-macro`. Explicit CLI flags still override profile defaults.                              |
 | `--compare-mode`    | `exploratory` | Comparison policy: `exploratory` for investigation, `decision` for run-level bootstrap classification on schema v5 payloads.                  |
 | `--fail-on`         | —             | Comma-separated compare statuses that should exit non-zero after rendering (used by decision automation).                                     |
 | `--mode`            | `perf`        | Benchmark mode forwarded to `bench.sh run`. Branch comparison should stay on `perf`.                                                          |
 | `--dataset-id`      | —             | Dataset id forwarded to fixture generation and benchmark runs.                                                                                |
 | `--timing-phase`    | `execute`     | Isolated timing phase for phase-aware suites.                                                                                                 |
+
+Profiles only supply defaults. If you pass `--compare-runs`, `--aggregation`, or other compare knobs explicitly, those values override the methodology profile for that invocation.
 
 ### Environment variables
 
@@ -195,15 +210,12 @@ Decision-grade command with the current explicit trust contract:
 ```bash
 ./scripts/compare_branch.sh \
   --current-vs-main \
-  --compare-mode decision \
-  --warmup 2 \
-  --iters 9 \
-  --prewarm-iters 1 \
-  --compare-runs 5 \
+  --methodology-profile pr-macro \
   scan
 ```
 
 Use `scan` for decision-grade automation today. `tpcds` remains manual until fixture provisioning is explicit, and stateful Rust suites remain decision-invalid in macro lane because their trusted path is the correctness lane.
+`pr-macro` currently resolves to `warmup=2`, `iters=9`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`.
 Within `scan`, the manifest-backed authoritative set excludes `scan_pruning_miss` until that case is requalified; do not treat exploratory output for that case as decision evidence.
 
 Freshness rules for trustworthy compare output:
@@ -230,6 +242,8 @@ Key metrics to look at:
 - **cv_pct** -- coefficient of variation as a percentage. Below 5% is good. Above 10% means the measurement is noisy and you should increase `--compare-runs` or `--iters`.
 - **median_ms** -- the representative timing for each case.
 - **iqr_ms** -- the interquartile spread computed from per-run medians in decision-mode evidence. This is the fixed spread metric used by the `pr-macro` methodology profile.
+- **decision_scope** -- whether the row contributes to macro evidence. `macro` rows count toward regressions/improvements/stable summaries; `micro_only` rows are rendered under **Out of Scope (micro only)** because both sides are below the sub-millisecond threshold.
+- **scope_reason** -- why a row is out of scope. `sub_ms_threshold` means the `pr-macro` contract excluded the row from macro evidence.
 
 Automation-friendly compare artifacts live next to the aggregated run JSON:
 
@@ -238,7 +252,7 @@ Automation-friendly compare artifacts live next to the aggregated run JSON:
 | `summary.md` | Markdown report for PR comments or artifact upload |
 | `comparison.json` | Versioned machine-readable compare payload with `schema_version`, `metadata`, `summary`, and `rows`, including per-row scope and spread fields |
 | `hash-policy.txt` | Hash/schema compatibility report for the aggregated payload pair across all observed sample hashes |
-| `manifest.json` | Pointer file with suite, SHAs, compare settings, and artifact paths |
+| `manifest.json` | Pointer file with suite, SHAs, compare settings, methodology metadata, and artifact paths |
 
 For the complete list of metrics that may appear in the report, see [Reference](reference.md#metrics-reference).
 

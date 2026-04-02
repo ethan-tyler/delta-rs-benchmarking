@@ -4,14 +4,13 @@ Reproducible benchmark harness for [delta-rs](https://github.com/delta-io/delta-
 
 ## Quick Start
 
+Prepare the checkout, generate fixtures, run a smoke benchmark, then compare your branch against `main`:
+
 ```bash
 ./scripts/prepare_delta_rs.sh
 ./scripts/sync_harness_to_delta_rs.sh
-
 ./scripts/bench.sh data --dataset-id tiny_smoke --seed 42
-
 ./scripts/bench.sh run --suite scan --runner rust --dataset-id tiny_smoke --label local
-
 ./scripts/compare_branch.sh --current-vs-main scan
 ```
 
@@ -24,6 +23,11 @@ For the full setup walkthrough, see [Getting Started](docs/getting-started.md).
 For Python interop coverage, install `python/requirements-audit.txt` first. For trust-contract verification, read [Validation](docs/validation.md) and run `./scripts/validate_perf_harness.sh`.
 
 ## What You Can Do
+
+- Run local smoke checks on any machine with `./scripts/bench.sh run`.
+- Use GitHub-hosted CI for smoke and correctness validation, including correctness-backed suites such as `interop_py`.
+- Use self-hosted runners for macro perf, decision compare, Criterion microbench, and longitudinal workflows.
+- For PR macro evidence, run `./scripts/compare_branch.sh --methodology-profile pr-macro ...`; the profile fixes the decision-grade compare contract and marks sub-millisecond cases as `micro_only` instead of treating them as normal macro regressions.
 
 | I want to...                          | Read this                                         |
 | ------------------------------------- | ------------------------------------------------- |

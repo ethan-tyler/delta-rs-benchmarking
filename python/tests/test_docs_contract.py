@@ -295,3 +295,35 @@ def test_docs_call_out_disabled_scan_case_as_non_authoritative() -> None:
     assert "scan_pruning_miss" in combined
     assert "disabled" in combined
     assert "authoritative" in combined
+
+
+def test_compare_docs_define_pr_macro_methodology_profile_contract() -> None:
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+
+    assert "--methodology-profile" in compare_doc
+    assert "pr-macro" in compare_doc
+    assert "iqr_ms" in compare_doc
+    assert "micro_only" in compare_doc
+
+
+def test_reference_docs_include_methodology_metadata_fields() -> None:
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+
+    assert "methodology_profile" in reference
+    assert "methodology_version" in reference
+    assert "methodology_settings" in reference
+    assert "decision_scope" in reference
+    assert "scope_reason" in reference
+    assert "baseline_spread_ms" in reference
+    assert "candidate_spread_ms" in reference
+
+
+def test_pr_macro_docs_treat_sub_ms_cases_as_micro_only_out_of_scope() -> None:
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+
+    combined = "\n".join((compare_doc, architecture, validation))
+    assert "pr-macro" in combined
+    assert "micro_only" in combined
+    assert "Out of Scope" in combined

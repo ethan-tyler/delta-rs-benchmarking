@@ -1,5 +1,8 @@
 target/
 .worktrees/
+.delta-bench-compare-checkouts/
+.delta-rs-compare-root/
+.delta-rs-source/
 .delta-rs-under-test/
 .DS_Store
 *.delta_bench_checkout.lock

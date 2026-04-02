@@ -135,7 +135,7 @@ For the complete list of all 35 benchmark cases across 8 suites, see [Reference]
 These mechanisms ensure that benchmark results are comparable across runs:
 
 - **Deterministic fixtures.** Seed-based data generation produces identical tables regardless of when or where you run.
-- **Managed checkout locking.** Prepare/compare flows serialize access to `.delta-rs-under-test` so concurrent control-plane actions cannot corrupt the managed checkout.
+- **Checkout locking.** Prepare/compare flows serialize access to the mutable `.delta-rs-under-test` checkout and the clean `.delta-rs-source` checkout so concurrent control-plane actions cannot corrupt compare pinning or checkout reuse.
 - **Deterministic manifest ordering.** The `core-rust` and `core-python` manifests define a fixed case execution order.
 - **Single-machine comparisons.** Branch comparisons run both refs on the same hardware to eliminate machine-to-machine variance.
 - **Prewarm runs.** Optional unreported iterations stabilize caches and thermal state before measurement begins.

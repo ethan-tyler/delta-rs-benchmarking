@@ -24,13 +24,16 @@ default_checkout_lock_file() {
 RESULTS_DIR="${DELTA_BENCH_RESULTS:-${ROOT_DIR}/results}"
 COMPARE_CHECKOUT_ROOT="${DELTA_BENCH_COMPARE_CHECKOUT_ROOT:-${ROOT_DIR}/.delta-bench-compare-checkouts}"
 FIXTURES_DIR="${DELTA_BENCH_FIXTURES:-${ROOT_DIR}/fixtures}"
+DELTA_RS_SOURCE_DIR="${DELTA_RS_SOURCE_DIR:-${ROOT_DIR}/.delta-rs-source}"
 DELTA_RS_DIR="${DELTA_RS_DIR:-${ROOT_DIR}/.delta-rs-under-test}"
 DELTA_BENCH_CHECKOUT_LOCK_FILE="${DELTA_BENCH_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_DIR}")}"
+DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE="${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE:-$(default_checkout_lock_file "${DELTA_RS_SOURCE_DIR}")}"
 
 MODE="dry-run"
 TARGET_RESULTS=0
 TARGET_COMPARE_CHECKOUTS=0
 TARGET_FIXTURES=0
+TARGET_DELTA_RS_SOURCE=0
 TARGET_DELTA_RS_UNDER_TEST=0
 ALLOW_OUTSIDE_ROOT=0
 KEEP_LAST=""
@@ -49,6 +52,7 @@ Targets:
   --results                    Clean entries under results/ (supports retention flags)
   --compare-checkouts          Clean entries under .delta-bench-compare-checkouts/ (supports retention flags)
   --fixtures                   Remove fixtures/ directory
+  --delta-rs-source            Remove .delta-rs-source/ checkout directory
   --delta-rs-under-test        Remove .delta-rs-under-test/ checkout directory
 
 Retention controls:
@@ -70,7 +74,7 @@ Examples:
   ./scripts/cleanup_local.sh --apply --results --keep-last 5
   ./scripts/cleanup_local.sh --apply --compare-checkouts --keep-last 5
   ./scripts/cleanup_local.sh --apply --results --older-than-days 14
-  ./scripts/cleanup_local.sh --apply --fixtures --delta-rs-under-test
+  ./scripts/cleanup_local.sh --apply --fixtures --delta-rs-source --delta-rs-under-test
   ./scripts/cleanup_local.sh --apply --results --allow-outside-root
   ./scripts/cleanup_local.sh --dry-run --results --keep-last 3 --older-than-days 7
 EOF
@@ -128,6 +132,10 @@ while [[ $# -gt 0 ]]; do
 		TARGET_FIXTURES=1
 		shift
 		;;
+	--delta-rs-source)
+		TARGET_DELTA_RS_SOURCE=1
+		shift
+		;;
 	--delta-rs-under-test)
 		TARGET_DELTA_RS_UNDER_TEST=1
 		shift
@@ -174,10 +182,11 @@ if [[ -n "${OLDER_THAN_DAYS}" ]] && ! is_non_negative_integer "${OLDER_THAN_DAYS
 	exit 1
 fi
 
-if ((TARGET_RESULTS == 0 && TARGET_COMPARE_CHECKOUTS == 0 && TARGET_FIXTURES == 0 && TARGET_DELTA_RS_UNDER_TEST == 0)); then
+if ((TARGET_RESULTS == 0 && TARGET_COMPARE_CHECKOUTS == 0 && TARGET_FIXTURES == 0 && TARGET_DELTA_RS_SOURCE == 0 && TARGET_DELTA_RS_UNDER_TEST == 0)); then
 	TARGET_RESULTS=1
 	TARGET_COMPARE_CHECKOUTS=1
 	TARGET_FIXTURES=1
+	TARGET_DELTA_RS_SOURCE=1
 	TARGET_DELTA_RS_UNDER_TEST=1
 fi
 
@@ -199,6 +208,9 @@ if ((TARGET_COMPARE_CHECKOUTS != 0)); then
 fi
 if ((TARGET_FIXTURES != 0)); then
 	echo "  - fixtures (${FIXTURES_DIR})"
+fi
+if ((TARGET_DELTA_RS_SOURCE != 0)); then
+	echo "  - delta-rs-source (${DELTA_RS_SOURCE_DIR})"
 fi
 if ((TARGET_DELTA_RS_UNDER_TEST != 0)); then
 	echo "  - delta-rs-under-test (${DELTA_RS_DIR})"
@@ -307,6 +319,20 @@ if ((TARGET_FIXTURES != 0)); then
 		paths_to_remove+=("${FIXTURES_DIR}")
 	else
 		echo "SKIP: fixtures directory not found at ${FIXTURES_DIR}"
+	fi
+fi
+
+if ((TARGET_DELTA_RS_SOURCE != 0)); then
+	if [[ -d "${DELTA_RS_SOURCE_DIR}" ]]; then
+		paths_to_remove+=("${DELTA_RS_SOURCE_DIR}")
+	else
+		echo "SKIP: delta-rs-source directory not found at ${DELTA_RS_SOURCE_DIR}"
+	fi
+	if [[ -e "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}" ]]; then
+		paths_to_remove+=("${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}")
+	fi
+	if [[ -d "${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}.dir" ]]; then
+		paths_to_remove+=("${DELTA_BENCH_SOURCE_CHECKOUT_LOCK_FILE}.dir")
 	fi
 fi
 

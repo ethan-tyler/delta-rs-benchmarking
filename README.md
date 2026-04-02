@@ -56,6 +56,7 @@ See [Reference](docs/reference.md#benchmark-suites-and-cases) for the full listi
 ```bash
 cargo test --locked
 (cd python && python3 -m pytest -q tests)
+./scripts/validate_perf_harness.sh
 ```
 
 Run these before opening a PR. See [Getting Started](docs/getting-started.md#local-ci-baseline) for the full CI baseline.

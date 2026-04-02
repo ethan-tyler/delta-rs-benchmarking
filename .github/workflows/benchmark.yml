@@ -201,6 +201,7 @@ jobs:
           storage_args=()
           bench_args=()
           compare_args=()
+          methodology_args=()
           if [[ -n "${BENCH_STORAGE_BACKEND:-}" ]]; then
             storage_args+=(--storage-backend "${BENCH_STORAGE_BACKEND}")
           fi
@@ -217,12 +218,14 @@ jobs:
             bench_args+=(--runner "${BENCH_RUNNER_MODE}")
           fi
           if [[ "${compare_mode}" == "decision" ]]; then
-            compare_args+=(--compare-mode decision --fail-on regression,inconclusive)
+            methodology_args+=(--methodology-profile pr-macro)
+            compare_args+=(--fail-on regression,inconclusive)
           fi
           set +e
           ./scripts/compare_branch.sh \
             "${storage_args[@]}" \
             "${bench_args[@]}" \
+            "${methodology_args[@]}" \
             "${compare_args[@]}" \
             --enforce-run-mode \
             --require-no-public-ipv4 \

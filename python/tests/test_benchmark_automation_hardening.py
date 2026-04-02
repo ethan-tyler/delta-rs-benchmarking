@@ -545,11 +545,33 @@ def test_benchmark_workflow_reports_execution_status_separately_from_compare_mod
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "status_label=EXPLORATORY" not in workflow
     assert "Benchmark EXPLORATORY" not in workflow
-    assert "--compare-mode decision" in workflow
+    assert "--methodology-profile pr-macro" in workflow
     assert "--fail-on regression,inconclusive" in workflow
     assert "status_label=PASS" in workflow
     assert "status_label=FAIL" in workflow
     assert "`Compare mode: ${compareMode}`" in workflow
+
+
+def test_benchmark_workflow_uses_pr_macro_methodology_profile_for_decision_runs() -> (
+    None
+):
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "--methodology-profile pr-macro" in workflow
+
+
+def test_benchmark_workflow_does_not_restate_pr_macro_methodology_knobs() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    for forbidden in (
+        "--compare-mode decision",
+        "--warmup",
+        "--iters",
+        "--prewarm-iters",
+        "--compare-runs",
+        "--measure-order",
+        "--timing-phase",
+        "--aggregation",
+    ):
+        assert forbidden not in workflow
 
 
 def test_benchmark_workflow_fails_job_when_compare_fails() -> None:

@@ -304,6 +304,21 @@ def test_compare_branch_supports_aggregation_passthrough() -> None:
     )
 
 
+def test_compare_branch_supports_methodology_profile_flag() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "--methodology-profile <name>" in script
+
+
+def test_compare_branch_references_pr_macro_methodology_profile() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "bench/methodologies/pr-macro.env" in script
+
+
+def test_compare_branch_accepts_pr_macro_methodology_profile_name() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "pr-macro" in script
+
+
 def test_compare_branch_defaults_to_exploratory_mode_curated_scan_and_macro_lane() -> (
     None
 ):

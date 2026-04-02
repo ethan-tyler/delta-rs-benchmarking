@@ -19,6 +19,8 @@ BENCH_WARMUP="${BENCH_WARMUP:-2}"
 BENCH_ITERS="${BENCH_ITERS:-9}"
 BENCH_PREWARM_ITERS="${BENCH_PREWARM_ITERS:-1}"
 BENCH_COMPARE_RUNS="${BENCH_COMPARE_RUNS:-3}"
+METHODOLOGY_PROFILE="${BENCH_METHODOLOGY_PROFILE:-}"
+METHODOLOGY_VERSION=""
 DELTA_BENCH_MIN_FREE_GB="${DELTA_BENCH_MIN_FREE_GB:-20}"
 BENCH_MEASURE_ORDER="${BENCH_MEASURE_ORDER:-alternate}"
 BASE_SHA_OVERRIDE=""
@@ -34,6 +36,18 @@ RUNNER_MODE="${BENCH_RUNNER_MODE:-all}"
 BENCHMARK_MODE="${BENCH_BENCHMARK_MODE:-perf}"
 DATASET_ID="${BENCH_DATASET_ID:-}"
 TIMING_PHASE="${BENCH_TIMING_PHASE:-execute}"
+DATASET_POLICY=""
+SPREAD_METRIC=""
+SUB_MS_THRESHOLD_MS=""
+SUB_MS_POLICY=""
+AGGREGATION_EXPLICIT=0
+COMPARE_MODE_EXPLICIT=0
+BENCH_WARMUP_EXPLICIT=0
+BENCH_ITERS_EXPLICIT=0
+BENCH_PREWARM_ITERS_EXPLICIT=0
+BENCH_COMPARE_RUNS_EXPLICIT=0
+BENCH_MEASURE_ORDER_EXPLICIT=0
+TIMING_PHASE_EXPLICIT=0
 
 sanitize_label() {
 	local raw="${1:-}"
@@ -52,6 +66,155 @@ is_positive_integer() {
 
 is_non_negative_integer() {
 	[[ "${1:-}" =~ ^[0-9]+$ ]]
+}
+
+methodology_profile_path() {
+	local profile_name="${1:-}"
+	case "${profile_name}" in
+	pr-macro)
+		printf '%s\n' "${ROOT_DIR}/bench/methodologies/pr-macro.env"
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+load_methodology_profile() {
+	local profile_name="${1:-}"
+	local profile_path=""
+	if ! profile_path="$(methodology_profile_path "${profile_name}")"; then
+		echo "unknown --methodology-profile '${profile_name}'; expected one of: pr-macro" >&2
+		exit 1
+	fi
+	if [[ ! -f "${profile_path}" ]]; then
+		echo "methodology profile '${profile_name}' not found at ${profile_path}" >&2
+		exit 1
+	fi
+
+	local profile_output=""
+	profile_output="$(
+		(
+			set -euo pipefail
+			source "${profile_path}"
+			printf 'METHODOLOGY_PROFILE=%s\n' "${METHODOLOGY_PROFILE-}"
+			printf 'METHODOLOGY_VERSION=%s\n' "${METHODOLOGY_VERSION-}"
+			printf 'COMPARE_MODE=%s\n' "${COMPARE_MODE-}"
+			printf 'WARMUP=%s\n' "${WARMUP-}"
+			printf 'ITERS=%s\n' "${ITERS-}"
+			printf 'PREWARM_ITERS=%s\n' "${PREWARM_ITERS-}"
+			printf 'COMPARE_RUNS=%s\n' "${COMPARE_RUNS-}"
+			printf 'MEASURE_ORDER=%s\n' "${MEASURE_ORDER-}"
+			printf 'TIMING_PHASE=%s\n' "${TIMING_PHASE-}"
+			printf 'AGGREGATION=%s\n' "${AGGREGATION-}"
+			printf 'DATASET_POLICY=%s\n' "${DATASET_POLICY-}"
+			printf 'SPREAD_METRIC=%s\n' "${SPREAD_METRIC-}"
+			printf 'SUB_MS_THRESHOLD_MS=%s\n' "${SUB_MS_THRESHOLD_MS-}"
+			printf 'SUB_MS_POLICY=%s\n' "${SUB_MS_POLICY-}"
+		)
+	)"
+
+	local profile_declared_name=""
+	local profile_version=""
+	local profile_compare_mode=""
+	local profile_warmup=""
+	local profile_iters=""
+	local profile_prewarm_iters=""
+	local profile_compare_runs=""
+	local profile_measure_order=""
+	local profile_timing_phase=""
+	local profile_aggregation=""
+	local profile_dataset_policy=""
+	local profile_spread_metric=""
+	local profile_sub_ms_threshold_ms=""
+	local profile_sub_ms_policy=""
+
+	while IFS='=' read -r key value; do
+		case "${key}" in
+		METHODOLOGY_PROFILE)
+			profile_declared_name="${value}"
+			;;
+		METHODOLOGY_VERSION)
+			profile_version="${value}"
+			;;
+		COMPARE_MODE)
+			profile_compare_mode="${value}"
+			;;
+		WARMUP)
+			profile_warmup="${value}"
+			;;
+		ITERS)
+			profile_iters="${value}"
+			;;
+		PREWARM_ITERS)
+			profile_prewarm_iters="${value}"
+			;;
+		COMPARE_RUNS)
+			profile_compare_runs="${value}"
+			;;
+		MEASURE_ORDER)
+			profile_measure_order="${value}"
+			;;
+		TIMING_PHASE)
+			profile_timing_phase="${value}"
+			;;
+		AGGREGATION)
+			profile_aggregation="${value}"
+			;;
+		DATASET_POLICY)
+			profile_dataset_policy="${value}"
+			;;
+		SPREAD_METRIC)
+			profile_spread_metric="${value}"
+			;;
+		SUB_MS_THRESHOLD_MS)
+			profile_sub_ms_threshold_ms="${value}"
+			;;
+		SUB_MS_POLICY)
+			profile_sub_ms_policy="${value}"
+			;;
+		esac
+	done <<< "${profile_output}"
+
+	if [[ -z "${profile_declared_name}" ]]; then
+		echo "methodology profile '${profile_name}' is missing METHODOLOGY_PROFILE" >&2
+		exit 1
+	fi
+	if [[ "${profile_declared_name}" != "${profile_name}" ]]; then
+		echo "methodology profile '${profile_name}' declares METHODOLOGY_PROFILE='${profile_declared_name}'" >&2
+		exit 1
+	fi
+
+	METHODOLOGY_VERSION="${profile_version}"
+	DATASET_POLICY="${profile_dataset_policy}"
+	SPREAD_METRIC="${profile_spread_metric}"
+	SUB_MS_THRESHOLD_MS="${profile_sub_ms_threshold_ms}"
+	SUB_MS_POLICY="${profile_sub_ms_policy}"
+
+	if ((COMPARE_MODE_EXPLICIT == 0)) && [[ -n "${profile_compare_mode}" ]]; then
+		COMPARE_MODE="${profile_compare_mode}"
+	fi
+	if ((BENCH_WARMUP_EXPLICIT == 0)) && [[ -n "${profile_warmup}" ]]; then
+		BENCH_WARMUP="${profile_warmup}"
+	fi
+	if ((BENCH_ITERS_EXPLICIT == 0)) && [[ -n "${profile_iters}" ]]; then
+		BENCH_ITERS="${profile_iters}"
+	fi
+	if ((BENCH_PREWARM_ITERS_EXPLICIT == 0)) && [[ -n "${profile_prewarm_iters}" ]]; then
+		BENCH_PREWARM_ITERS="${profile_prewarm_iters}"
+	fi
+	if ((BENCH_COMPARE_RUNS_EXPLICIT == 0)) && [[ -n "${profile_compare_runs}" ]]; then
+		BENCH_COMPARE_RUNS="${profile_compare_runs}"
+	fi
+	if ((BENCH_MEASURE_ORDER_EXPLICIT == 0)) && [[ -n "${profile_measure_order}" ]]; then
+		BENCH_MEASURE_ORDER="${profile_measure_order}"
+	fi
+	if ((TIMING_PHASE_EXPLICIT == 0)) && [[ -n "${profile_timing_phase}" ]]; then
+		TIMING_PHASE="${profile_timing_phase}"
+	fi
+	if ((AGGREGATION_EXPLICIT == 0)) && [[ -n "${profile_aggregation}" ]]; then
+		AGGREGATION="${profile_aggregation}"
+	fi
 }
 
 TIMEOUT_BIN=""
@@ -75,6 +238,7 @@ Options:
   --require-egress-policy         Require nftables egress hash check during preflight (set DELTA_BENCH_EGRESS_POLICY_SHA256)
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
   --aggregation <min|median|p95>  Representative sample aggregation for compare.py (default: median)
+  --methodology-profile <name>    Load a harness-owned profile from bench/methodologies/<name>.env
   --compare-mode <exploratory|decision>
                                   Compare classification mode passed to compare.py (default: ${COMPARE_MODE})
   --fail-on <statuses>            Comma-separated compare statuses that force exit code 2 (for decision automation)
@@ -144,10 +308,16 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--aggregation)
 		AGGREGATION="$2"
+		AGGREGATION_EXPLICIT=1
+		shift 2
+		;;
+	--methodology-profile)
+		METHODOLOGY_PROFILE="$2"
 		shift 2
 		;;
 	--compare-mode)
 		COMPARE_MODE="$2"
+		COMPARE_MODE_EXPLICIT=1
 		shift 2
 		;;
 	--fail-on)
@@ -156,22 +326,27 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--warmup)
 		BENCH_WARMUP="$2"
+		BENCH_WARMUP_EXPLICIT=1
 		shift 2
 		;;
 	--iters)
 		BENCH_ITERS="$2"
+		BENCH_ITERS_EXPLICIT=1
 		shift 2
 		;;
 	--prewarm-iters)
 		BENCH_PREWARM_ITERS="$2"
+		BENCH_PREWARM_ITERS_EXPLICIT=1
 		shift 2
 		;;
 	--compare-runs)
 		BENCH_COMPARE_RUNS="$2"
+		BENCH_COMPARE_RUNS_EXPLICIT=1
 		shift 2
 		;;
 	--measure-order)
 		BENCH_MEASURE_ORDER="$2"
+		BENCH_MEASURE_ORDER_EXPLICIT=1
 		shift 2
 		;;
 	--base-sha)
@@ -224,6 +399,7 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--timing-phase)
 		TIMING_PHASE="$2"
+		TIMING_PHASE_EXPLICIT=1
 		shift 2
 		;;
 	-h | --help)
@@ -299,6 +475,11 @@ if [[ -z "${candidate_ref}" && ${WORKING_VS_UPSTREAM_MAIN} -eq 0 ]]; then
 	usage >&2
 	exit 1
 fi
+
+if [[ -n "${METHODOLOGY_PROFILE}" ]]; then
+	load_methodology_profile "${METHODOLOGY_PROFILE}"
+fi
+
 case "${AGGREGATION}" in
 min | median | p95) ;;
 *)

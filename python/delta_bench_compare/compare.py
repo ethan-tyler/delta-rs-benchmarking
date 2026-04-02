@@ -10,9 +10,12 @@ from pathlib import Path
 
 from .formatting import (
     render_markdown as render_markdown_output,
+)
+from .formatting import (
     render_text_report,
 )
 from .model import (
+    COMPARABLE_COMPARISON_STATUSES,
     VALID_COMPARISON_STATUSES,
     Comparison,
     ComparisonRow,
@@ -320,7 +323,7 @@ def _update_summary_counts(
     new: int,
     removed: int,
 ) -> tuple[int, int, int, int, int, int]:
-    if row.decision_scope == "micro_only":
+    if _is_out_of_scope_micro_only_row(row):
         return faster, slower, no_change, incomparable, new, removed
     if row.status == "improvement":
         faster += 1
@@ -335,6 +338,13 @@ def _update_summary_counts(
     elif row.status == "removed":
         removed += 1
     return faster, slower, no_change, incomparable, new, removed
+
+
+def _is_out_of_scope_micro_only_row(row: ComparisonRow) -> bool:
+    return (
+        row.decision_scope == "micro_only"
+        and row.status in COMPARABLE_COMPARISON_STATUSES
+    )
 
 
 def compare_runs(
@@ -754,7 +764,7 @@ def _parse_fail_on(raw: str) -> set[str]:
 
 
 def _matches_fail_on(row: ComparisonRow, fail_on_statuses: set[str]) -> bool:
-    if row.decision_scope == "micro_only":
+    if _is_out_of_scope_micro_only_row(row):
         return False
     return row.status in fail_on_statuses
 

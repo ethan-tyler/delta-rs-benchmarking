@@ -55,7 +55,7 @@ Use this when you want to check your branch against main without specifying exac
 
 ### Methodology profiles
 
-Use `--methodology-profile <name>` to load harness-owned compare defaults from `bench/methodologies/<name>.env`. Explicit CLI flags still win, so local operators can override a profile for ad hoc investigation without editing the profile itself.
+Use `--methodology-profile <name>` to load harness-owned compare defaults from `bench/methodologies/<name>.env`. Explicit CLI flags still win, so local operators can override a profile for ad hoc investigation without editing the profile itself. If an invocation changes any profile-owned setting explicitly, `manifest.json` keeps the resolved `methodology_settings` but omits canonical `methodology_profile` and `methodology_version` so the artifact cannot be mistaken for an exact `pr-macro` run.
 
 `pr-macro` is the current self-hosted PR decision profile. It resolves to decision mode, five measured runs per ref, median aggregation, `iqr_ms` spread reporting, and `micro_only` decision scope for sub-millisecond rows that should stay out of macro regression counts.
 
@@ -142,7 +142,7 @@ These flags control the measurement itself:
 | `--dataset-id`      | —             | Dataset id forwarded to fixture generation and benchmark runs.                                                                                |
 | `--timing-phase`    | `execute`     | Isolated timing phase for phase-aware suites.                                                                                                 |
 
-Profiles only supply defaults. If you pass `--compare-runs`, `--aggregation`, or other compare knobs explicitly, those values override the methodology profile for that invocation.
+Profiles only supply defaults. If you pass `--compare-runs`, `--aggregation`, or other compare knobs explicitly, those values override the methodology profile for that invocation. Once you do that, the compare manifest still records the resolved settings but drops canonical profile identity because the run no longer matches the exact harness-owned contract.
 
 ### Environment variables
 
@@ -233,7 +233,7 @@ The comparison report groups benchmark cases into four sections:
 | **Regressions**        | Cases where the candidate is slower than the base beyond the noise threshold. Investigate before merging.     |
 | **Improvements**       | Cases where the candidate is faster than the base beyond the noise threshold.                                 |
 | **Stable**             | Cases where performance is within the noise threshold. No action needed.                                      |
-| **Out of Scope (micro only)** | Decision-mode rows excluded from macro evidence because both sides are below the configured sub-millisecond threshold. |
+| **Out of Scope (micro only)** | Comparable decision-mode rows excluded from macro evidence because both sides are below the configured sub-millisecond threshold. |
 | **Comparison aborted / invalid** | Exploratory mode reports invalid workloads here without discarding the rest of the artifact. Decision mode still fails closed instead of producing a perf claim. |
 
 Key metrics to look at:
@@ -242,7 +242,7 @@ Key metrics to look at:
 - **cv_pct** -- coefficient of variation as a percentage. Below 5% is good. Above 10% means the measurement is noisy and you should increase `--compare-runs` or `--iters`.
 - **median_ms** -- the representative timing for each case.
 - **iqr_ms** -- the interquartile spread computed from per-run medians in decision-mode evidence. This is the fixed spread metric used by the `pr-macro` methodology profile.
-- **decision_scope** -- whether the row contributes to macro evidence. `macro` rows count toward regressions/improvements/stable summaries; `micro_only` rows are rendered under **Out of Scope (micro only)** because both sides are below the sub-millisecond threshold.
+- **decision_scope** -- whether the row contributes to macro evidence. `macro` rows count toward regressions/improvements/stable summaries; comparable `micro_only` rows are rendered under **Out of Scope (micro only)** because both sides are below the sub-millisecond threshold. Rows that are still `inconclusive` or `expected_failure` remain in **Needs Attention** and still honor `--fail-on`.
 - **scope_reason** -- why a row is out of scope. `sub_ms_threshold` means the `pr-macro` contract excluded the row from macro evidence.
 
 Automation-friendly compare artifacts live next to the aggregated run JSON:

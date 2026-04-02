@@ -7,13 +7,12 @@ import sys
 from pathlib import Path
 
 import pytest
-
+from delta_bench_compare.aggregate import aggregate_payloads
 from delta_bench_compare.compare import (
     _load,
     compare_runs,
     format_change,
 )
-from delta_bench_compare.aggregate import aggregate_payloads
 
 
 def _run(
@@ -1114,17 +1113,17 @@ def test_render_text_places_micro_only_rows_in_out_of_scope_section() -> None:
     baseline["cases"][0]["run_summaries"] = [{"median_ms": 100.0}] * 5
     candidate["cases"][0]["run_summaries"] = [{"median_ms": 120.0}] * 5
     baseline["cases"][1]["run_summaries"] = [
-        {"median_ms": 0.40},
-        {"median_ms": 0.50},
         {"median_ms": 0.60},
-        {"median_ms": 0.70},
-        {"median_ms": 0.80},
+        {"median_ms": 0.60},
+        {"median_ms": 0.60},
+        {"median_ms": 0.60},
+        {"median_ms": 0.60},
     ]
     candidate["cases"][1]["run_summaries"] = [
-        {"median_ms": 0.50},
-        {"median_ms": 0.60},
-        {"median_ms": 0.70},
-        {"median_ms": 0.80},
+        {"median_ms": 0.90},
+        {"median_ms": 0.90},
+        {"median_ms": 0.90},
+        {"median_ms": 0.90},
         {"median_ms": 0.90},
     ]
 
@@ -1165,17 +1164,17 @@ def test_render_markdown_places_micro_only_rows_in_out_of_scope_section() -> Non
     baseline["cases"][0]["run_summaries"] = [{"median_ms": 100.0}] * 5
     candidate["cases"][0]["run_summaries"] = [{"median_ms": 120.0}] * 5
     baseline["cases"][1]["run_summaries"] = [
-        {"median_ms": 0.40},
-        {"median_ms": 0.50},
         {"median_ms": 0.60},
-        {"median_ms": 0.70},
-        {"median_ms": 0.80},
+        {"median_ms": 0.60},
+        {"median_ms": 0.60},
+        {"median_ms": 0.60},
+        {"median_ms": 0.60},
     ]
     candidate["cases"][1]["run_summaries"] = [
-        {"median_ms": 0.50},
-        {"median_ms": 0.60},
-        {"median_ms": 0.70},
-        {"median_ms": 0.80},
+        {"median_ms": 0.90},
+        {"median_ms": 0.90},
+        {"median_ms": 0.90},
+        {"median_ms": 0.90},
         {"median_ms": 0.90},
     ]
 
@@ -1233,6 +1232,78 @@ def test_compare_cli_fail_on_ignores_micro_only_rows(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "Out of Scope (micro only)" in result.stdout
     assert "scan_micro_regression" in result.stdout
+
+
+def test_compare_runs_micro_only_inconclusive_still_counts_as_attention() -> None:
+    baseline = _run_v4(
+        [{"case": "scan_micro_inconclusive", "samples": [{"elapsed_ms": 0.6}]}]
+    )
+    candidate = _run_v4(
+        [{"case": "scan_micro_inconclusive", "samples": [{"elapsed_ms": 0.8}]}]
+    )
+    baseline["cases"][0]["supports_decision"] = False
+    candidate["cases"][0]["supports_decision"] = False
+    baseline["cases"][0]["run_summaries"] = [{"median_ms": 0.60}] * 5
+    candidate["cases"][0]["run_summaries"] = [{"median_ms": 0.80}] * 5
+
+    from delta_bench_compare.compare import render_text
+
+    comparison = compare_runs(
+        baseline,
+        candidate,
+        mode="decision",
+        spread_metric="iqr_ms",
+        sub_ms_threshold_ms=1.0,
+        sub_ms_policy="micro_only",
+    )
+    out = render_text(comparison)
+
+    row = comparison.rows[0]
+    assert row.decision_scope == "micro_only"
+    assert row.status == "inconclusive"
+    assert comparison.summary.incomparable == 1
+    assert "Needs Attention" in out
+    assert "scan_micro_inconclusive" in out.split("Needs Attention", 1)[1]
+    assert "Out of Scope (micro only)" not in out
+
+
+def test_compare_cli_fail_on_inconclusive_still_triggers_for_micro_only_rows(
+    tmp_path: Path,
+) -> None:
+    baseline = _run_v4(
+        [{"case": "scan_micro_inconclusive", "samples": [{"elapsed_ms": 0.6}]}]
+    )
+    candidate = _run_v4(
+        [{"case": "scan_micro_inconclusive", "samples": [{"elapsed_ms": 0.8}]}]
+    )
+    baseline["cases"][0]["supports_decision"] = False
+    candidate["cases"][0]["supports_decision"] = False
+    baseline["cases"][0]["run_summaries"] = [{"median_ms": 0.60}] * 5
+    candidate["cases"][0]["run_summaries"] = [{"median_ms": 0.80}] * 5
+
+    baseline_path = tmp_path / "baseline.json"
+    candidate_path = tmp_path / "candidate.json"
+    baseline_path.write_text(json.dumps(baseline), encoding="utf-8")
+    candidate_path.write_text(json.dumps(candidate), encoding="utf-8")
+
+    result = _run_compare_cli(
+        baseline_path,
+        candidate_path,
+        "--mode",
+        "decision",
+        "--spread-metric",
+        "iqr_ms",
+        "--sub-ms-threshold-ms",
+        "1.0",
+        "--sub-ms-policy",
+        "micro_only",
+        "--fail-on",
+        "inconclusive",
+    )
+
+    assert result.returncode == 2
+    assert "scan_micro_inconclusive" in result.stdout
+    assert "inconclusive" in result.stdout
 
 
 def test_compare_cli_rejects_invalid_perf_input_without_traceback(
@@ -2505,7 +2576,7 @@ def test_terminal_color_disabled_when_not_tty() -> None:
 
 
 def test_terminal_set_color_mode() -> None:
-    from delta_bench_compare.terminal import set_color_mode, red, visible_len
+    from delta_bench_compare.terminal import red, set_color_mode, visible_len
 
     set_color_mode(True)
     colored = red("test")

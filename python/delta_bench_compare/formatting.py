@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from delta_bench_compare.model import Comparison, ComparisonRow
+from delta_bench_compare.model import (
+    COMPARABLE_COMPARISON_STATUSES,
+    Comparison,
+    ComparisonRow,
+)
 from delta_bench_compare.terminal import bold, dim, green, red, visible_len, yellow
 
 _COMPACT_STABLE_THRESHOLD = 5
@@ -306,27 +310,32 @@ def _is_invalid_row(row: ComparisonRow) -> bool:
     return row.status == "incomparable" and row.change.startswith("invalid")
 
 
-def _is_micro_only_row(row: ComparisonRow) -> bool:
-    return row.decision_scope == "micro_only"
+def _is_out_of_scope_micro_only_row(row: ComparisonRow) -> bool:
+    return (
+        row.decision_scope == "micro_only"
+        and row.status in COMPARABLE_COMPARISON_STATUSES
+    )
 
 
 def _group_rows(comparison: Comparison) -> list[tuple[str, list[ComparisonRow]]]:
     slower = [
         row
         for row in comparison.rows
-        if row.status == "regression" and not _is_micro_only_row(row)
+        if row.status == "regression" and not _is_out_of_scope_micro_only_row(row)
     ]
     faster = [
         row
         for row in comparison.rows
-        if row.status == "improvement" and not _is_micro_only_row(row)
+        if row.status == "improvement" and not _is_out_of_scope_micro_only_row(row)
     ]
     stable = [
         row
         for row in comparison.rows
-        if row.status == "no_change" and not _is_micro_only_row(row)
+        if row.status == "no_change" and not _is_out_of_scope_micro_only_row(row)
     ]
-    out_of_scope = [row for row in comparison.rows if _is_micro_only_row(row)]
+    out_of_scope = [
+        row for row in comparison.rows if _is_out_of_scope_micro_only_row(row)
+    ]
     invalid = [row for row in comparison.rows if _is_invalid_row(row)]
     needs_attention = [
         row
@@ -334,7 +343,6 @@ def _group_rows(comparison: Comparison) -> list[tuple[str, list[ComparisonRow]]]
         if row.status
         in {"incomparable", "expected_failure", "new", "removed", "inconclusive"}
         and row not in invalid
-        and not _is_micro_only_row(row)
     ]
     return [
         ("Regressions (slower)", slower),

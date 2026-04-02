@@ -21,6 +21,8 @@ BENCH_PREWARM_ITERS="${BENCH_PREWARM_ITERS:-1}"
 BENCH_COMPARE_RUNS="${BENCH_COMPARE_RUNS:-3}"
 METHODOLOGY_PROFILE="${BENCH_METHODOLOGY_PROFILE:-}"
 METHODOLOGY_VERSION=""
+MANIFEST_METHODOLOGY_PROFILE=""
+MANIFEST_METHODOLOGY_VERSION=""
 DELTA_BENCH_MIN_FREE_GB="${DELTA_BENCH_MIN_FREE_GB:-20}"
 BENCH_MEASURE_ORDER="${BENCH_MEASURE_ORDER:-alternate}"
 BASE_SHA_OVERRIDE=""
@@ -128,6 +130,7 @@ load_methodology_profile() {
 	local profile_spread_metric=""
 	local profile_sub_ms_threshold_ms=""
 	local profile_sub_ms_policy=""
+	local canonical_profile_identity=1
 
 	while IFS='=' read -r key value; do
 		case "${key}" in
@@ -190,30 +193,53 @@ load_methodology_profile() {
 	SPREAD_METRIC="${profile_spread_metric}"
 	SUB_MS_THRESHOLD_MS="${profile_sub_ms_threshold_ms}"
 	SUB_MS_POLICY="${profile_sub_ms_policy}"
+	MANIFEST_METHODOLOGY_PROFILE="${profile_declared_name}"
+	MANIFEST_METHODOLOGY_VERSION="${profile_version}"
 
 	if ((COMPARE_MODE_EXPLICIT == 0)) && [[ -n "${profile_compare_mode}" ]]; then
 		COMPARE_MODE="${profile_compare_mode}"
+	elif ((COMPARE_MODE_EXPLICIT != 0)) && [[ "${COMPARE_MODE}" != "${profile_compare_mode}" ]]; then
+		canonical_profile_identity=0
 	fi
 	if ((BENCH_WARMUP_EXPLICIT == 0)) && [[ -n "${profile_warmup}" ]]; then
 		BENCH_WARMUP="${profile_warmup}"
+	elif ((BENCH_WARMUP_EXPLICIT != 0)) && [[ "${BENCH_WARMUP}" != "${profile_warmup}" ]]; then
+		canonical_profile_identity=0
 	fi
 	if ((BENCH_ITERS_EXPLICIT == 0)) && [[ -n "${profile_iters}" ]]; then
 		BENCH_ITERS="${profile_iters}"
+	elif ((BENCH_ITERS_EXPLICIT != 0)) && [[ "${BENCH_ITERS}" != "${profile_iters}" ]]; then
+		canonical_profile_identity=0
 	fi
 	if ((BENCH_PREWARM_ITERS_EXPLICIT == 0)) && [[ -n "${profile_prewarm_iters}" ]]; then
 		BENCH_PREWARM_ITERS="${profile_prewarm_iters}"
+	elif ((BENCH_PREWARM_ITERS_EXPLICIT != 0)) && [[ "${BENCH_PREWARM_ITERS}" != "${profile_prewarm_iters}" ]]; then
+		canonical_profile_identity=0
 	fi
 	if ((BENCH_COMPARE_RUNS_EXPLICIT == 0)) && [[ -n "${profile_compare_runs}" ]]; then
 		BENCH_COMPARE_RUNS="${profile_compare_runs}"
+	elif ((BENCH_COMPARE_RUNS_EXPLICIT != 0)) && [[ "${BENCH_COMPARE_RUNS}" != "${profile_compare_runs}" ]]; then
+		canonical_profile_identity=0
 	fi
 	if ((BENCH_MEASURE_ORDER_EXPLICIT == 0)) && [[ -n "${profile_measure_order}" ]]; then
 		BENCH_MEASURE_ORDER="${profile_measure_order}"
+	elif ((BENCH_MEASURE_ORDER_EXPLICIT != 0)) && [[ "${BENCH_MEASURE_ORDER}" != "${profile_measure_order}" ]]; then
+		canonical_profile_identity=0
 	fi
 	if ((TIMING_PHASE_EXPLICIT == 0)) && [[ -n "${profile_timing_phase}" ]]; then
 		TIMING_PHASE="${profile_timing_phase}"
+	elif ((TIMING_PHASE_EXPLICIT != 0)) && [[ "${TIMING_PHASE}" != "${profile_timing_phase}" ]]; then
+		canonical_profile_identity=0
 	fi
 	if ((AGGREGATION_EXPLICIT == 0)) && [[ -n "${profile_aggregation}" ]]; then
 		AGGREGATION="${profile_aggregation}"
+	elif ((AGGREGATION_EXPLICIT != 0)) && [[ "${AGGREGATION}" != "${profile_aggregation}" ]]; then
+		canonical_profile_identity=0
+	fi
+
+	if ((canonical_profile_identity == 0)); then
+		MANIFEST_METHODOLOGY_PROFILE=""
+		MANIFEST_METHODOLOGY_VERSION=""
 	fi
 }
 
@@ -223,8 +249,8 @@ manifest_methodology_args=()
 
 build_resolved_methodology_settings() {
 	resolved_methodology_settings=(
-		profile "${METHODOLOGY_PROFILE}"
-		version "${METHODOLOGY_VERSION}"
+		profile "${MANIFEST_METHODOLOGY_PROFILE}"
+		version "${MANIFEST_METHODOLOGY_VERSION}"
 		compare_mode "${COMPARE_MODE}"
 		warmup "${BENCH_WARMUP}"
 		iters "${BENCH_ITERS}"
@@ -385,7 +411,7 @@ Options:
   --mode <perf|assert>            Benchmark mode forwarded to bench.sh run (default: perf)
   --dataset-id <id>               Dataset id forwarded to bench.sh data/run
   --timing-phase <phase>          Timing phase forwarded to bench.sh run (default: execute)
-                                  Trusted macro-lane compare suites: scan, write_perf, tpcds, interop_py (default: scan)
+                                  Trusted macro-lane compare suites: scan, write_perf, tpcds (default: scan)
   -h, --help                      Show this help
 EOF
 }
@@ -393,7 +419,7 @@ EOF
 trusted_macro_compare_suite() {
 	local requested_suite="${1:-}"
 	case "${requested_suite}" in
-	scan | write_perf | tpcds | interop_py)
+	scan | write_perf | tpcds)
 		return 0
 		;;
 	*)
@@ -620,7 +646,7 @@ esac
 
 if ! trusted_macro_compare_suite "${suite}"; then
 	echo "suite '${suite}' is not supported for macro-lane branch compare." >&2
-	echo "compare_branch.sh supports only trusted perf suites: scan, write_perf, tpcds, interop_py." >&2
+	echo "compare_branch.sh supports only trusted perf suites: scan, write_perf, tpcds." >&2
 	echo "use suite 'scan' for the curated default, or run unsupported stateful suites through purpose-built validation/longitudinal flows." >&2
 	exit 1
 fi

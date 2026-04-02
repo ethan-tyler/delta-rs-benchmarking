@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPARE_BRANCH = REPO_ROOT / "scripts" / "compare_branch.sh"
@@ -3091,7 +3092,7 @@ print("hash policy ok")
         assert Path(manifest["hash_policy_report"]).is_file()
 
 
-def test_compare_branch_manifest_records_methodology_profile_and_resolved_settings() -> (
+def test_compare_branch_manifest_records_overridden_methodology_settings_without_canonical_profile_identity() -> (
     None
 ):
     with tempfile.TemporaryDirectory() as td:
@@ -3349,8 +3350,8 @@ print("hash policy ok")
         manifest = json.loads(
             (artifact_dir / "manifest.json").read_text(encoding="utf-8")
         )
-        assert manifest["methodology_profile"] == "pr-macro"
-        assert manifest["methodology_version"] == 1
+        assert manifest["methodology_profile"] is None
+        assert manifest["methodology_version"] is None
         assert manifest["methodology_settings"] == {
             "compare_mode": "decision",
             "warmup": 7,
@@ -4312,9 +4313,10 @@ exit 99
         assert "git should not be invoked" not in result.stderr
 
 
-def test_compare_branch_rejects_untrusted_macro_compare_suites_before_checkout() -> (
-    None
-):
+@pytest.mark.parametrize("suite", ["all", "interop_py"])
+def test_compare_branch_rejects_untrusted_macro_compare_suites_before_checkout(
+    suite: str,
+) -> None:
     with tempfile.TemporaryDirectory() as td:
         temp_root = Path(td)
         scripts_dir = temp_root / "scripts"
@@ -4342,7 +4344,7 @@ exit 99
         env["PATH"] = f"{fake_bin}:{env['PATH']}"
 
         result = subprocess.run(
-            ["bash", str(compare_copy), "main", "candidate", "all"],
+            ["bash", str(compare_copy), "main", "candidate", suite],
             cwd=temp_root,
             env=env,
             check=False,
@@ -4351,7 +4353,7 @@ exit 99
         )
 
         assert result.returncode != 0
-        assert "suite 'all' is not supported" in result.stderr
+        assert f"suite '{suite}' is not supported" in result.stderr
         assert "macro-lane branch compare" in result.stderr
         assert "scan" in result.stderr
         assert "git should not be invoked" not in result.stderr

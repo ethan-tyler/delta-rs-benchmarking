@@ -1,4 +1,4 @@
-pandas==2.3.2
+pandas==2.3.3
 polars==1.36.1
 pyarrow==21.0.0
 duckdb==1.4.0

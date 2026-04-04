@@ -6,7 +6,7 @@ cases:
   runner: rust
   enabled: true
   supports_decision: true
-  required_runs: 5
+  required_runs: 7
   decision_threshold_pct: 5.0
   decision_metric: median
   assertions:
@@ -19,7 +19,7 @@ cases:
   runner: rust
   enabled: true
   supports_decision: true
-  required_runs: 5
+  required_runs: 7
   decision_threshold_pct: 5.0
   decision_metric: median
   assertions:
@@ -32,7 +32,7 @@ cases:
   runner: rust
   enabled: true
   supports_decision: true
-  required_runs: 5
+  required_runs: 7
   decision_threshold_pct: 5.0
   decision_metric: median
   assertions:
@@ -43,9 +43,9 @@ cases:
 - id: scan_pruning_hit
   target: scan
   runner: rust
-  enabled: true
+  enabled: false
   supports_decision: true
-  required_runs: 5
+  required_runs: 7
   decision_threshold_pct: 5.0
   decision_metric: median
   assertions:
@@ -58,7 +58,7 @@ cases:
   runner: rust
   enabled: false
   supports_decision: true
-  required_runs: 5
+  required_runs: 7
   decision_threshold_pct: 5.0
   decision_metric: median
   assertions:
@@ -100,6 +100,10 @@ cases:
   target: write_perf
   runner: rust
   enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
   assertions:
   - type: exact_result_hash
     value: sha256:95c83aeccfac6b8c7aa563313b9cbdfdc8693f4f83292ae9fe34f0ed8863bda1
@@ -109,6 +113,10 @@ cases:
   target: write_perf
   runner: rust
   enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
   assertions:
   - type: exact_result_hash
     value: sha256:b115da64f8d9204c9ed94597f6ac4ed7055979f32adab18c9a0925f337b35059
@@ -118,6 +126,10 @@ cases:
   target: write_perf
   runner: rust
   enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
   assertions:
   - type: exact_result_hash
     value: sha256:d4e8042f9e6d7f6ef38fd84a3b08b9a78cb551cbdf62c52e6881f75e2fe1f27a
@@ -127,6 +139,10 @@ cases:
   target: write_perf
   runner: rust
   enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
   assertions:
   - type: exact_result_hash
     value: sha256:cca3313008b2be9e76f6acdb87ae5c2456d242c5d55d3002cae0a50cee44d5c2

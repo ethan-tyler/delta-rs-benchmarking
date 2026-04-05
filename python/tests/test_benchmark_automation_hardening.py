@@ -24,6 +24,7 @@ NIGHTLY_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-nightly.yml"
 PRERELEASE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "benchmark-prerelease.yml"
 VALIDATION_SCRIPT = REPO_ROOT / "scripts" / "validate_perf_harness.sh"
 PUBLISH_CONTRACT_SCRIPT = REPO_ROOT / "scripts" / "publish_contract.sh"
+ACTIONLINT_SCRIPT = REPO_ROOT / "scripts" / "run_actionlint.sh"
 VALIDATION_DOC = REPO_ROOT / "docs" / "validation.md"
 REFERENCE_DOC = REPO_ROOT / "docs" / "reference.md"
 GETTING_STARTED_DOC = REPO_ROOT / "docs" / "getting-started.md"
@@ -37,6 +38,57 @@ LONGITUDINAL_RELEASE_HISTORY_WORKFLOW = (
     REPO_ROOT / ".github" / "workflows" / "longitudinal-release-history.yml"
 )
 LABEL_CONTRACT = REPO_ROOT / "python" / "tests" / "fixtures" / "label_contract.json"
+PR_MACRO_PROFILE = REPO_ROOT / "bench" / "methodologies" / "pr-macro.env"
+PR_WRITE_PERF_PROFILE = REPO_ROOT / "bench" / "methodologies" / "pr-write-perf.env"
+PR_DELETE_UPDATE_PERF_PROFILE = (
+    REPO_ROOT / "bench" / "methodologies" / "pr-delete-update-perf.env"
+)
+PR_MERGE_PERF_PROFILE = REPO_ROOT / "bench" / "methodologies" / "pr-merge-perf.env"
+PR_OPTIMIZE_PERF_PROFILE = (
+    REPO_ROOT / "bench" / "methodologies" / "pr-optimize-perf.env"
+)
+COMPARE_DOC = REPO_ROOT / "docs" / "comparing-branches.md"
+README_DOC = REPO_ROOT / "README.md"
+EVIDENCE_REGISTRY = REPO_ROOT / "bench" / "evidence" / "registry.yaml"
+WRITE_PERF_SUITE = (
+    REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "write_perf.rs"
+)
+DELETE_UPDATE_PERF_SUITE = (
+    REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "delete_update_perf.rs"
+)
+MERGE_PERF_SUITE = (
+    REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "merge_perf.rs"
+)
+OPTIMIZE_PERF_SUITE = (
+    REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "optimize_perf.rs"
+)
+TPCDS_SUITE = REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "tpcds" / "mod.rs"
+
+
+def read_env_file(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, value = line.split("=", maxsplit=1)
+        values[key] = value
+    return values
+
+
+def embedded_python_from_shell_function(script: str, function_name: str) -> str:
+    marker = f"{function_name}() {{"
+    start = script.index(marker)
+    function_block = script[start:]
+    return function_block.split("<<'PY'", maxsplit=1)[1].split("\nPY\n", maxsplit=1)[0]
+
+
+def shell_function_block(script: str, function_name: str) -> str:
+    marker = f"{function_name}() {{"
+    start = script.index(marker)
+    function_block = script[start:]
+    body = function_block.split("\n}\n", maxsplit=1)[0]
+    return body + "\n}\n"
 
 
 def wait_for_condition(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
@@ -139,7 +191,19 @@ def test_compare_branch_sanitizes_branch_labels_for_cli() -> None:
 
 def test_bench_sh_usage_lists_write_perf_suite() -> None:
     script = BENCH_SH.read_text(encoding="utf-8")
-    assert "--suite <scan|write|write_perf|" in script
+    assert "write_perf" in script
+
+
+def test_bench_sh_usage_lists_new_perf_owned_suites() -> None:
+    script = BENCH_SH.read_text(encoding="utf-8")
+
+    for suite in ("delete_update_perf", "merge_perf", "optimize_perf"):
+        assert suite in script
+
+
+def test_bench_sh_usage_excludes_scan_planning_suite() -> None:
+    script = BENCH_SH.read_text(encoding="utf-8")
+    assert "scan_planning" not in script
 
 
 def test_bench_sh_defaults_run_lane_to_smoke() -> None:
@@ -172,6 +236,18 @@ def test_benchmark_workflow_defines_job_timeout() -> None:
     assert re.search(r"^\s*timeout-minutes:\s*\d+", workflow, flags=re.MULTILINE)
 
 
+def test_actionlint_entrypoint_exists_and_bootstraps_pinned_release() -> None:
+    assert ACTIONLINT_SCRIPT.exists(), "missing scripts/run_actionlint.sh"
+    assert ACTIONLINT_SCRIPT.stat().st_mode & 0o111, (
+        "scripts/run_actionlint.sh must be executable"
+    )
+    script = ACTIONLINT_SCRIPT.read_text(encoding="utf-8")
+    assert "ACTIONLINT_VERSION=" in script
+    assert "rhysd/actionlint" in script
+    assert "curl -fsSL" in script
+    assert "tar -xzf" in script
+
+
 def test_benchmark_workflow_enforces_suite_allowlist() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "allowedSuites" in workflow
@@ -188,6 +264,25 @@ def test_benchmark_workflow_enforces_suite_allowlist() -> None:
     assert "invalid command" in workflow
 
 
+def test_benchmark_workflow_treats_full_as_pack_alias_not_suite() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "run benchmark decision full" in workflow
+    assert "pack alias" in workflow.lower()
+    assert "delta_bench_compare.pack plan" in workflow
+    assert '"full"' not in re.search(
+        r"const allowedSuites = new Set\(\[(?P<body>.*?)\]\);",
+        workflow,
+        flags=re.DOTALL,
+    ).group("body")
+
+
+def test_benchmark_workflow_rejects_exploratory_full_command() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "run benchmark full" in workflow
+    assert "run benchmark decision full" in workflow
+    assert "Reject exploratory 'run benchmark full' initially." in workflow
+
+
 def test_benchmark_workflow_supports_decision_command_grammar() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "run benchmark decision" in workflow
@@ -199,15 +294,64 @@ def test_benchmark_workflow_supports_decision_command_grammar() -> None:
 def test_benchmark_workflow_uses_sha_pins_for_compare_refs() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert re.search(
-        r"env:\n\s+BASE_SHA:\s+\$\{\{ steps\.pr\.outputs\.base_sha \}\}", workflow
+        r"env:\n\s+BASE_SHA:\s+\$\{\{ needs\.request\.outputs\.base_sha \}\}", workflow
     )
     assert re.search(
-        r"\s+HEAD_SHA:\s+\$\{\{ steps\.pr\.outputs\.head_sha \}\}", workflow
+        r"\s+HEAD_SHA:\s+\$\{\{ needs\.request\.outputs\.head_sha \}\}", workflow
     )
-    assert re.search(r"\s+SUITE:\s+\$\{\{ steps\.parse\.outputs\.suite \}\}", workflow)
+    assert re.search(
+        r"\s+SUITE:\s+\$\{\{ needs\.request\.outputs\.suite \}\}", workflow
+    )
     assert '"$BASE_SHA"' in workflow
     assert '"$HEAD_SHA"' in workflow
     assert '"$SUITE"' in workflow
+
+
+def test_benchmark_workflow_uses_pack_planning_matrix_and_aggregation() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "python3 -m delta_bench_compare.pack plan" in workflow
+    assert "--format github-matrix" in workflow
+    assert "fromJson(" in workflow
+    assert "matrix.timeout_minutes" in workflow
+    assert "timeout --preserve-status" in workflow
+    assert "./scripts/run_profile.sh --base-sha" in workflow
+    assert '\"$PROFILE\"' in workflow or '"$PROFILE"' in workflow
+    assert "python3 -m delta_bench_compare.pack summarize" in workflow
+    assert "actions/download-artifact@v4" in workflow
+
+
+def test_benchmark_workflow_supports_manual_replay_for_existing_pack_request() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "workflow_dispatch:" in workflow
+    assert "request_id:" in workflow
+    assert "github.event.inputs.request_id" in workflow
+    assert "replay-request" in workflow
+    assert "request-state" in workflow
+
+
+def test_benchmark_workflow_tracks_requests_in_persistent_sqlite() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "DELTA_BENCH_BOT_DB_PATH" in workflow
+    assert "python3 -m delta_bench_compare.bot_state" in workflow
+    assert "${{ vars.DELTA_BENCH_BOT_DB_PATH }}" in workflow
+    assert "/var/lib/delta-bench/pr-bot.sqlite3" not in workflow
+
+
+def test_benchmark_workflow_requires_shared_bot_db_path_for_queue_and_pack() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "Validate shared bot database path" in workflow
+    assert "DELTA_BENCH_BOT_DB_READY" in workflow
+    assert "shared path mounted on every runner" in workflow
+    assert "Benchmark queue is unavailable until DELTA_BENCH_BOT_DB_PATH is configured" in workflow
+    assert "Pack automation requires DELTA_BENCH_BOT_DB_PATH to point at a shared path" in workflow
+
+
+def test_show_benchmark_queue_reads_persistent_bot_db() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "show benchmark queue" in workflow
+    assert "Queue status is not available in workflow mode" not in workflow
+    assert "delta_bench_compare.bot_state" in workflow
+    assert "queue > benchmark_queue.txt" in workflow
 
 
 def test_benchmark_workflows_run_security_preflight_before_compare_execution() -> None:
@@ -281,6 +425,61 @@ def test_compare_branch_supports_dataset_and_timing_phase_passthrough() -> None:
     assert re.search(r'data_cmd\+=\(--dataset-id "\$\{DATASET_ID\}"\)', script)
 
 
+def test_pr_macro_profile_uses_medium_selective_dataset_and_stronger_decision_defaults() -> (
+    None
+):
+    profile = read_env_file(PR_MACRO_PROFILE)
+
+    assert profile["METHODOLOGY_PROFILE"] == "pr-macro"
+    assert profile["COMPARE_MODE"] == "decision"
+    assert profile["DATASET_ID"] == "medium_selective"
+    assert profile["WARMUP"] == "2"
+    assert profile["ITERS"] == "15"
+    assert profile["PREWARM_ITERS"] == "1"
+    assert profile["COMPARE_RUNS"] == "7"
+    assert profile["MEASURE_ORDER"] == "alternate"
+    assert profile["TIMING_PHASE"] == "execute"
+    assert profile["AGGREGATION"] == "median"
+    assert profile["SPREAD_METRIC"] == "iqr_ms"
+    assert profile["SUB_MS_THRESHOLD_MS"] == "1.0"
+    assert profile["SUB_MS_POLICY"] == "micro_only"
+
+
+def test_compare_branch_docs_describe_replay_bench_workflow() -> None:
+    combined = "\n".join(
+        (
+            README_DOC.read_text(encoding="utf-8"),
+            COMPARE_DOC.read_text(encoding="utf-8"),
+            REFERENCE_DOC.read_text(encoding="utf-8"),
+        )
+    )
+
+    assert "replay-state" in combined
+    assert "scan_replay_bench" in combined
+    assert "scan_planning" not in combined
+    assert "scan-plan" not in combined
+
+
+def test_compare_branch_does_not_advertise_scan_planning_suite_or_profile() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+    assert "scan_planning" not in script
+    assert "scan-plan" not in script
+
+
+def test_docs_distinguish_execute_guardrail_from_planning_probe() -> None:
+    combined = "\n".join(
+        (
+            COMPARE_DOC.read_text(encoding="utf-8"),
+            REFERENCE_DOC.read_text(encoding="utf-8"),
+        )
+    )
+
+    assert "execute-phase guardrail" in combined
+    assert "investigation-grade" in combined
+    assert "timing_phase=plan" in combined
+    assert "replay-state" in combined
+
+
 def test_compare_branch_does_not_retry_benchmark_producing_steps() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "run_step_no_retry()" in script
@@ -331,6 +530,39 @@ def test_compare_branch_references_pr_macro_methodology_profile() -> None:
 def test_compare_branch_accepts_pr_macro_methodology_profile_name() -> None:
     script = COMPARE_BRANCH.read_text(encoding="utf-8")
     assert "pr-macro" in script
+
+
+def test_pr_write_perf_profile_uses_intrinsic_case_workload_policy() -> None:
+    profile = read_env_file(PR_WRITE_PERF_PROFILE)
+
+    assert profile["METHODOLOGY_PROFILE"] == "pr-write-perf"
+    assert profile["TARGET"] == "write_perf"
+    assert profile["DATASET_POLICY"] == "intrinsic_case_workload"
+    assert "DATASET_ID" not in profile
+
+
+def test_delete_update_perf_merge_perf_optimize_perf_profiles_use_medium_selective_compare_contract() -> None:
+    for profile_path, expected_profile, expected_target in (
+        (
+            PR_DELETE_UPDATE_PERF_PROFILE,
+            "pr-delete-update-perf",
+            "delete_update_perf",
+        ),
+        (PR_MERGE_PERF_PROFILE, "pr-merge-perf", "merge_perf"),
+        (PR_OPTIMIZE_PERF_PROFILE, "pr-optimize-perf", "optimize_perf"),
+    ):
+        profile = read_env_file(profile_path)
+
+        assert profile["METHODOLOGY_PROFILE"] == expected_profile
+        assert profile["TARGET"] == expected_target
+        assert profile["PROFILE_KIND"] == "compare"
+        assert profile["DATASET_ID"] == "medium_selective"
+        assert profile["COMPARE_MODE"] == "decision"
+        assert profile["MEASURE_ORDER"] == "alternate"
+        assert profile["TIMING_PHASE"] == "execute"
+        assert profile["AGGREGATION"] == "median"
+        assert profile["DATASET_POLICY"] == "shared_run_scope"
+        assert profile["SPREAD_METRIC"] == "iqr_ms"
 
 
 def test_compare_branch_derives_compare_and_manifest_args_from_shared_methodology_settings() -> (
@@ -480,6 +712,287 @@ def test_validation_script_covers_all_scan_phase_canaries() -> None:
         assert f'"{control_phase}"' in script
 
 
+def test_validation_script_covers_write_perf_same_sha_and_regression_canary() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    assert "Running write_perf same-SHA branch compare..." in script
+    assert "Running write_perf regression-detection canary..." in script
+    assert "--methodology-profile pr-write-perf" in script
+    assert "write_perf_unpartitioned_1m" in script
+    assert "DELTA_BENCH_ALLOW_WRITE_PERF_DELAY=1" in script
+    assert "DELTA_BENCH_WRITE_PERF_DELAY_MS" in script
+
+
+def test_validation_script_covers_delete_update_perf_merge_perf_and_optimize_perf_canaries() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    for banner, profile_name, case_name, allow_env, delay_env in (
+        (
+            "Running delete_update_perf same-SHA branch compare...",
+            "pr-delete-update-perf",
+            "delete_perf_scattered_5pct_small_files",
+            "DELTA_BENCH_ALLOW_DELETE_UPDATE_PERF_DELAY=1",
+            "DELTA_BENCH_DELETE_UPDATE_PERF_DELAY_MS",
+        ),
+        (
+            "Running merge_perf same-SHA branch compare...",
+            "pr-merge-perf",
+            "merge_perf_upsert_50pct",
+            "DELTA_BENCH_ALLOW_MERGE_PERF_DELAY=1",
+            "DELTA_BENCH_MERGE_PERF_DELAY_MS",
+        ),
+        (
+            "Running optimize_perf same-SHA branch compare...",
+            "pr-optimize-perf",
+            "optimize_perf_compact_small_files",
+            "DELTA_BENCH_ALLOW_OPTIMIZE_PERF_DELAY=1",
+            "DELTA_BENCH_OPTIMIZE_PERF_DELAY_MS",
+        ),
+    ):
+        assert banner in script
+        assert f"--methodology-profile {profile_name}" in script
+        assert case_name in script
+        assert allow_env in script
+        assert delay_env in script
+
+
+def test_validation_script_embedded_python_helpers_compile() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    for function_name in (
+        "assert_same_sha_compare_is_fail_closed",
+        "assert_payload_contains_cases",
+        "assert_phase_canary",
+        "assert_regression_canary_detected",
+    ):
+        source = embedded_python_from_shell_function(script, function_name)
+        compile(source, f"<{function_name}>", "exec")
+
+
+def test_validation_script_regression_canary_helper_executes_successfully(
+    tmp_path: Path,
+) -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    function_block = shell_function_block(script, "assert_regression_canary_detected")
+    case_name = "delete_perf_scattered_5pct_small_files"
+
+    def write_payload(path: Path, *, label: str, run_medians_ms: list[float]) -> None:
+        median_ms = run_medians_ms[len(run_medians_ms) // 2]
+        payload = {
+            "schema_version": 5,
+            "context": {
+                "schema_version": 5,
+                "label": label,
+                "suite": "delete_update_perf",
+                "benchmark_mode": "perf",
+                "timing_phase": "execute",
+                "dataset_id": "medium_selective",
+                "dataset_fingerprint": "sha256:fixture",
+                "runner": "rust",
+                "scale": "sf1",
+                "storage_backend": "local",
+                "backend_profile": "local",
+                "lane": "macro",
+                "measurement_kind": "phase_breakdown",
+                "validation_level": "operational",
+                "harness_revision": "harness-rev",
+                "fixture_recipe_hash": "sha256:recipe",
+                "fidelity_fingerprint": "sha256:fidelity",
+            },
+            "cases": [
+                {
+                    "case": case_name,
+                    "success": True,
+                    "validation_passed": True,
+                    "perf_status": "trusted",
+                    "classification": "supported",
+                    "samples": [{"elapsed_ms": median_ms, "metrics": {}}],
+                    "run_summary": {
+                        "sample_count": 1,
+                        "invalid_sample_count": 0,
+                        "median_ms": median_ms,
+                        "host_label": "bench-host",
+                        "fidelity_fingerprint": "sha256:fidelity",
+                    },
+                    "run_summaries": [
+                        {
+                            "sample_count": 1,
+                            "invalid_sample_count": 0,
+                            "median_ms": value,
+                            "host_label": "bench-host",
+                            "fidelity_fingerprint": "sha256:fidelity",
+                        }
+                        for value in run_medians_ms
+                    ],
+                    "compatibility_key": "sha256:good",
+                    "supports_decision": True,
+                    "required_runs": 5,
+                    "decision_threshold_pct": 5.0,
+                    "decision_metric": "median",
+                }
+            ],
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    baseline_json = tmp_path / "baseline.json"
+    candidate_json = tmp_path / "candidate.json"
+    write_payload(
+        baseline_json,
+        label="baseline",
+        run_medians_ms=[100.0, 101.0, 99.0, 100.5, 100.2],
+    )
+    write_payload(
+        candidate_json,
+        label="candidate",
+        run_medians_ms=[120.0, 121.0, 119.0, 120.5, 120.2],
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                "set -euo pipefail\n"
+                f'PYTHONPATH_DIR="{REPO_ROOT / "python"}"\n'
+                f"{function_block}\n"
+                'assert_regression_canary_detected "$1" "$2" "$3"\n'
+            ),
+            "assert_regression_canary_detected_test",
+            str(baseline_json),
+            str(candidate_json),
+            case_name,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"Regression canary: {case_name} classified as regression" in result.stdout
+
+
+def test_validation_script_keeps_scan_and_perf_owned_gates_on_their_contract_dataset() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'PRIMARY_VALIDATION_DATASET_ID="medium_selective"' in script
+    assert 'TPCDS_VALIDATION_DATASET_ID="tpcds_duckdb"' in script
+    assert 'PRIMARY_FIXTURES_DIR="${VALIDATION_ARTIFACT_DIR}/fixtures-medium_selective"' in script
+    assert 'TPCDS_FIXTURES_DIR="${VALIDATION_ARTIFACT_DIR}/fixtures-tpcds_duckdb"' in script
+    assert '--dataset-id "${PRIMARY_VALIDATION_DATASET_ID}"' in script
+    assert '--dataset-id "${TPCDS_VALIDATION_DATASET_ID}"' in script
+    assert "Use --dataset-id tpcds_duckdb to enable it." in script
+
+
+def test_validation_script_keeps_write_perf_canary_case_fixed() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    assert "write_perf_unpartitioned_1m" in script
+    assert "VALIDATION_WRITE_PERF_CASE" not in script
+
+
+def test_write_perf_suite_contains_validation_only_delay_canary_contract() -> None:
+    source = WRITE_PERF_SUITE.read_text(encoding="utf-8")
+
+    assert "DELTA_BENCH_ALLOW_WRITE_PERF_DELAY" in source
+    assert "DELTA_BENCH_WRITE_PERF_DELAY_MS" in source
+    assert "validation-only write_perf delay injection requires" in source
+    assert "write_perf_unpartitioned_1m" in source
+
+
+def test_delete_update_perf_merge_perf_and_optimize_perf_suites_contain_validation_only_delay_canary_contracts() -> None:
+    for source_path, allow_env, delay_env, message, case_name in (
+        (
+            DELETE_UPDATE_PERF_SUITE,
+            "DELTA_BENCH_ALLOW_DELETE_UPDATE_PERF_DELAY",
+            "DELTA_BENCH_DELETE_UPDATE_PERF_DELAY_MS",
+            "validation-only delete_update_perf delay injection requires",
+            "delete_perf_scattered_5pct_small_files",
+        ),
+        (
+            MERGE_PERF_SUITE,
+            "DELTA_BENCH_ALLOW_MERGE_PERF_DELAY",
+            "DELTA_BENCH_MERGE_PERF_DELAY_MS",
+            "validation-only merge_perf delay injection requires",
+            "merge_perf_upsert_50pct",
+        ),
+        (
+            OPTIMIZE_PERF_SUITE,
+            "DELTA_BENCH_ALLOW_OPTIMIZE_PERF_DELAY",
+            "DELTA_BENCH_OPTIMIZE_PERF_DELAY_MS",
+            "validation-only optimize_perf delay injection requires",
+            "optimize_perf_compact_small_files",
+        ),
+    ):
+        source = source_path.read_text(encoding="utf-8")
+
+        assert allow_env in source
+        assert delay_env in source
+        assert message in source
+        assert case_name in source
+
+
+def test_validation_script_covers_tpcds_same_sha_and_regression_canary() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    assert "Running tpcds same-SHA branch compare..." in script
+    assert "Running tpcds regression-detection canary..." in script
+    assert "--methodology-profile pr-tpcds" in script
+    assert "tpcds_q03" in script
+    assert "DELTA_BENCH_ALLOW_TPCDS_DELAY=1" in script
+    assert "DELTA_BENCH_TPCDS_DELAY_MS" in script
+
+
+def test_tpcds_suite_contains_validation_only_delay_canary_contract() -> None:
+    source = TPCDS_SUITE.read_text(encoding="utf-8")
+
+    assert "DELTA_BENCH_ALLOW_TPCDS_DELAY" in source
+    assert "DELTA_BENCH_TPCDS_DELAY_MS" in source
+    assert "validation-only tpcds delay injection requires" in source
+    assert "tpcds_q03" in source
+
+
+def test_evidence_registry_lists_delete_update_perf_merge_perf_and_optimize_perf_as_candidate_manual() -> None:
+    from delta_bench_compare.registry import load_registry, pack_suite_definitions
+
+    registry = load_registry(EVIDENCE_REGISTRY)
+
+    for suite_name, default_profile in (
+        ("delete_update_perf", "pr-delete-update-perf"),
+        ("merge_perf", "pr-merge-perf"),
+        ("optimize_perf", "pr-optimize-perf"),
+    ):
+        suite = registry["suites"][suite_name]
+        assert suite["class"] == "authoritative_macro"
+        assert suite["automation_tier"] == "candidate_pr_bot"
+        assert suite["readiness"] == "gated"
+        assert suite["default_profile"] == default_profile
+
+    candidate_pack = registry["packs"].get("pr-candidate-manual")
+    assert isinstance(candidate_pack, dict)
+    candidate_suites = [
+        entry["suite"] for entry in pack_suite_definitions(registry, candidate_pack)
+    ]
+    assert "delete_update_perf" in candidate_suites
+    assert "merge_perf" in candidate_suites
+    assert "optimize_perf" in candidate_suites
+
+
+def test_evidence_registry_replacement_surfaces_reference_real_suites() -> None:
+    from delta_bench_compare.registry import load_registry
+
+    registry = load_registry(EVIDENCE_REGISTRY)
+    declared_suites = set(registry["suites"])
+
+    for suite_name, suite in registry["suites"].items():
+        replacement_surface = suite.get("replacement_surface")
+        if replacement_surface is None:
+            continue
+        assert replacement_surface in declared_suites, (
+            f"{suite_name} replacement_surface points at unknown suite "
+            f"{replacement_surface!r}"
+        )
+
+
 def test_validation_script_canonicalizes_artifact_dir_once() -> None:
     script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
     assert "canonicalize_dir()" in script
@@ -546,18 +1059,17 @@ def test_benchmark_workflow_reports_execution_status_separately_from_compare_mod
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "status_label=EXPLORATORY" not in workflow
     assert "Benchmark EXPLORATORY" not in workflow
-    assert "--methodology-profile pr-macro" in workflow
-    assert "--fail-on regression,inconclusive" in workflow
     assert "status_label=PASS" in workflow
     assert "status_label=FAIL" in workflow
-    assert "`Compare mode: ${compareMode}`" in workflow
+    assert "Compare mode" in workflow
 
 
 def test_benchmark_workflow_uses_pr_macro_methodology_profile_for_decision_runs() -> (
     None
 ):
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert "--methodology-profile pr-macro" in workflow
+    assert "profile: pr-macro" in EVIDENCE_REGISTRY.read_text(encoding="utf-8")
+    assert "./scripts/run_profile.sh" in workflow
 
 
 def test_benchmark_workflow_does_not_restate_pr_macro_methodology_knobs() -> None:
@@ -575,6 +1087,13 @@ def test_benchmark_workflow_does_not_restate_pr_macro_methodology_knobs() -> Non
         assert forbidden not in workflow
 
 
+def test_benchmark_workflow_keeps_single_suite_scan_path() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "run benchmark scan" in workflow
+    assert "run benchmark decision scan" in workflow
+    assert "suite == 'scan'" in workflow or 'suite === "scan"' in workflow
+
+
 def test_benchmark_workflow_fails_job_when_compare_fails() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert 'if [[ "${status}" -ne 0 ]]; then' in workflow
@@ -583,11 +1102,18 @@ def test_benchmark_workflow_fails_job_when_compare_fails() -> None:
 
 def test_benchmark_workflow_posts_results_even_after_compare_step_failure() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
-    assert (
-        "if: always() && steps.parse.outputs.mode == 'run' && "
-        "steps.auth.outputs.allowed == 'true' && "
-        "steps.pr.outputs.same_repo == 'true'"
-    ) in workflow
+    assert "- name: Post benchmark result" in workflow
+    assert "if: always()" in workflow
+
+
+def test_benchmark_workflow_pack_status_comment_fails_closed_when_any_shard_fails() -> (
+    None
+):
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    assert "const shardResult = `${{ needs.run_pack_shards.result }}`;" in workflow
+    assert "const overallStatus = `${{ steps.summarize.outputs.overall_status }}`;" in workflow
+    assert 'const finalStatus = shardResult === "success" && overallStatus === "passed"' in workflow
+    assert '`### Benchmark ${finalStatus ? "PASS" : "FAIL"}`' in workflow
 
 
 def test_benchmark_workflow_does_not_mask_exploratory_failures() -> None:
@@ -3083,6 +3609,7 @@ print("hash policy ok")
         manifest = json.loads(
             (artifact_dir / "manifest.json").read_text(encoding="utf-8")
         )
+        assert manifest["profile"] == "scan"
         assert manifest["compare_mode"] == "exploratory"
         assert manifest["aggregation"] == "median"
         assert manifest["noise_threshold"] == 0.05
@@ -3350,17 +3877,19 @@ print("hash policy ok")
         manifest = json.loads(
             (artifact_dir / "manifest.json").read_text(encoding="utf-8")
         )
+        assert manifest["profile"] == "pr-macro"
         assert manifest["methodology_profile"] is None
         assert manifest["methodology_version"] is None
         assert manifest["methodology_settings"] == {
             "compare_mode": "decision",
             "warmup": 7,
-            "iters": 9,
+            "iters": 15,
             "prewarm_iters": 1,
-            "compare_runs": 5,
+            "compare_runs": 7,
             "measure_order": "alternate",
             "timing_phase": "execute",
             "aggregation": "median",
+            "dataset_id": "medium_selective",
             "dataset_policy": "shared_run_scope",
             "spread_metric": "iqr_ms",
             "sub_ms_threshold_ms": 1.0,
@@ -4313,7 +4842,7 @@ exit 99
         assert "git should not be invoked" not in result.stderr
 
 
-@pytest.mark.parametrize("suite", ["all", "interop_py"])
+@pytest.mark.parametrize("suite", ["all", "interop_py", "scan_planning"])
 def test_compare_branch_rejects_untrusted_macro_compare_suites_before_checkout(
     suite: str,
 ) -> None:
@@ -4354,8 +4883,11 @@ exit 99
 
         assert result.returncode != 0
         assert f"suite '{suite}' is not supported" in result.stderr
-        assert "macro-lane branch compare" in result.stderr
+        assert "compare_branch.sh" in result.stderr
+        assert "curated compare suites" in result.stderr
         assert "scan" in result.stderr
+        assert "write_perf" in result.stderr
+        assert "tpcds" in result.stderr
         assert "git should not be invoked" not in result.stderr
 
 

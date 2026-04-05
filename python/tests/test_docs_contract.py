@@ -217,6 +217,24 @@ def test_compare_docs_cover_concurrency_guidance() -> None:
     assert "leave it null" in markdown
 
 
+def test_docs_cover_pack_based_pr_decision_contract() -> None:
+    combined = "\n".join(
+        (
+            (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "reference.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "architecture.md").read_text(encoding="utf-8"),
+        )
+    )
+
+    assert "run benchmark decision full" in combined
+    assert "pr-full-decision" in combined
+    assert "bench/evidence/registry.yaml" in combined
+    assert "full does not mean --suite all" in combined
+    assert "contains only readiness=ready suites" in combined
+    assert "pr-candidate-manual" in combined
+    assert "tpcds remains candidate/manual" in combined
+
+
 def test_cloud_runner_docs_cover_enforced_workflows_and_required_env() -> None:
     markdown = (DOCS_DIR / "cloud-runner.md").read_text(encoding="utf-8")
     workflow_names = _self_hosted_benchmark_workflow_names()
@@ -226,12 +244,15 @@ def test_cloud_runner_docs_cover_enforced_workflows_and_required_env() -> None:
 
     for env_var in (
         "DELTA_BENCH_EGRESS_POLICY_SHA256",
+        "DELTA_BENCH_BOT_DB_PATH",
         "BENCH_RUNNER_MODE",
         "BENCH_STORAGE_BACKEND",
         "BENCH_STORAGE_OPTIONS",
         "BENCH_BACKEND_PROFILE",
     ):
         assert env_var in markdown
+
+    assert "shared path mounted on every runner" in markdown
 
     assert (
         "./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy"
@@ -302,8 +323,47 @@ def test_compare_docs_define_pr_macro_methodology_profile_contract() -> None:
 
     assert "--methodology-profile" in compare_doc
     assert "pr-macro" in compare_doc
+    assert "medium_selective" in compare_doc
     assert "iqr_ms" in compare_doc
     assert "micro_only" in compare_doc
+
+
+def test_compare_docs_define_pr_write_perf_methodology_profile_contract() -> None:
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+
+    assert "pr-write-perf" in compare_doc
+    assert "intrinsic_case_workload" in compare_doc
+    assert (
+        "./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf"
+        in compare_doc
+    )
+
+
+def test_compare_docs_define_pr_tpcds_methodology_profile_contract() -> None:
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+
+    assert "pr-tpcds" in compare_doc
+    assert "tpcds_duckdb" in compare_doc
+    assert (
+        "./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds"
+        in compare_doc
+    )
+
+
+def test_compare_docs_define_new_perf_owned_methodology_profile_contracts() -> None:
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+
+    for profile_name, suite_name in (
+        ("pr-delete-update-perf", "delete_update_perf"),
+        ("pr-merge-perf", "merge_perf"),
+        ("pr-optimize-perf", "optimize_perf"),
+    ):
+        assert profile_name in compare_doc
+        assert "medium_selective" in compare_doc
+        assert (
+            f"./scripts/compare_branch.sh --current-vs-main --methodology-profile {profile_name} {suite_name}"
+            in compare_doc
+        )
 
 
 def test_reference_docs_include_methodology_metadata_fields() -> None:
@@ -327,3 +387,135 @@ def test_pr_macro_docs_treat_sub_ms_cases_as_micro_only_out_of_scope() -> None:
     assert "pr-macro" in combined
     assert "micro_only" in combined
     assert "Out of Scope" in combined
+
+
+def test_docs_describe_macro_vs_micro_scan_split_and_exact_cli_examples() -> None:
+    readme = README.read_text(encoding="utf-8")
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+
+    combined = "\n".join((readme, compare_doc, reference, architecture))
+    assert "scan_pruning_hit" in combined
+    assert "microbench" in combined
+    assert "medium_selective" in combined
+    assert "--methodology-profile pr-macro" in combined
+    assert "--save-baseline" in combined
+    assert "--baseline" in combined
+
+
+def test_docs_publish_criterion_family_map_and_diagnostic_policy() -> None:
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+
+    combined = "\n".join((reference, architecture, validation, compare_doc))
+    assert "## Criterion Microbench Families" in reference
+
+    for family_name in (
+        "scan_phase",
+        "metadata_replay",
+        "metadata_log",
+        "file_selection",
+        "merge_filter",
+        "optimize_plan",
+        "object_store_control",
+    ):
+        assert f"`{family_name}`" in reference
+
+    for profile_name, bench_name in (
+        ("scan-phase-criterion", "scan_phase_bench"),
+        ("metadata-replay-criterion", "scan_replay_bench"),
+    ):
+        assert profile_name in combined
+        assert bench_name in combined
+
+    assert "diagnostic-only" in combined
+    assert "never authoritative PR evidence" in combined
+    assert "local or trusted self-hosted" in combined
+
+
+def test_validation_docs_use_replay_bench_instead_of_scan_planning_compare() -> None:
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+
+    assert "metadata-replay-criterion" in validation
+    assert "scan_replay_bench" in validation
+    assert "scan_planning" not in validation
+    assert "scan-plan" not in validation
+
+
+def test_validation_docs_do_not_duplicate_identical_criterion_replay_profile_command_block() -> (
+    None
+):
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+
+    command_block = "```bash\n./scripts/run_profile.sh metadata-replay-criterion\n```"
+    assert validation.count(command_block) == 1
+
+
+def test_validation_docs_require_write_perf_gate_before_promotion() -> None:
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+
+    combined = "\n".join((validation, compare_doc))
+    assert "write_perf" in combined
+    assert "pr-write-perf" in combined
+    assert (
+        "./scripts/validate_perf_harness.sh --artifact-dir results/validation/write-perf-gate"
+        in combined
+    )
+    assert "before enabling bot-default decision runs" in combined
+
+
+def test_docs_require_new_perf_owned_gates_before_promotion() -> None:
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+
+    combined = "\n".join((validation, compare_doc, architecture, reference))
+    for suite_name, profile_name in (
+        ("delete_update_perf", "pr-delete-update-perf"),
+        ("merge_perf", "pr-merge-perf"),
+        ("optimize_perf", "pr-optimize-perf"),
+    ):
+        assert suite_name in combined
+        assert profile_name in combined
+        assert "candidate/manual" in combined
+        assert "same-SHA" in combined
+        assert "regression" in combined
+        assert "runtime signoff" in combined
+
+
+def test_docs_require_tpcds_gate_before_promotion() -> None:
+    readme = README.read_text(encoding="utf-8")
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+    getting_started = (DOCS_DIR / "getting-started.md").read_text(encoding="utf-8")
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+
+    combined = "\n".join(
+        (readme, validation, compare_doc, architecture, getting_started, reference)
+    )
+    assert "pr-tpcds" in combined
+    assert "tpcds_duckdb" in combined
+    assert "trusted self-hosted" in combined
+    assert "q72" in combined
+    assert "outside the PR decision surface" in combined
+    assert (
+        "./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate"
+        in combined
+    )
+
+
+def test_readme_and_architecture_drop_stale_suite_counts_and_include_concurrency() -> (
+    None
+):
+    readme = README.read_text(encoding="utf-8")
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+
+    assert "36 benchmark cases across 9 suites" not in readme
+    assert "36 benchmark cases across 9 suites" not in architecture
+    assert "`concurrency`" in readme

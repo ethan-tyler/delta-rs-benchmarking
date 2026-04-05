@@ -6,6 +6,7 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 
 - [Glossary](#glossary)
 - [Benchmark Suites and Cases](#benchmark-suites-and-cases)
+- [Criterion Microbench Families](#criterion-microbench-families)
 - [Metrics Reference](#metrics-reference)
 - [CLI Commands and Flags](#cli-commands-and-flags)
 - [Repository Verification Baseline](#repository-verification-baseline)
@@ -23,6 +24,8 @@ Complete lookup reference for the delta-rs benchmarking harness. This page catal
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Suite**              | A named group of benchmark cases that test a specific Delta Lake operation (e.g., `scan`, `write`, `merge`).                                                          |
 | **Case**               | An individual benchmark within a suite. Each case is run for a configured number of warmup + measured iterations.                                                     |
+| **Methodology profile** | A harness-owned compare or diagnostic contract loaded from `bench/methodologies/<name>.env` so operators do not restate raw compare knobs or Criterion entrypoints by hand. |
+| **Evidence registry**   | The harness-owned policy file at `bench/evidence/registry.yaml` that classifies suites and defines pack aliases such as `full -> pr-full-decision`.                   |
 | **Runner**             | The execution lane: `rust` (native Rust implementation), `python` (Python interop via pandas/polars/pyarrow), or `all`.                                               |
 | **Dataset**            | A named fixture configuration that controls which tables are generated and at what size. Identified by `dataset_id`.                                                  |
 | **Scale**              | The size factor for fixture data: `sf1` (10K rows), `sf10` (100K rows), `sf100` (1M rows).                                                                            |
@@ -67,7 +70,9 @@ Read operations testing full scans, projections, filters, and partition pruning.
 
 For phase-aware suites, use `--timing-phase load|plan|execute|validate` to select which isolated phase populates `elapsed_ms`. Case IDs stay the same regardless of the selected phase.
 
-Authoritative decision runs use `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_hit` is requalified on the current `tiny_smoke` fixture contract. `scan_pruning_miss` is listed for exploratory use but disabled in `bench/manifests/core_rust.yaml` until its exact-result assertion is requalified.
+Authoritative decision runs use `scan_full_narrow`, `scan_projection_region`, and `scan_filter_flag` on the deterministic `medium_selective` dataset. `scan_pruning_hit` is intentionally excluded from the macro decision manifest and belongs in Criterion microbench coverage because it is routinely too small/cache-sensitive on local disk. `scan_pruning_miss` is listed for exploratory review but stays disabled in `bench/manifests/core_rust.yaml` until its exact-result assertion is requalified.
+
+Use `scan` as the execute-phase guardrail. For scan-internal planning or execution probes, pair it with `./scripts/run_profile.sh scan-phase-criterion`. For snapshot/provider replay diagnostics, use `./scripts/run_profile.sh metadata-replay-criterion`. Criterion output is diagnostic-only and should be reported separately from authoritative PR evidence.
 
 ### write (3 cases)
 
@@ -93,6 +98,19 @@ DML operations testing deletes and updates at varying selectivity and data layou
 | `update_expr_50pct_broad`       | Update 50% of rows with an expression, across all partitions         | rows_processed, files_scanned, rewrite_time_ms |
 | `update_all_rows_expr`          | Update all rows with an expression (full table rewrite)              | rows_processed, files_scanned, rewrite_time_ms |
 
+`delete_update` stays correctness-backed. If you need DML compare evidence, use the dedicated `delete_update_perf` suite instead of treating macro-lane runs of `delete_update` as authoritative.
+
+### delete_update_perf (4 cases)
+
+Perf-owned DML candidate/manual suite. The compare profile is `pr-delete-update-perf`, which fixes `dataset_id=medium_selective` and keeps the suite gated in `bench/evidence/registry.yaml` until same-SHA stability, delayed-canary validation, runtime signoff, and one stable case-list refresh cycle are complete.
+
+| Case                                   | Description                                                           | Key metrics                                    |
+| -------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------- |
+| `delete_perf_localized_1pct`           | Perf-owned localized delete case matching 1% of rows in one partition | rows_processed, files_scanned, rewrite_time_ms |
+| `delete_perf_scattered_5pct_small_files` | Perf-owned scattered delete case on small-file layout                 | rows_processed, files_scanned, rewrite_time_ms |
+| `update_perf_literal_5pct_scattered`   | Perf-owned scattered literal update on small-file layout              | rows_processed, files_scanned, rewrite_time_ms |
+| `update_perf_all_rows_expr`            | Perf-owned full-table expression update canary                        | rows_processed, files_scanned, rewrite_time_ms |
+
 ### merge (6 cases)
 
 Merge (upsert/delete) operations at varying match ratios and target configurations.
@@ -106,6 +124,19 @@ Merge (upsert/delete) operations at varying match ratios and target configuratio
 | `merge_upsert_90pct`              | Upsert matching 90% of rows (near-full rewrite)             | files_scanned, files_pruned, scan_time_ms, rewrite_time_ms |
 | `merge_localized_1pct`            | Partition-aware upsert matching 1% with partition predicate | files_scanned, files_pruned, scan_time_ms, rewrite_time_ms |
 
+`merge` stays correctness-backed. For candidate/manual merge perf evidence, use `merge_perf`.
+
+### merge_perf (4 cases)
+
+Perf-owned merge candidate/manual suite. The compare profile is `pr-merge-perf`, which fixes `dataset_id=medium_selective` and stays gated until same-SHA stability, delayed-canary validation, runtime signoff, and case-list stability are all closed.
+
+| Case                        | Description                                                      | Key metrics                                                |
+| --------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------- |
+| `merge_perf_upsert_10pct`   | Perf-owned upsert matching 10% of rows                           | files_scanned, files_pruned, scan_time_ms, rewrite_time_ms |
+| `merge_perf_upsert_50pct`   | Perf-owned upsert matching 50% of rows                           | files_scanned, files_pruned, scan_time_ms, rewrite_time_ms |
+| `merge_perf_localized_1pct` | Perf-owned partition-aware upsert matching 1% of rows            | files_scanned, files_pruned, scan_time_ms, rewrite_time_ms |
+| `merge_perf_delete_5pct`    | Perf-owned merge-delete matching 5% of rows                      | files_scanned, files_pruned, scan_time_ms, rewrite_time_ms |
+
 ### metadata (2 cases)
 
 Metadata operations testing table load and time-travel performance.
@@ -114,6 +145,8 @@ Metadata operations testing table load and time-travel performance.
 | ------------------------- | ---------------------------------------------------------------- | ------------------------- |
 | `metadata_load`           | Load table metadata from the transaction log                     | table_version, operations |
 | `metadata_time_travel_v0` | Load table metadata at version 0 (time travel to initial commit) | table_version, operations |
+
+`metadata` stays correctness-backed. Do not treat it as authoritative perf evidence.
 
 ### optimize_vacuum (5 cases)
 
@@ -126,6 +159,18 @@ Table maintenance operations: file compaction and vacuum.
 | `optimize_heavy_compaction`     | Aggressive compaction with small target size (64KB)         | files_scanned, files_pruned |
 | `vacuum_dry_run_lite`           | Dry-run vacuum to identify removable files without deleting | files_scanned, operations   |
 | `vacuum_execute_lite`           | Execute vacuum to remove expired files                      | files_scanned, operations   |
+
+`optimize_vacuum` stays correctness-backed. For candidate/manual maintenance perf evidence, use `optimize_perf`.
+
+### optimize_perf (3 cases)
+
+Perf-owned maintenance candidate/manual suite. The compare profile is `pr-optimize-perf`, which fixes `dataset_id=medium_selective` and stays gated until same-SHA stability, delayed-canary validation, runtime signoff, and a stable initial case set are complete.
+
+| Case                                 | Description                                            | Key metrics                 |
+| ------------------------------------ | ------------------------------------------------------ | --------------------------- |
+| `optimize_perf_compact_small_files`  | Perf-owned compaction on the small-file maintenance fixture | files_scanned, files_pruned |
+| `optimize_perf_noop_already_compact` | Perf-owned no-op optimize case on already compacted data   | files_scanned, files_pruned |
+| `vacuum_perf_execute_lite`           | Perf-owned vacuum execute case                             | files_scanned, operations   |
 
 ### concurrency (5 cases)
 
@@ -143,7 +188,7 @@ Rust-only multi-worker races for parallel table creation, concurrent appends, an
 
 ### tpcds (4 queries)
 
-TPC-DS analytical queries against the `store_sales` table. Requires `tpcds_duckdb` dataset.
+TPC-DS analytical queries against the `store_sales` table. The trusted self-hosted compare profile is `pr-tpcds`, which requires the `tpcds_duckdb` dataset. Only `tpcds_q03`, `tpcds_q07`, and `tpcds_q64` participate in the candidate/manual evidence path today; `tpcds_q72` remains outside the PR decision surface. `tpcds` remains candidate/manual until fixture provisioning, same-SHA stability, delayed-canary validation, and runtime signoff are all closed.
 
 | Case        | Status   | Description                                    |
 | ----------- | -------- | ---------------------------------------------- |
@@ -162,6 +207,22 @@ Python interop benchmarks testing roundtrip and scan performance through Python 
 | `polars_roundtrip_smoke`    | Write and read-back through polars | rows_processed, bytes_processed |
 | `pyarrow_dataset_scan_perf` | Dataset scan through pyarrow       | rows_processed, bytes_processed |
 
+## Criterion Microbench Families
+
+Criterion profiles are for local or trusted self-hosted investigation only. They are diagnostic-only, never authoritative PR evidence, and do not enter `bench/evidence/registry.yaml` packs, `compare_branch.sh`, PR comment automation, or longitudinal ingest.
+
+Use `./scripts/run_profile.sh <profile>` for committed Criterion entrypoints. Planned families are listed here so the diagnostic contract stays explicit as coverage expands without widening PR decision scope.
+
+| Family | Status | Profile | Bench file | Intended use |
+| --- | --- | --- | --- | --- |
+| `scan_phase` | Existing | `scan-phase-criterion` | `scan_phase_bench.rs` | Phase-isolated scan microbench for `scan_filter_flag`, `scan_projection_region`, and `scan_pruning_hit` |
+| `metadata_replay` | Existing | `metadata-replay-criterion` | `scan_replay_bench.rs` | Snapshot/provider replay probes for the existing scan replay bench |
+| `metadata_log` | Planned | `metadata-log-criterion` (planned) | `metadata_log_bench.rs` | Log parsing and snapshot materialization internals |
+| `file_selection` | Planned | `file-selection-criterion` (planned) | `file_selection_bench.rs` | Shared delete/update file-finding and predicate-selection internals |
+| `merge_filter` | Planned | `merge-filter-criterion` (planned) | `merge_filter_bench.rs` | Merge early-filter and placeholder-expansion planning |
+| `optimize_plan` | Planned | `optimize-plan-criterion` (planned) | `optimize_plan_bench.rs` | Compaction planning and file-selection internals |
+| `object_store_control` | Optional later | `object-store-control-criterion` (planned) | `object_store_control_bench.rs` | Local object-store control-plane helpers only |
+
 ## Metrics Reference
 
 All metrics are optional per-sample fields. Which metrics are populated depends on the suite and case.
@@ -179,7 +240,7 @@ Emitted by all suites.
 
 ### Scan and rewrite metrics
 
-Emitted by scan, delete_update, merge, and optimize_vacuum suites.
+Emitted by scan, delete_update, delete_update_perf, merge, merge_perf, optimize_vacuum, and optimize_perf suites.
 
 | Metric            | Type | Description                             |
 | ----------------- | ---- | --------------------------------------- |
@@ -283,7 +344,7 @@ Relative `DELTA_BENCH_FIXTURES` and `DELTA_BENCH_RESULTS` values are resolved ag
 | `--suite`            | `all`     | Suite to run (or `all`)                                                                                                                                                                                                                                                                              |
 | `--case-filter`      | —         | Substring filter for case names                                                                                                                                                                                                                                                                      |
 | `--runner`           | `all`     | Runner mode: `rust`, `python`, or `all`                                                                                                                                                                                                                                                              |
-| `--lane`             | `smoke`   | Benchmark lane: `smoke`, `correctness`, or `macro`. `smoke` is the default local workflow; `correctness` is the trusted semantic lane for correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`); `macro` is the perf lane for macro-safe cases. |
+| `--lane`             | `smoke`   | Benchmark lane: `smoke`, `correctness`, or `macro`. `smoke` is the default local workflow; `correctness` is the trusted semantic lane for correctness-backed suites (`write`, `delete_update`, `merge`, `metadata`, `optimize_vacuum`, `interop_py`) and optional semantic validation on the perf-owned DML/maintenance suites; `macro` is the perf lane for macro-safe cases such as `scan`, `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds`. |
 | `--mode`             | `perf`    | Benchmark mode: `perf` records measurable timings; `assert` emits validation-only artifacts and requires `--lane correctness`                                                                                                                                                                         |
 | `--timing-phase`     | `execute` | For phase-aware suites, isolate and record `load`, `plan`, `execute`, or `validate` time in `elapsed_ms`                                                                                                                                                                                             |
 | `--warmup`           | `1`       | Warmup iterations per case (not measured)                                                                                                                                                                                                                                                            |
@@ -314,7 +375,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--base-fetch-url`           | —             | Alternate remote URL used when the base SHA is not reachable from `origin`; prefer the full 40-character SHA or set `DELTA_RS_FETCH_REF` when using abbreviated SHAs             |
 | `--candidate-fetch-url`      | —             | Alternate remote URL used when the candidate SHA is not reachable from `origin`; prefer the full 40-character SHA or set `DELTA_RS_FETCH_REF` when using abbreviated SHAs        |
 | `--current-vs-main`          | —             | Compare current checkout against upstream main                                                                                                                                      |
-| `--methodology-profile`      | —             | Load a harness-owned methodology profile from `bench/methodologies/<name>.env`. `pr-macro` is the self-hosted PR decision contract, and explicit CLI flags still override profile defaults. |
+| `--methodology-profile`      | —             | Load a harness-owned methodology profile from `bench/methodologies/<name>.env`. `pr-macro` is the self-hosted PR decision contract; `pr-write-perf`, `pr-delete-update-perf`, `pr-merge-perf`, `pr-optimize-perf`, and `pr-tpcds` are dedicated operator compare contracts; explicit CLI flags still override profile defaults. |
 | `--warmup`                   | `2`           | Warmup iterations per case                                                                                                                                                          |
 | `--iters`                    | `9`           | Measured iterations per case per run                                                                                                                                                |
 | `--prewarm-iters`            | `1`           | Unreported warmup iterations per ref                                                                                                                                                |
@@ -335,7 +396,30 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--dataset-id`               | —             | Dataset id forwarded to fixture generation and benchmark runs                                                                                                                       |
 | `--timing-phase`             | `execute`     | Timing phase forwarded to `bench.sh run`                                                                                                                                            |
 
-Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `compare_mode=decision`, `compare_runs=5`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`.
+Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes and `./scripts/run_profile.sh metadata-replay-criterion`, which resolves to `scan_replay_bench`, for replay/provider diagnostics.
+
+### `run_profile.sh` — Invoke committed methodology profiles
+
+```bash
+./scripts/run_profile.sh [--dry-run] <profile> [profile-args...]
+```
+
+`run_profile.sh` resolves the named profile from `bench/methodologies/` and dispatches it to the correct entrypoint:
+
+- compare profiles resolve to `./scripts/compare_branch.sh --methodology-profile <name> ...`
+- run profiles resolve to `./scripts/bench.sh run ...`
+- Criterion profiles resolve to `cargo bench -p delta-bench --bench <bench>`
+
+Current committed Criterion profiles:
+
+- `scan-phase-criterion` -> `scan_phase_bench`
+- `metadata-replay-criterion` -> `scan_replay_bench`
+
+Criterion profiles are diagnostic-only and intended for local or trusted self-hosted investigation. Pass extra Criterion arguments after `--` when you need a narrower filter or a saved baseline, for example `./scripts/run_profile.sh scan-phase-criterion -- scan_pruning_hit/phase/execute --save-baseline pr-base`.
+
+PR pack automation reads `bench/evidence/registry.yaml`. The currently defined pack alias is `full`, which resolves to `pr-full-decision`. `run benchmark decision full` is therefore a pack request, not a suite request, and full does not mean --suite all.
+
+`pr-full-decision` contains only `readiness=ready` suites. In plain terms, it contains only readiness=ready suites. Gated perf-owned suites move to `pr-candidate-manual` so operators can refresh manual/candidate evidence without widening PR comment automation. `pr-candidate-manual` currently carries `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds`; `tpcds` remains candidate/manual in that pack until its gates are fully closed.
 
 Compare automation artifacts are written to `results/compare/<suite>/<base_sha>__<candidate_sha>/`. The directory includes:
 
@@ -351,7 +435,9 @@ Compare automation artifacts are written to `results/compare/<suite>/<base_sha>_
 
 `manifest.json` contains these top-level keys: `suite`, `base_sha`, `candidate_sha`, `base_json`, `candidate_json`, `stdout_report`, `markdown_report`, `comparison_json`, `hash_policy_report`, `compare_mode`, `aggregation`, `noise_threshold`, `methodology_profile`, `methodology_version`, and `methodology_settings`.
 
-`methodology_settings` records the resolved compare settings used for the run: `compare_mode`, `warmup`, `iters`, `prewarm_iters`, `compare_runs`, `measure_order`, `timing_phase`, `aggregation`, `dataset_policy`, `spread_metric`, `sub_ms_threshold_ms`, and `sub_ms_policy`. For an exact `pr-macro` invocation, `methodology_profile` and `methodology_version` identify that canonical self-hosted PR macro contract. If explicit CLI overrides change any profile-owned setting, the manifest leaves those two top-level fields null and relies on `methodology_settings` to describe the effective non-canonical run.
+`methodology_settings` records the resolved compare settings used for the run: `compare_mode`, `warmup`, `iters`, `prewarm_iters`, `compare_runs`, `measure_order`, `timing_phase`, `aggregation`, `dataset_id`, `dataset_policy`, `spread_metric`, `sub_ms_threshold_ms`, and `sub_ms_policy`. For an exact `pr-macro` invocation, `methodology_profile` and `methodology_version` identify that canonical self-hosted PR macro contract. If explicit CLI overrides change any profile-owned setting, the manifest leaves those two top-level fields null and relies on `methodology_settings` to describe the effective non-canonical run.
+
+Pack automation writes an additional bundle under `results/compare/packs/<pack_id>/<base_sha>__<candidate_sha>/` with the same stable filenames: `summary.md`, `comparison.json`, `hash-policy.txt`, and `manifest.json`. Pack-level `comparison.json` flattens suite rows and adds a required `suite` field.
 
 `compare_branch.sh` keeps a clean source checkout at `.delta-rs-source/` by default for branch lookup, immutable SHA pinning, and seeding per-SHA compare checkouts. `--current-vs-main` is the one exception: it seeds the candidate prepared checkout from `DELTA_RS_DIR` so the current local HEAD remains reachable even when it is not present in the clean source checkout.
 
@@ -372,6 +458,22 @@ Decision compare accepts only schema v5 aggregated inputs and fails closed when 
 Copies the current README, key docs, manifests, and wrapper entrypoints into `results/contracts/` (or a caller-selected output directory) and writes a machine-readable `manifest.json` that records the published contract bundle and result schema version.
 
 Runs the focused trust-contract suites used to justify trustworthy PR perf claims. By default the script writes a timestamped artifact tree under `results/validation/` and stores the Markdown summary at `summary.md` inside that directory. Use `--artifact-dir` to choose a stable directory such as `results/validation/latest`.
+
+The same validator covers the candidate/manual perf-owned DML and maintenance suites too. Their operator compare entrypoints are:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf
+```
+
+Passing `--dataset-id tpcds_duckdb` enables the dedicated TPC-DS promotion gate in the same script. The primary scan and DML/maintenance validation blocks remain pinned to their own contract datasets; the flag only turns on the extra TPC-DS surface. The operator-facing invocation is:
+
+```bash
+./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate
+```
+
+Use `pr-candidate-manual` when you want the harness-owned multi-suite manual/candidate pack for gated perf suites; it is intentionally separate from the `full` PR automation alias.
 
 ### `longitudinal_bench.sh` — Longitudinal pipeline
 
@@ -451,6 +553,7 @@ These commands are the current repo-wide baseline for code, dependency, and self
 | `BENCH_STORAGE_OPTIONS`     | —       | Multi-line `KEY=VALUE` storage options                                         |
 | `BENCH_BACKEND_PROFILE`     | —       | Backend profile for script-level workflows                                     |
 | `BENCH_RUNNER_MODE`         | —       | Runner mode for script-level workflows (`rust`, `python`, `all`)               |
+| `DELTA_BENCH_BOT_DB_PATH`   | —       | Shared filesystem path for `benchmark.yml` PR bot state; must resolve on every runner that can execute queue/pack automation |
 | `BENCH_BENCHMARK_MODE`      | `perf`  | Benchmark mode for script-level workflows (`perf`, `assert`)                   |
 | `BENCH_COMPARE_FAIL_ON`     | —       | Default `--fail-on` statuses for `compare_branch.sh` / `compare.py` automation |
 | `DELTA_RS_SOURCE_DIR`       | `${RUNNER_ROOT}/.delta-rs-source` | Clean checkout used for compare ref resolution and per-SHA checkout seeding |
@@ -477,6 +580,28 @@ These are validation-only controls used by `./scripts/validate_perf_harness.sh` 
 | `DELTA_BENCH_SCAN_DELAY_PLAN_MS`     | —       | Injects a fixed delay into scan plan timing                                         |
 | `DELTA_BENCH_SCAN_DELAY_EXECUTE_MS`  | —       | Injects a fixed delay into scan execute timing                                      |
 | `DELTA_BENCH_SCAN_DELAY_VALIDATE_MS` | —       | Injects a fixed delay into scan validate timing                                     |
+
+### TPC-DS canary injection
+
+These are validation-only controls used by the dedicated `tpcds` block in `./scripts/validate_perf_harness.sh`.
+
+| Variable                         | Default | Description                                                                  |
+| -------------------------------- | ------- | ---------------------------------------------------------------------------- |
+| `DELTA_BENCH_ALLOW_TPCDS_DELAY`  | —       | Must be set to `1` before the validation-only TPC-DS execute delay is honored |
+| `DELTA_BENCH_TPCDS_DELAY_MS`     | —       | Injects a fixed delay into the validation canary execute path for `tpcds_q03` |
+
+### Perf-owned DML and maintenance canary injection
+
+These are validation-only controls used by the dedicated `delete_update_perf`, `merge_perf`, and `optimize_perf` blocks in `./scripts/validate_perf_harness.sh`.
+
+| Variable                                   | Default | Description |
+| ------------------------------------------ | ------- | ----------- |
+| `DELTA_BENCH_ALLOW_DELETE_UPDATE_PERF_DELAY` | —     | Must be set to `1` before the validation-only DML perf delay is honored |
+| `DELTA_BENCH_DELETE_UPDATE_PERF_DELAY_MS`  | —       | Injects a fixed delay into `delete_perf_scattered_5pct_small_files` |
+| `DELTA_BENCH_ALLOW_MERGE_PERF_DELAY`       | —       | Must be set to `1` before the validation-only merge perf delay is honored |
+| `DELTA_BENCH_MERGE_PERF_DELAY_MS`          | —       | Injects a fixed delay into `merge_perf_upsert_50pct` |
+| `DELTA_BENCH_ALLOW_OPTIMIZE_PERF_DELAY`    | —       | Must be set to `1` before the validation-only maintenance perf delay is honored |
+| `DELTA_BENCH_OPTIMIZE_PERF_DELAY_MS`       | —       | Injects a fixed delay into `optimize_perf_compact_small_files` |
 
 ### Fidelity and hardening
 
@@ -514,8 +639,9 @@ Legacy `rows.jsonl` / `index.json` stores are no longer a supported primary path
 | `tiny_smoke`       | sf1   | Standard        | Minimal smoke test. Fast to generate.                                    |
 | `medium_selective` | sf10  | Standard        | Medium workload with selective query patterns.                           |
 | `small_files`      | sf1   | Standard        | Many small files for optimize/vacuum testing.                            |
-| `many_versions`    | sf1   | ManyVersions    | Creates 12 commits to build version history.                             |
 | `tpcds_duckdb`     | sf1   | TpcdsDuckdb     | TPC-DS `store_sales` sourced from DuckDB. Requires `python3` + `duckdb`. |
+
+`tiny_smoke` is the fast setup and smoke dataset. The self-hosted `pr-macro` compare profile deliberately upgrades branch comparison to `medium_selective` so the authoritative macro scan cases spend more time doing real scan work and less time in timer-noise territory.
 
 Exact-result manifest hashes are authored against the default `tiny_smoke` corpus. When you run with another dataset id, the harness keeps schema validation enabled but relaxes exact-result hash assertions at runtime because scale/profile changes legitimately alter row-level digests.
 
@@ -532,7 +658,6 @@ Exact-result manifest hashes are authored against the default `tiny_smoke` corpu
 | Profile      | Used by                                         | Behavior                                                                    |
 | ------------ | ----------------------------------------------- | --------------------------------------------------------------------------- |
 | Standard     | `tiny_smoke`, `medium_selective`, `small_files` | Normal fixture generation                                                   |
-| ManyVersions | `many_versions`                                 | Creates 12 append commits to build a Delta version history                  |
 | TpcdsDuckdb  | `tpcds_duckdb`                                  | Loads TPC-DS data via DuckDB `dsdgen`, exports through CSV, writes to Delta |
 
 ## Fixture Tables
@@ -549,6 +674,9 @@ All fixture tables are generated under `<fixtures_dir>/<scale>/`.
 | Optimize small files      | `optimize_small_files_delta`      | Small files for compaction testing              |
 | Optimize compacted        | `optimize_compacted_delta`        | Already-compacted table for no-op optimize test |
 | Vacuum ready              | `vacuum_ready_delta`              | Table with expired files for vacuum testing     |
+| Metadata long history     | `metadata_long_history_delta`     | Long uncheckpointed metadata/log replay history |
+| Metadata checkpointed     | `metadata_checkpointed_delta`     | Comparable metadata head load with checkpoint hint |
+| Metadata uncheckpointed   | `metadata_uncheckpointed_delta`   | Comparable metadata head load without checkpoint hint |
 | TPC-DS store_sales        | `tpcds/store_sales`               | TPC-DS `store_sales` table                      |
 
 Additional fixture artifacts:

@@ -42,7 +42,9 @@ The harness is organized into three layers: execution, comparison/analysis, and 
 
 | Component                    | Description                                                                                                                       |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `bench/methodologies/*.env`  | Harness-owned compare contracts and Criterion diagnostic profiles. Criterion profiles are local or trusted self-hosted only and never authoritative PR evidence. |
 | `python/delta_bench_compare` | Result comparison and rendering. Reads schema v5 JSON and enforces strict compatibility identity for compare and aggregation. |
+| `bench/evidence/registry.yaml` | Harness-owned evidence policy and pack definitions used by PR comment automation.                                         |
 | `python/delta_bench_interop` | Python interop benchmark cases using pandas, polars, and pyarrow.                                                                 |
 | `python/delta_bench_tpcds`   | DuckDB-backed `store_sales` fixture generation script for the `tpcds_duckdb` dataset.                                             |
 
@@ -60,7 +62,7 @@ The harness is organized into three layers: execution, comparison/analysis, and 
 | `scripts/security_check.sh`                                                | Preflight guardrails for mode, network, and egress policy.                                                                        |
 | `scripts/provision_runner.sh`                                              | Terraform orchestration wrapper for runner provisioning.                                                                          |
 | `.github/workflows/ci.yml`                                                 | Enforces the shared Rust/Python test baseline and runs hosted smoke/correctness benchmark validation on pushes and pull requests. |
-| `.github/workflows/benchmark*.yml`, `.github/workflows/longitudinal-*.yml` | Self-hosted benchmark workflows that enforce runner preflight before branch comparison or `run-matrix`.                           |
+| `.github/workflows/benchmark*.yml`, `.github/workflows/longitudinal-*.yml` | Self-hosted benchmark workflows that enforce runner preflight before branch comparison, pack fan-out, or `run-matrix`.            |
 
 ## Data Flow
 
@@ -74,19 +76,19 @@ Benchmark execution follows this pipeline:
 
 GitHub-hosted CI stays on smoke and correctness lanes. Self-hosted infrastructure is the only authorized path for macro perf, decision compare, Criterion microbench, and longitudinal ingestion.
 
-4. **Result output.** Each suite writes a schema v5 JSON file to `results/<label>/<suite>.json`. Context carries lane, benchmark mode, fixture recipe, harness revision, and fidelity identity. Cases also carry run summaries, compatibility keys, and `perf_status`. Correctness-tagged cases requested in macro lane remain operationally runnable but are emitted with `perf_status=validation_only` so they cannot be compared or reported as trusted perf evidence.
+4. **Result output.** Each suite writes a schema v5 JSON file to `results/<label>/<suite>.json`. Context carries lane, benchmark mode, fixture recipe, harness revision, and fidelity identity. Cases also carry run summaries, compatibility keys, and `perf_status`. Legacy correctness-tagged cases requested in macro lane remain operationally runnable but are emitted with `perf_status=validation_only` so they cannot be compared or reported as trusted perf evidence. Dedicated perf-owned suites such as `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds` keep separate suite ids so they can own their own methodology and readiness gates.
 
-5. **Comparison (optional).** `compare.py` reads baseline and candidate schema v5 JSON files, rejects invalid or mismatched contexts, and supports three render formats: text, markdown, and a versioned JSON payload with explicit machine status fields. `compare_branch.sh` prepares one checkout per pinned SHA under `.delta-bench-compare-checkouts/` so repeated runs reuse the same synced worktree. Exploratory mode can run with the default three measured runs; decision mode fails closed unless both sides provide at least five runs. Named methodology profiles let the harness pin that contract centrally; the self-hosted PR decision path uses `--methodology-profile pr-macro`, which fixes `iqr_ms` as the spread metric and marks sub-millisecond rows as `decision_scope=micro_only`.
+5. **Comparison (optional).** `compare.py` reads baseline and candidate schema v5 JSON files, rejects invalid or mismatched contexts, and supports three render formats: text, markdown, and a versioned JSON payload with explicit machine status fields. `compare_branch.sh` prepares one checkout per pinned SHA under `.delta-bench-compare-checkouts/` so repeated runs reuse the same synced worktree. Exploratory mode can run with the default three measured runs; decision mode fails closed unless both sides provide at least five runs. Named methodology profiles let the harness pin that contract centrally; the self-hosted PR decision path uses `--methodology-profile pr-macro`, which fixes the `medium_selective` dataset, seven measured runs, 15 iterations per run, `iqr_ms` as the spread metric, and `decision_scope=micro_only` for sub-millisecond rows. Candidate/manual perf-owned DML and maintenance surfaces (`pr-delete-update-perf`, `pr-merge-perf`, `pr-optimize-perf`) also route through the same compare path, but remain gated in the evidence registry until their same-SHA and canary evidence is refreshed.
 
-6. **Security validation.** `security_check.sh` validates fidelity invariants (run mode, network, egress). Self-hosted GitHub Actions workflows enforce this preflight before branch comparison and longitudinal execution. Current automated perf collection is self-hosted, macro-only, and curated to `scan`; GitHub-hosted CI is limited to smoke/correctness validation. PR comments split into exploratory (`run benchmark scan`) and decision (`run benchmark decision scan`) paths, and the decision path resolves to `./scripts/compare_branch.sh --methodology-profile pr-macro ...` on the hardened runner fleet.
+6. **Security validation.** `security_check.sh` validates fidelity invariants (run mode, network, egress). Self-hosted GitHub Actions workflows enforce this preflight before branch comparison, pack planning, shard execution, and longitudinal execution. Current automated perf collection is self-hosted, macro-only, and curated through the registry in `bench/evidence/registry.yaml`; GitHub-hosted CI is limited to smoke/correctness validation. PR comments split into exploratory (`run benchmark scan`), single-suite decision (`run benchmark decision scan`), queue inspection (`show benchmark queue`), and pack decision (`run benchmark decision full`) paths. The `full` command resolves the `pr-full-decision` pack, full does not mean --suite all, and that pack contains only `readiness=ready` suites. `pr-candidate-manual` keeps gated perf-owned suites available for operator reruns without routing them through PR comment automation; it now carries `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds`. Queue/pack state lives in a SQLite DB pointed to by `DELTA_BENCH_BOT_DB_PATH`, and that path must resolve on every runner that can pick up `benchmark.yml`.
 
-7. **Report output.** The compare workflow produces grouped text output and a sidecar artifact bundle under `results/compare/<suite>/<base>__<candidate>/`, including `summary.md`, `comparison.json`, `hash-policy.txt`, and `manifest.json`.
+7. **Report output.** The compare workflow produces grouped text output and a sidecar artifact bundle under `results/compare/<suite>/<base>__<candidate>/`, including `summary.md`, `comparison.json`, `hash-policy.txt`, and `manifest.json`. Pack aggregation writes the same stable filenames under `results/compare/packs/<pack_id>/<base>__<candidate>/`, with pack-level `comparison.json` flattening suite rows and adding a `suite` field.
 
 8. **Longitudinal matrix checkpointing (optional).** `run-matrix` writes `matrix-state.json` through an atomic temp-file replace. The state file records per-cell progress plus a configuration fingerprint so resume only happens against the same suite/scale/lane/output contract.
 
 9. **Longitudinal ingest, reporting, and retention (optional).** `ingest-results` normalizes schema v5 suite outputs into a SQLite store. Reporting uses explicit stored compatibility identity fields, `benchmark_mode`, and `compatibility_key` rather than just `suite/scale/case`, and the pipeline rejects legacy `rows.jsonl` / `index.json`-only stores to avoid silent split state.
 
-10. **Criterion decision lane (optional).** `cargo bench -p delta-bench --bench scan_phase_bench` runs phase-isolated microbenchmarks for PR-sensitive scan paths using Criterion `iter_batched` loops so setup stays outside the timed phase.
+10. **Criterion diagnostic lane (optional).** `./scripts/run_profile.sh scan-phase-criterion` and `./scripts/run_profile.sh metadata-replay-criterion` run the currently committed Criterion families, resolving to `scan_phase_bench` and `scan_replay_bench`. These microbenches stay local or trusted self-hosted diagnostics only: they never become authoritative PR evidence, never enter `bench/evidence/registry.yaml` packs, and never route through `compare_branch.sh`, PR comment automation, or longitudinal ingest. `scan_pruning_hit` moved here because it is too small/cache-sensitive for the authoritative macro manifest, and replay/provider work belongs on the dedicated metadata/replay probe rather than on the correctness-only `metadata` suite.
 11. **Trust validation (operator step).** `validate_perf_harness.sh` reruns the focused trust-contract suites before the operator treats a machine/workflow as trustworthy for PR perf claims.
 
 Marketplace datasets are a document-only path: place externally provisioned Delta tables under the expected `fixtures/<scale>/...` roots.
@@ -118,29 +120,38 @@ Different suites populate different subsets of the metrics:
 | ---------------------------------- | ------------------------------------------------------------------ |
 | `scan`                             | `files_scanned`, `files_pruned`, `bytes_scanned`, `scan_time_ms`   |
 | `merge`                            | `files_scanned`, `files_pruned`, `scan_time_ms`, `rewrite_time_ms` |
+| `merge_perf`                       | `files_scanned`, `files_pruned`, `scan_time_ms`, `rewrite_time_ms` |
+| `delete_update_perf`               | `files_scanned`, `scan_time_ms`, `rewrite_time_ms`                 |
 | `optimize_vacuum` (optimize cases) | `files_scanned` (considered), `files_pruned` (skipped)             |
+| `optimize_perf`                    | `files_scanned` (considered), `files_pruned` (skipped)             |
 
 ## Benchmark Coverage
 
 The harness covers these operation categories with specific contrast cases:
 
-- **scan** includes pruning contrast in the suite implementation: `scan_pruning_hit` vs `scan_pruning_miss` measures the impact of partition pruning, but the authoritative macro decision manifest currently enables only `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_miss` is disabled until its exact-result contract is requalified.
+- **scan** includes pruning contrast in the suite implementation: `scan_pruning_hit` vs `scan_pruning_miss` measures the impact of partition pruning, but the authoritative macro decision manifest now enables only `scan_full_narrow`, `scan_projection_region`, and `scan_filter_flag` on `medium_selective`. `scan_pruning_hit` moved to Criterion microbench coverage because it is too small/cache-sensitive for normal macro verdicts, and `scan_pruning_miss` is disabled until its exact-result contract is requalified.
 - **merge** includes a localized partition-aware case: `merge_localized_1pct` tests merge performance when a partition predicate narrows the scan scope.
+- **merge_perf** freezes the initial perf-owned merge evidence set around `merge_perf_upsert_10pct`, `merge_perf_upsert_50pct`, `merge_perf_localized_1pct`, and `merge_perf_delete_5pct` so correctness runs and perf evidence stay separate.
+- **delete_update_perf** freezes the initial perf-owned DML evidence set around localized delete, scattered small-file delete, scattered literal update, and full-table expression update.
 - **optimize_vacuum** includes noop-vs-heavy contrast: `optimize_noop_already_compact` vs `optimize_heavy_compaction` to measure compaction overhead when there is nothing to do vs aggressive compaction.
-
-For the complete list of all 35 benchmark cases across 8 suites, see [Reference](reference.md#benchmark-suites-and-cases).
+- **optimize_perf** keeps a narrower perf-owned maintenance surface: small-file compaction, noop compact, and vacuum execute.
+For the complete list of benchmark suites and cases documented for operators, see [Reference](reference.md#benchmark-suites-and-cases).
 
 ## Reproducibility Controls
 
 These mechanisms ensure that benchmark results are comparable across runs:
 
 - **Deterministic fixtures.** Seed-based data generation produces identical tables regardless of when or where you run.
+- **Dataset separation by purpose.** `tiny_smoke` stays optimized for setup/smoke validation, while `pr-macro` intentionally promotes branch compare onto the larger deterministic `medium_selective` dataset.
 - **Checkout locking.** Prepare/compare flows serialize access to the mutable `.delta-rs-under-test` checkout and the clean `.delta-rs-source` checkout so concurrent control-plane actions cannot corrupt compare pinning or checkout reuse.
 - **Deterministic manifest ordering.** The `core-rust` and `core-python` manifests define a fixed case execution order.
 - **Single-machine comparisons.** Branch comparisons run both refs on the same hardware to eliminate machine-to-machine variance.
 - **Prewarm runs.** Optional unreported iterations stabilize caches and thermal state before measurement begins.
 - **Multi-run aggregation.** Multiple measured runs per ref are aggregated (default: median) before change classification.
-- **Named methodology profiles.** Harness-owned profiles such as `pr-macro` keep self-hosted PR decision settings stable across bot runs while still allowing explicit local flag overrides.
+- **Named methodology profiles.** Harness-owned profiles such as `pr-macro` keep self-hosted PR decision settings stable across bot runs while still allowing explicit local flag overrides. Planning-focused profiles stay investigation-grade and should not be substituted for the default execute-path PR contract.
+- **Separate correctness and perf suite ids.** `delete_update`, `merge`, and `optimize_vacuum` remain correctness-owned, while `delete_update_perf`, `merge_perf`, and `optimize_perf` own the candidate/manual perf compare contracts.
+- **Explicit self-hosted fixture provisioning.** Promotion-grade `tpcds` evidence assumes the DuckDB-backed `tpcds_duckdb` fixture tree is already present on every trusted self-hosted runner before the compare starts.
+- **Separated evidence surfaces.** `scan` remains the execute-path guardrail. Criterion profiles such as `scan-phase-criterion` and `metadata-replay-criterion` stay diagnostic-only and separate from authoritative PR evidence.
 - **Configurable run order.** `base-first`, `candidate-first`, or `alternate` ordering to reduce systematic bias from execution order.
 - **Stable thresholds.** Default no-change threshold of `0.05` (5%) prevents false positives from normal measurement noise.
 - **Explicit decision scope.** Compare output marks sub-millisecond rows as `decision_scope=micro_only` and renders them under `Out of Scope (micro only)` instead of counting them as normal macro regressions or improvements.
@@ -172,6 +183,12 @@ Runtime configuration:
 | `DELTA_BENCH_DUCKDB_PYTHON`           | `python3` | Python executable for DuckDB        |
 | `DELTA_BENCH_TPCDS_DUCKDB_SCRIPT`     | —         | Override path to generation script  |
 | `DELTA_BENCH_TPCDS_DUCKDB_TIMEOUT_MS` | `600000`  | Timeout for generation (10 minutes) |
+
+Trusted self-hosted runner contract:
+
+- Pre-provision the shared fixture root before collecting `pr-tpcds` evidence, typically with `DELTA_BENCH_FIXTURES=/var/lib/delta-bench/fixtures`.
+- The expected table path is `/var/lib/delta-bench/fixtures/sf1/tpcds/store_sales`.
+- `tpcds_q72` stays outside the PR decision surface until DataFusion parity exists.
 
 ### Marketplace datasets
 

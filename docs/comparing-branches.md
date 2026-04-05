@@ -19,6 +19,16 @@ Branch comparison answers the question: "did my change make things faster, slowe
 
 Use it before merging PRs, validating optimizations, or making release decisions. For tracking performance across many revisions over time, use [Longitudinal Benchmarking](longitudinal.md) instead.
 
+Choose the benchmark surface based on the path you changed:
+
+- Use `scan` plus the self-hosted `pr-macro` profile when the suspected effect is on query execution or Parquet reads.
+- Use `write_perf` plus the self-hosted `pr-write-perf` profile when the suspected effect is on write throughput, partition fanout, or file-creation cost.
+- Use `delete_update_perf` plus `pr-delete-update-perf` when the suspected effect is on delete/update rewrite cost, file churn, or scattered-vs-localized DML behavior.
+- Use `merge_perf` plus `pr-merge-perf` when the suspected effect is on merge upsert/delete cost, file pruning, or partition-aware merge execution.
+- Use `optimize_perf` plus `pr-optimize-perf` when the suspected effect is on compaction or vacuum maintenance work.
+- Use `tpcds` plus the self-hosted `pr-tpcds` profile when the suspected effect is on analytical execute-path behavior against the DuckDB-backed `store_sales` corpus.
+- Use Criterion as the local diagnostic signal when replay/provider work or scan-internal timings stay sub-millisecond or too noisy for compare classification. That signal is never authoritative PR evidence.
+
 ## Quick Start: Compare Your Branch Against Main
 
 The fastest way to compare your current checkout against upstream `main`:
@@ -35,11 +45,58 @@ For self-hosted PR evidence, load the harness-owned methodology profile instead 
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-macro scan
 ```
 
-The compare pipeline runs the macro lane in `--mode perf`. By default `compare_branch.sh` uses `--compare-mode exploratory`, which works for same-machine investigation but not automatic pass/fail decisions. `--methodology-profile pr-macro` resolves the current PR decision contract: `compare_mode=decision`, `compare_runs=5`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only` for rows where both sides stay below the configured sub-millisecond threshold.
+For write-path investigation on the current self-hosted operator contract, use:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf
+```
+
+For DML and maintenance investigation on the new perf-owned candidate/manual surfaces, use:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf
+```
+
+For TPC-DS investigation on the dedicated self-hosted operator contract, use:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds
+```
+
+The compare pipeline runs the macro lane in `--mode perf`. By default `compare_branch.sh` uses `--compare-mode exploratory`, which works for same-machine investigation but not automatic pass/fail decisions. `--methodology-profile pr-macro` resolves the current PR decision contract: `dataset_id=medium_selective`, `compare_mode=decision`, `warmup=2`, `iters=15`, `prewarm_iters=1`, `compare_runs=7`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only` for rows where both sides stay below the configured sub-millisecond threshold.
+
+`--methodology-profile pr-write-perf` resolves the write-path contract: `compare_mode=decision`, `dataset_id=null`, `dataset_policy=intrinsic_case_workload`, `warmup=1`, `iters=7`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. That profile is the operator path for `write_perf`, but the registry still keeps `write_perf` gated until same-SHA stability, delayed-canary validation, and runtime signoff are complete.
+
+`--methodology-profile pr-delete-update-perf`, `pr-merge-perf`, and `pr-optimize-perf` resolve the initial perf-owned DML and maintenance contracts. All three fix `dataset_id=medium_selective`, record `dataset_policy=shared_run_scope`, and use decision-mode compare defaults with five measured runs per side. They are candidate/manual surfaces first: the legacy `delete_update`, `merge`, and `optimize_vacuum` suites remain correctness-only, while the dedicated perf-owned counterparts stay gated until same-SHA stability, delayed-canary validation, runtime signoff, and one stable case-list refresh cycle are all complete.
+
+`--methodology-profile pr-tpcds` resolves the TPC-DS contract: `dataset_id=tpcds_duckdb`, `compare_mode=decision`, `warmup=1`, `iters=5`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. Use it only on trusted self-hosted runners with the DuckDB-backed fixture tree provisioned ahead of time. `tpcds_q72` remains outside the PR decision surface, and the suite stays gated in `bench/evidence/registry.yaml` until fixture provisioning plus validation signoff evidence exists. Refresh the dedicated gate with `./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate`.
+
+Criterion profiles live in the same `bench/methodologies/` directory, but `compare_branch.sh` intentionally rejects `PROFILE_KIND=criterion`. Invoke them through `./scripts/run_profile.sh scan-phase-criterion` or `./scripts/run_profile.sh metadata-replay-criterion` instead. `metadata-replay-criterion` resolves to `scan_replay_bench`, and both committed profiles stay diagnostic-only rather than authoritative PR evidence.
 
 Before treating a machine or workflow as trustworthy for perf claims, rerun `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
 
-> **Automation scope.** PR comments support `run benchmark scan` (exploratory) and `run benchmark decision scan` (decision-grade). The decision path runs `./scripts/compare_branch.sh --methodology-profile pr-macro ...` on self-hosted hardware. Automated macro perf is curated to `scan` only — specifically `scan_full_narrow`, `scan_projection_region`, `scan_filter_flag`, and `scan_pruning_hit`. `scan_pruning_hit` is requalified on the current `tiny_smoke` contract; `scan_pruning_miss` remains disabled until it is requalified. Stateful Rust suites are correctness-trusted; forcing them through macro lane produces operational but not `perf_status=trusted` results. GitHub-hosted CI stays on smoke and correctness lanes.
+> **Automation scope.** PR comments support `run benchmark scan` (exploratory), `run benchmark decision scan` (decision-grade), `run benchmark decision full`, and `show benchmark queue`. The single-suite decision path runs `./scripts/compare_branch.sh --methodology-profile pr-macro ...` on self-hosted hardware. The `full` command resolves the harness-owned `pr-full-decision` pack from `bench/evidence/registry.yaml`; full does not mean --suite all, and `pr-full-decision` contains only `readiness=ready` suites. Operators can still batch gated perf suites through `pr-candidate-manual`; that candidate/manual pack now includes `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds`. The legacy `metadata`, `delete_update`, `merge`, and `optimize_vacuum` suites stay correctness-only, so forcing those originals through macro lane still produces operational but not `perf_status=trusted` results. `scan_pruning_hit` moved to Criterion microbench coverage because it is too small/cache-sensitive to treat as a normal macro verdict row. `scan_pruning_miss` remains disabled until it is requalified. GitHub-hosted CI stays on smoke and correctness lanes.
+
+## Replay-State Probes
+
+Keep the execute-phase guardrail and the replay-state investigation probe separate.
+
+Use the public `scan` contract for the product-facing PR verdict, then run the narrower replay/provider engineering probe separately:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-macro scan
+./scripts/run_profile.sh metadata-replay-criterion
+```
+
+`metadata-replay-criterion` resolves to `scan_replay_bench`. It is investigation-grade, isolates snapshot/provider replay work behind the existing scan replay bench, and does not replace the macro `scan` compare surface or enter PR verdict logic.
+
+Operator rule set:
+
+- Replay/provider investigations: run `scan` with `pr-macro`, then run `./scripts/run_profile.sh metadata-replay-criterion` when the regression smells replay- or provider-local.
+- Execute-path PRs: run `scan` with `pr-macro`.
+- Mixed PRs: run the public compare surface first, then any relevant Criterion probes, and report the Criterion output separately.
 
 ## Comparison Methods
 
@@ -57,7 +114,15 @@ Use this when you want to check your branch against main without specifying exac
 
 Use `--methodology-profile <name>` to load harness-owned compare defaults from `bench/methodologies/<name>.env`. Explicit CLI flags still win, so local operators can override a profile for ad hoc investigation without editing the profile itself. If an invocation changes any profile-owned setting explicitly, `manifest.json` keeps the resolved `methodology_settings` but omits canonical `methodology_profile` and `methodology_version` so the artifact cannot be mistaken for an exact `pr-macro` run.
 
-`pr-macro` is the current self-hosted PR decision profile. It resolves to decision mode, five measured runs per ref, median aggregation, `iqr_ms` spread reporting, and `micro_only` decision scope for sub-millisecond rows that should stay out of macro regression counts.
+`pr-macro` is the current self-hosted PR decision profile. It resolves to the deterministic `medium_selective` local-disk dataset, decision mode, seven measured runs per ref, 15 measured iterations per run, median aggregation, `iqr_ms` spread reporting, and `micro_only` decision scope for sub-millisecond rows that should stay out of macro regression counts.
+
+`pr-write-perf` is the write-path operator profile. It keeps `dataset_id` intentionally unset because the workload lives in the case ids themselves, and records `dataset_policy=intrinsic_case_workload` so the compare manifest makes that contract explicit. Use it for trusted self-hosted `write_perf` evidence and rerun `./scripts/validate_perf_harness.sh --artifact-dir results/validation/write-perf-gate` before enabling bot-default decision runs.
+
+`pr-delete-update-perf`, `pr-merge-perf`, and `pr-optimize-perf` are the perf-owned DML and maintenance operator profiles. They all fix `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. Use them for candidate/manual evidence refreshes on `delete_update_perf`, `merge_perf`, and `optimize_perf`; the underlying correctness suites remain correctness-only and are not perf evidence.
+
+`pr-tpcds` is the TPC-DS operator profile. It fixes `dataset_id=tpcds_duckdb`, expects the fixture root to exist on trusted self-hosted runners before the compare begins, and keeps `tpcds_q72` outside the PR decision surface. Use it for dedicated TPC-DS evidence and rerun `./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate` before treating the output as promotion evidence.
+
+The PR pack registry lives in `bench/evidence/registry.yaml`. `pr-full-decision` maps the `full` alias to the ready PR decision surface only and contains only `readiness=ready` suites. `pr-candidate-manual` collects gated perf-owned suites for operator-run evidence refreshes: `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds`. `tpcds` remains candidate/manual there and stays out of PR comment automation until its gates are closed.
 
 ### Named branch-to-branch
 
@@ -81,6 +146,7 @@ Pin both sides to exact commit SHAs for fully reproducible results:
 ./scripts/compare_branch.sh \
   --base-sha 5a0c8d7f3f2d9d42fdd9414f1ce2af319e0c52e1 \
   --candidate-sha 8c6170f1de4af5e2d3336b4fce8a9896af4d9b90 \
+  --methodology-profile pr-macro \
   scan
 ```
 
@@ -93,6 +159,7 @@ If a trusted PR head SHA lives on a fork remote instead of `origin`, pass the fo
   --base-sha 5a0c8d7f3f2d9d42fdd9414f1ce2af319e0c52e1 \
   --candidate-sha 8c6170f1de4af5e2d3336b4fce8a9896af4d9b90 \
   --candidate-fetch-url https://github.com/example/delta-rs \
+  --methodology-profile pr-macro \
   scan
 ```
 
@@ -106,6 +173,26 @@ By default compare keeps two local delta-rs roots with different responsibilitie
 This means compare no longer requires `.delta-rs-under-test/` to stay clean between runs.
 
 `--current-vs-main` is the one exception to the seeding rule: its candidate prepared checkout is fetched from `.delta-rs-under-test/` so the current local HEAD remains reachable even when it has not been copied into `.delta-rs-source/`.
+
+### Criterion microbench compare
+
+Use the Criterion lane for tiny or highly cache-sensitive scan cases that should not drive the normal PR macro verdict. Today that means `scan_pruning_hit`. Run these profiles on the same local or trusted self-hosted host, treat them as diagnostic-only, and report them separately from any authoritative PR evidence.
+
+The committed Criterion entrypoints are:
+
+```bash
+./scripts/run_profile.sh scan-phase-criterion
+./scripts/run_profile.sh metadata-replay-criterion
+```
+
+Run the first command on the pinned base checkout, then run the second command on the pinned candidate checkout:
+
+```bash
+./scripts/run_profile.sh scan-phase-criterion -- scan_pruning_hit/phase/execute --save-baseline pr-base
+./scripts/run_profile.sh scan-phase-criterion -- scan_pruning_hit/phase/execute --baseline pr-base
+```
+
+This keeps the micro case observable with Criterion’s own statistics while leaving `compare_branch.sh --methodology-profile pr-macro` focused on macro-safe scan coverage. Criterion baselines stay outside `bench/evidence/registry.yaml` packs, PR comment automation, and longitudinal ingest.
 
 ## What Compare Does Under the Hood
 
@@ -131,7 +218,7 @@ These flags control the measurement itself:
 | `--warmup`          | `2`           | Warmup iterations per case (not measured).                                                                                                    |
 | `--iters`           | `9`           | Measured iterations per case per run.                                                                                                         |
 | `--prewarm-iters`   | `1`           | Unreported warmup iterations per ref (run before any measured iterations).                                                                    |
-| `--compare-runs`    | `3`           | Number of independent measured runs per ref before aggregation. Exploratory mode can use this default; decision mode hard-requires at least `5`. |
+| `--compare-runs`    | `3`           | Number of independent measured runs per ref before aggregation. Exploratory mode can use this default; decision mode hard-requires at least `5`, and `pr-macro` raises it to `7`. |
 | `--measure-order`   | `alternate`   | Run interleaving: `base-first`, `candidate-first`, or `alternate`.                                                                            |
 | `--aggregation`     | `median`      | How to pick the representative sample: `min`, `median`, or `p95`.                                                                             |
 | `--noise-threshold` | `0.05`        | Minimum relative change to classify as regression or improvement.                                                                             |
@@ -139,7 +226,7 @@ These flags control the measurement itself:
 | `--compare-mode`    | `exploratory` | Comparison policy: `exploratory` for investigation, `decision` for run-level bootstrap classification on schema v5 payloads.                  |
 | `--fail-on`         | —             | Comma-separated compare statuses that should exit non-zero after rendering (used by decision automation).                                     |
 | `--mode`            | `perf`        | Benchmark mode forwarded to `bench.sh run`. Branch comparison should stay on `perf`.                                                          |
-| `--dataset-id`      | —             | Dataset id forwarded to fixture generation and benchmark runs.                                                                                |
+| `--dataset-id`      | —             | Dataset id forwarded to fixture generation and benchmark runs. `pr-macro` defaults this to `medium_selective`.                              |
 | `--timing-phase`    | `execute`     | Isolated timing phase for phase-aware suites.                                                                                                 |
 
 Profiles only supply defaults. If you pass `--compare-runs`, `--aggregation`, or other compare knobs explicitly, those values override the methodology profile for that invocation. Once you do that, the compare manifest still records the resolved settings but drops canonical profile identity because the run no longer matches the exact harness-owned contract.
@@ -214,9 +301,9 @@ Decision-grade command with the current explicit trust contract:
   scan
 ```
 
-Use `scan` for decision-grade automation today. `tpcds` remains manual until fixture provisioning is explicit, and stateful Rust suites remain decision-invalid in macro lane because their trusted path is the correctness lane.
-`pr-macro` currently resolves to `warmup=2`, `iters=9`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`.
-Within `scan`, the manifest-backed authoritative set excludes `scan_pruning_miss` until that case is requalified; do not treat exploratory output for that case as decision evidence.
+Use `scan` for decision-grade automation today. `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds` are still candidate/manual until their promotion gates close, and the legacy stateful Rust suites remain decision-invalid in macro lane because their trusted path is the correctness lane.
+`pr-macro` currently resolves to `dataset_id=medium_selective`, `warmup=2`, `iters=15`, `prewarm_iters=1`, `compare_runs=7`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`.
+Within `scan`, the manifest-backed authoritative macro set is `scan_full_narrow`, `scan_projection_region`, and `scan_filter_flag`. `scan_pruning_hit` is microbench-only, and `scan_pruning_miss` remains disabled until that case is requalified; do not treat either as normal macro decision evidence.
 
 Freshness rules for trustworthy compare output:
 

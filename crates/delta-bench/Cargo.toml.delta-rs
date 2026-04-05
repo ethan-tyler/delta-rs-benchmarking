@@ -13,6 +13,8 @@ description = "Macro benchmark runner for delta-rs"
 [dependencies]
 deltalake-core = { path = "../core", features = ["datafusion", "cloud"] }
 
+bytes = "1"
+futures = "0.3"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -32,3 +34,8 @@ serde_yaml = "0.9"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+criterion = "0.5"
+
+[[bench]]
+name = "metadata_log_bench"
+harness = false

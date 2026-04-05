@@ -72,7 +72,7 @@ For phase-aware suites, use `--timing-phase load|plan|execute|validate` to selec
 
 Authoritative decision runs use `scan_full_narrow`, `scan_projection_region`, and `scan_filter_flag` on the deterministic `medium_selective` dataset. `scan_pruning_hit` is intentionally excluded from the macro decision manifest and belongs in Criterion microbench coverage because it is routinely too small/cache-sensitive on local disk. `scan_pruning_miss` is listed for exploratory review but stays disabled in `bench/manifests/core_rust.yaml` until its exact-result assertion is requalified.
 
-Use `scan` as the execute-phase guardrail. For scan-internal planning or execution probes, pair it with `./scripts/run_profile.sh scan-phase-criterion`. For snapshot/provider replay diagnostics, use `./scripts/run_profile.sh metadata-replay-criterion`. Criterion output is diagnostic-only and should be reported separately from authoritative PR evidence.
+Use `scan` as the execute-phase guardrail. For scan-internal planning or execution probes, pair it with `./scripts/run_profile.sh scan-phase-criterion`. For snapshot/provider replay diagnostics, use `./scripts/run_profile.sh metadata-replay-criterion`. For log parsing or snapshot materialization internals, use `./scripts/run_profile.sh metadata-log-criterion`. Criterion output is diagnostic-only and should be reported separately from authoritative PR evidence.
 
 ### write (3 cases)
 
@@ -211,13 +211,13 @@ Python interop benchmarks testing roundtrip and scan performance through Python 
 
 Criterion profiles are for local or trusted self-hosted investigation only. They are diagnostic-only, never authoritative PR evidence, and do not enter `bench/evidence/registry.yaml` packs, `compare_branch.sh`, PR comment automation, or longitudinal ingest.
 
-Use `./scripts/run_profile.sh <profile>` for committed Criterion entrypoints. Planned families are listed here so the diagnostic contract stays explicit as coverage expands without widening PR decision scope.
+Use `./scripts/run_profile.sh <profile>` for committed Criterion entrypoints. Existing and planned families are listed here so the diagnostic contract stays explicit as coverage expands without widening PR decision scope.
 
 | Family | Status | Profile | Bench file | Intended use |
 | --- | --- | --- | --- | --- |
 | `scan_phase` | Existing | `scan-phase-criterion` | `scan_phase_bench.rs` | Phase-isolated scan microbench for `scan_filter_flag`, `scan_projection_region`, and `scan_pruning_hit` |
 | `metadata_replay` | Existing | `metadata-replay-criterion` | `scan_replay_bench.rs` | Snapshot/provider replay probes for the existing scan replay bench |
-| `metadata_log` | Planned | `metadata-log-criterion` (planned) | `metadata_log_bench.rs` | Log parsing and snapshot materialization internals |
+| `metadata_log` | Existing | `metadata-log-criterion` | `metadata_log_bench.rs` | Log parsing and snapshot materialization internals |
 | `file_selection` | Planned | `file-selection-criterion` (planned) | `file_selection_bench.rs` | Shared delete/update file-finding and predicate-selection internals |
 | `merge_filter` | Planned | `merge-filter-criterion` (planned) | `merge_filter_bench.rs` | Merge early-filter and placeholder-expansion planning |
 | `optimize_plan` | Planned | `optimize-plan-criterion` (planned) | `optimize_plan_bench.rs` | Compaction planning and file-selection internals |
@@ -396,7 +396,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--dataset-id`               | —             | Dataset id forwarded to fixture generation and benchmark runs                                                                                                                       |
 | `--timing-phase`             | `execute`     | Timing phase forwarded to `bench.sh run`                                                                                                                                            |
 
-Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes and `./scripts/run_profile.sh metadata-replay-criterion`, which resolves to `scan_replay_bench`, for replay/provider diagnostics.
+Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes, `./scripts/run_profile.sh metadata-replay-criterion` for replay/provider diagnostics, and `./scripts/run_profile.sh metadata-log-criterion`, which resolves to `metadata_log_bench`, for metadata/log internals.
 
 ### `run_profile.sh` — Invoke committed methodology profiles
 
@@ -414,6 +414,7 @@ Current committed Criterion profiles:
 
 - `scan-phase-criterion` -> `scan_phase_bench`
 - `metadata-replay-criterion` -> `scan_replay_bench`
+- `metadata-log-criterion` -> `metadata_log_bench`
 
 Criterion profiles are diagnostic-only and intended for local or trusted self-hosted investigation. Pass extra Criterion arguments after `--` when you need a narrower filter or a saved baseline, for example `./scripts/run_profile.sh scan-phase-criterion -- scan_pruning_hit/phase/execute --save-baseline pr-base`.
 

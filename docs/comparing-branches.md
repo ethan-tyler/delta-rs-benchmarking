@@ -27,7 +27,7 @@ Choose the benchmark surface based on the path you changed:
 - Use `merge_perf` plus `pr-merge-perf` when the suspected effect is on merge upsert/delete cost, file pruning, or partition-aware merge execution.
 - Use `optimize_perf` plus `pr-optimize-perf` when the suspected effect is on compaction or vacuum maintenance work.
 - Use `tpcds` plus the self-hosted `pr-tpcds` profile when the suspected effect is on analytical execute-path behavior against the DuckDB-backed `store_sales` corpus.
-- Use Criterion as the local diagnostic signal when replay/provider work or scan-internal timings stay sub-millisecond or too noisy for compare classification. That signal is never authoritative PR evidence.
+- Use Criterion as the local diagnostic signal when replay/provider work, metadata/log internals, or scan-internal timings stay sub-millisecond or too noisy for compare classification. That signal is never authoritative PR evidence.
 
 ## Quick Start: Compare Your Branch Against Main
 
@@ -73,7 +73,7 @@ The compare pipeline runs the macro lane in `--mode perf`. By default `compare_b
 
 `--methodology-profile pr-tpcds` resolves the TPC-DS contract: `dataset_id=tpcds_duckdb`, `compare_mode=decision`, `warmup=1`, `iters=5`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. Use it only on trusted self-hosted runners with the DuckDB-backed fixture tree provisioned ahead of time. `tpcds_q72` remains outside the PR decision surface, and the suite stays gated in `bench/evidence/registry.yaml` until fixture provisioning plus validation signoff evidence exists. Refresh the dedicated gate with `./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate`.
 
-Criterion profiles live in the same `bench/methodologies/` directory, but `compare_branch.sh` intentionally rejects `PROFILE_KIND=criterion`. Invoke them through `./scripts/run_profile.sh scan-phase-criterion` or `./scripts/run_profile.sh metadata-replay-criterion` instead. `metadata-replay-criterion` resolves to `scan_replay_bench`, and both committed profiles stay diagnostic-only rather than authoritative PR evidence.
+Criterion profiles live in the same `bench/methodologies/` directory, but `compare_branch.sh` intentionally rejects `PROFILE_KIND=criterion`. Invoke them through `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, or `./scripts/run_profile.sh metadata-log-criterion` instead. `metadata-replay-criterion` resolves to `scan_replay_bench`, `metadata-log-criterion` resolves to `metadata_log_bench`, and all committed Criterion profiles stay diagnostic-only rather than authoritative PR evidence.
 
 Before treating a machine or workflow as trustworthy for perf claims, rerun `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
 
@@ -176,13 +176,14 @@ This means compare no longer requires `.delta-rs-under-test/` to stay clean betw
 
 ### Criterion microbench compare
 
-Use the Criterion lane for tiny or highly cache-sensitive scan cases that should not drive the normal PR macro verdict. Today that means `scan_pruning_hit`. Run these profiles on the same local or trusted self-hosted host, treat them as diagnostic-only, and report them separately from any authoritative PR evidence.
+Use the Criterion lane for tiny or highly cache-sensitive scan cases and focused metadata/log diagnostics that should not drive the normal PR macro verdict. Today that means `scan_pruning_hit` for scan microbench work and `metadata-log-criterion` for log parsing plus snapshot materialization internals. Run these profiles on the same local or trusted self-hosted host, treat them as diagnostic-only, and report them separately from any authoritative PR evidence.
 
 The committed Criterion entrypoints are:
 
 ```bash
 ./scripts/run_profile.sh scan-phase-criterion
 ./scripts/run_profile.sh metadata-replay-criterion
+./scripts/run_profile.sh metadata-log-criterion
 ```
 
 Run the first command on the pinned base checkout, then run the second command on the pinned candidate checkout:

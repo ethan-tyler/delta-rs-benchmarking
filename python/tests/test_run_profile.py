@@ -144,6 +144,20 @@ def test_run_profile_dry_run_resolves_committed_criterion_profiles(
     assert result.stdout.strip() == expected_command
 
 
+def test_run_profile_dry_run_resolves_metadata_log_criterion_command() -> None:
+    result = subprocess.run(
+        [str(RUN_PROFILE), "--dry-run", "metadata-log-criterion"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == "cargo bench -p delta-bench --bench metadata_log_bench"
+
+
 def test_run_profile_rejects_missing_required_run_metadata() -> None:
     for missing_field in ("RUNNER", "LANE", "MODE"):
         profile_name = f"test-run-profile-missing-{missing_field.lower()}"

@@ -71,25 +71,33 @@ pub(crate) fn fixture_error_cases(case_names: Vec<String>, message: &str) -> Vec
 
 pub mod concurrency;
 pub mod delete_update;
+pub mod delete_update_perf;
 pub mod interop_py;
 pub mod merge;
+pub mod merge_perf;
 pub mod metadata;
+pub mod metadata_perf;
+pub mod optimize_perf;
 pub mod optimize_vacuum;
 pub mod scan;
-mod scan_metrics;
+pub(crate) mod scan_metrics;
 pub mod tpcds;
 pub mod write;
 pub mod write_perf;
 
 /// Single source of truth for suite names. Adding a new suite requires updating
 /// this array, `list_cases_for_target`, and `run_target`.
-const SUITE_NAMES: [&str; 10] = [
+const SUITE_NAMES: [&str; 14] = [
     "scan",
     "write",
     "write_perf",
     "delete_update",
+    "delete_update_perf",
     "merge",
+    "merge_perf",
     "metadata",
+    "metadata_perf",
+    "optimize_perf",
     "optimize_vacuum",
     "concurrency",
     "tpcds",
@@ -244,8 +252,12 @@ pub fn list_cases_for_target(target: &str) -> BenchResult<Vec<String>> {
         "write" => Ok(write::case_names()),
         "write_perf" => Ok(write_perf::case_names()),
         "delete_update" => Ok(delete_update::case_names()),
+        "delete_update_perf" => Ok(delete_update_perf::case_names()),
         "merge" => Ok(merge::case_names()),
+        "merge_perf" => Ok(merge_perf::case_names()),
         "metadata" => Ok(metadata::case_names()),
+        "metadata_perf" => Ok(metadata_perf::case_names()),
+        "optimize_perf" => Ok(optimize_perf::case_names()),
         "optimize_vacuum" => Ok(optimize_vacuum::case_names()),
         "concurrency" => Ok(concurrency::case_names()),
         "tpcds" => Ok(tpcds::case_names()),
@@ -468,6 +480,17 @@ async fn run_single_suite(
             )
             .await
         }
+        "delete_update_perf" => {
+            delete_update_perf::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
         "merge" => {
             merge::run(
                 fixtures_dir,
@@ -479,8 +502,41 @@ async fn run_single_suite(
             )
             .await
         }
+        "merge_perf" => {
+            merge_perf::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
         "metadata" => {
             metadata::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
+        "metadata_perf" => {
+            metadata_perf::run(
+                fixtures_dir,
+                scale,
+                requested_lane,
+                warmup,
+                iterations,
+                storage,
+            )
+            .await
+        }
+        "optimize_perf" => {
+            optimize_perf::run(
                 fixtures_dir,
                 scale,
                 requested_lane,
@@ -617,7 +673,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_planning_for_all_excludes_opt_in_write_perf_cases() {
+    fn manifest_planning_for_all_excludes_opt_in_perf_cases() {
         let temp = tempfile::tempdir().expect("tempdir");
         let rust_manifest = temp.path().join("rust.yaml");
         let python_manifest = temp.path().join("python.yaml");
@@ -633,6 +689,18 @@ cases:
     enabled: true
   - id: write_perf_partitioned_1m_parts_010
     target: write_perf
+    runner: rust
+    enabled: true
+  - id: delete_perf_localized_1pct
+    target: delete_update_perf
+    runner: rust
+    enabled: true
+  - id: merge_perf_upsert_10pct
+    target: merge_perf
+    runner: rust
+    enabled: true
+  - id: optimize_perf_compact_small_files
+    target: optimize_perf
     runner: rust
     enabled: true
 "#,

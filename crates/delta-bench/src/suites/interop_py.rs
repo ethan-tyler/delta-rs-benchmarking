@@ -424,7 +424,9 @@ printf '%s' '{"rows_processed":1,"bytes_processed":1,"operations":1,"classificat
         make_executable(&fake_python);
 
         let runtime = InteropRuntimeConfig {
-            timeout: Duration::from_secs(1),
+            // Leave room for busy CI/workstations; the assertion is about reported
+            // elapsed time, not exercising the timeout path.
+            timeout: Duration::from_secs(5),
             retries: 0,
             python_executable: fake_python.to_string_lossy().into_owned(),
         };

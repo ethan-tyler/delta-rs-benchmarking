@@ -24,12 +24,28 @@ Options:
   --candidate-sha <sha>           Force immutable commit mode for the candidate revision
   --base-fetch-url <url>          Fetch URL used when base SHA is only reachable from another remote
   --candidate-fetch-url <url>     Fetch URL used when candidate SHA is only reachable from another remote
+  --enforce-run-mode              Require run-mode marker during compare preflight
+  --require-no-public-ipv4        Require no public IPv4 during compare preflight
+  --require-egress-policy         Require egress policy enforcement during compare preflight
   -h, --help                      Show this help
 
 Common compare profiles:
   pr-macro
   pr-write-perf
   pr-tpcds
+  scan-s3-candidate
+  delete-update-perf-s3-candidate
+  merge-perf-s3-candidate
+  optimize-perf-s3-candidate
+  metadata-perf-s3-candidate
+
+Declared remote surfaces in bench/evidence/registry.yaml:
+  scan_s3
+  delete_update_perf_s3
+  merge_perf_s3
+  optimize_perf_s3
+  metadata_perf_s3
+  write_perf_s3 remains explicitly gated and is not in s3-candidate-manual
 
 Common diagnostic Criterion profiles:
   scan-phase-criterion
@@ -63,6 +79,20 @@ require_profile_field() {
 	fi
 }
 
+profile_args_include_flag() {
+	local flag="${1:-}"
+	if [[ ${#profile_args[@]} -eq 0 ]]; then
+		return 1
+	fi
+	local arg
+	for arg in "${profile_args[@]}"; do
+		if [[ "${arg}" == "${flag}" ]]; then
+			return 0
+		fi
+	done
+	return 1
+}
+
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -80,6 +110,10 @@ while [[ $# -gt 0 ]]; do
 		fi
 		compare_only_args+=("$1" "$2")
 		shift 2
+		;;
+	--enforce-run-mode | --require-no-public-ipv4 | --require-egress-policy)
+		compare_only_args+=("$1")
+		shift
 		;;
 	-h | --help)
 		usage
@@ -172,6 +206,12 @@ compare)
 	if [[ ${#compare_only_args[@]} -gt 0 ]]; then
 		resolved_command+=("${compare_only_args[@]}")
 	fi
+	if ! profile_args_include_flag --storage-backend; then
+		append_flag_if_set --storage-backend "${STORAGE_BACKEND:-}"
+	fi
+	if ! profile_args_include_flag --backend-profile; then
+		append_flag_if_set --backend-profile "${BACKEND_PROFILE:-}"
+	fi
 	resolved_command+=(--methodology-profile "${profile_name}")
 	if [[ ${#profile_args[@]} -eq 0 ]]; then
 		resolved_command+=("${TARGET}")
@@ -193,6 +233,7 @@ run)
 	append_flag_if_set --warmup "${WARMUP:-}"
 	append_flag_if_set --iters "${ITERS:-}"
 	append_flag_if_set --storage-backend "${STORAGE_BACKEND:-}"
+	append_flag_if_set --backend-profile "${BACKEND_PROFILE:-}"
 	if [[ ${#profile_args[@]} -gt 0 ]]; then
 		resolved_command+=("${profile_args[@]}")
 	fi

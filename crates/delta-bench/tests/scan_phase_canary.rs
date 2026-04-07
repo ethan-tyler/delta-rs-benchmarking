@@ -2,13 +2,20 @@
 mod env_vars_support;
 
 use std::future::Future;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use delta_bench::cli::TimingPhase;
-use delta_bench::data::fixtures::generate_fixtures;
+use delta_bench::data::fixtures::{
+    generate_fixtures, generate_fixtures_with_profile, FixtureProfile,
+};
+use delta_bench::fingerprint::hash_record_batches_unordered;
+use delta_bench::scan_replay_support;
 use delta_bench::storage::StorageConfig;
 use delta_bench::suites::scan;
+use deltalake_core::datafusion::datasource::TableProvider;
+use deltalake_core::datafusion::physical_plan::collect;
+use deltalake_core::datafusion::prelude::SessionContext;
 use tokio::sync::Mutex;
 
 use env_vars_support::with_env_vars;
@@ -184,6 +191,17 @@ async fn measure_validate_phase(
         elapsed.push(measure_validate_phase_once(fixtures_dir, storage, entries).await);
     }
     median(&mut elapsed)
+}
+
+async fn provider_query_result_hash(sql: &str, provider: Arc<dyn TableProvider>) -> String {
+    let ctx = SessionContext::new();
+    ctx.register_table("bench", provider)
+        .expect("register provider");
+    let df = ctx.sql(sql).await.expect("create dataframe");
+    let task_ctx = Arc::new(df.task_ctx());
+    let plan = df.create_physical_plan().await.expect("create plan");
+    let batches = collect(plan, task_ctx).await.expect("collect query");
+    hash_record_batches_unordered(&batches).expect("hash query results")
 }
 
 fn assert_target_phase_shift(label: &str, baseline: f64, delayed: f64, expected_delay_ms: f64) {
@@ -381,4 +399,47 @@ async fn validate_delay_canary_only_moves_validate_timing() {
         PHASE_DELAY_MS,
     );
     assert_control_phase_stable("validate", baseline_execute, delayed_execute);
+}
+
+#[tokio::test]
+async fn scan_replay_helpers_do_not_fall_back_to_loaded_eager_provider_path() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let storage = StorageConfig::local();
+    generate_fixtures_with_profile(
+        temp.path(),
+        "sf1",
+        42,
+        true,
+        FixtureProfile::ManyVersions,
+        &storage,
+    )
+    .await
+    .expect("generate many-versions fixtures");
+
+    let spec = scan_replay_support::benchmark_case_spec(temp.path(), "sf1", &storage)
+        .expect("replay case spec");
+    let loaded = scan_replay_support::benchmark_load_case(&storage, spec)
+        .await
+        .expect("load replay case");
+
+    let latest_provider = scan_replay_support::benchmark_control_provider_from_loaded(&loaded)
+        .await
+        .expect("control provider");
+    let version_zero_snapshot = scan_replay_support::benchmark_snapshot_at_version(&loaded, 0)
+        .await
+        .expect("snapshot at version 0");
+    let version_zero_provider =
+        scan_replay_support::benchmark_provider_from_snapshot(&loaded, version_zero_snapshot)
+            .await
+            .expect("provider from version 0 snapshot");
+
+    let latest_hash =
+        provider_query_result_hash("SELECT COUNT(*) FROM bench", latest_provider).await;
+    let version_zero_hash =
+        provider_query_result_hash("SELECT COUNT(*) FROM bench", version_zero_provider).await;
+
+    assert_ne!(
+        latest_hash, version_zero_hash,
+        "with_snapshot(snapshot@v0) should not fall back to the loaded latest provider path"
+    );
 }

@@ -218,6 +218,58 @@ cases:
     value: sha256:6246db1cb0db81f5da5430ec2e67f808a2aaba1514d69e558785ac3bdf9160e9
   - type: schema_hash
     value: sha256:2088dd04243dec707b2161c31e76ae1ade66907ff8e914bd043722873009353e
+- id: delete_perf_localized_1pct
+  target: delete_update_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:0244be66af637f4a5e34649373df8144bd0c75d9ed764a98a4621794de3cd988
+  - type: schema_hash
+    value: sha256:2088dd04243dec707b2161c31e76ae1ade66907ff8e914bd043722873009353e
+- id: delete_perf_scattered_5pct_small_files
+  target: delete_update_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:0291b059d41a89f15f8aa49426471e15d75e696b89d98ca458c7230567404e16
+  - type: schema_hash
+    value: sha256:2088dd04243dec707b2161c31e76ae1ade66907ff8e914bd043722873009353e
+- id: update_perf_literal_5pct_scattered
+  target: delete_update_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:a2a99e2b285916fec52bc8dde4538faa84b425f2e87d1485d42b5010adec1fbb
+  - type: schema_hash
+    value: sha256:2088dd04243dec707b2161c31e76ae1ade66907ff8e914bd043722873009353e
+- id: update_perf_all_rows_expr
+  target: delete_update_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:6246db1cb0db81f5da5430ec2e67f808a2aaba1514d69e558785ac3bdf9160e9
+  - type: schema_hash
+    value: sha256:2088dd04243dec707b2161c31e76ae1ade66907ff8e914bd043722873009353e
 - id: merge_delete_5pct
   target: merge
   runner: rust
@@ -278,6 +330,58 @@ cases:
     value: sha256:e4e6d95fdf5c772bf63e244495811342189b0444a822297be20ae06cb881e0b7
   - type: schema_hash
     value: sha256:2088dd04243dec707b2161c31e76ae1ade66907ff8e914bd043722873009353e
+- id: merge_perf_upsert_10pct
+  target: merge_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:1776b06eba2713744a47d2b1f189764938c377eddd7aa61d40f0cdee102a4411
+  - type: schema_hash
+    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+- id: merge_perf_upsert_50pct
+  target: merge_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:b7b0724bf6695faa97f306f7423c9a582128ca40a634ffc7e3cce1c676b04062
+  - type: schema_hash
+    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+- id: merge_perf_localized_1pct
+  target: merge_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:e4e6d95fdf5c772bf63e244495811342189b0444a822297be20ae06cb881e0b7
+  - type: schema_hash
+    value: sha256:2088dd04243dec707b2161c31e76ae1ade66907ff8e914bd043722873009353e
+- id: merge_perf_delete_5pct
+  target: merge_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:b6efeee27e797b2080cbbce73368e64452ea8e07515fcba6d741ffb67e105ed0
+  - type: schema_hash
+    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
 - id: metadata_load
   target: metadata
   runner: rust
@@ -298,6 +402,58 @@ cases:
     value: sha256:5ab9790136cccb6f14961db20191b148f33dfa2134072075022ac619c95a7195
   - type: schema_hash
     value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+- id: metadata_perf_load_head_long_history
+  target: metadata_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:0fe47f5973f19b751ad2ee09a0bb69294831f3483cb0e3bd667f5be7a98d1b45
+  - type: schema_hash
+    value: sha256:295b42ee754a3ec916d4535729487c98e25a12e0f7297a120c50596315fa3592
+- id: metadata_perf_time_travel_v0_long_history
+  target: metadata_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:1861db54f876957b9868380b03ff19272229eafa0b2ec2749ce56b2f0cff64a9
+  - type: schema_hash
+    value: sha256:295b42ee754a3ec916d4535729487c98e25a12e0f7297a120c50596315fa3592
+- id: metadata_perf_load_checkpointed_head
+  target: metadata_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:ac3424e2ae4146a5815289dd0f8b42cd104159d0f5b5f99b5cfdfdd15e9dd0b4
+  - type: schema_hash
+    value: sha256:295b42ee754a3ec916d4535729487c98e25a12e0f7297a120c50596315fa3592
+- id: metadata_perf_load_uncheckpointed_head
+  target: metadata_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:24b8aa3b9810b801eca4eb8a302cfbd3462d6b0b9446acb36d871bc8f27a3161
+  - type: schema_hash
+    value: sha256:295b42ee754a3ec916d4535729487c98e25a12e0f7297a120c50596315fa3592
 - id: optimize_compact_small_files
   target: optimize_vacuum
   runner: rust
@@ -343,6 +499,45 @@ cases:
   runner: rust
   enabled: true
   lane: correctness
+  assertions:
+  - type: exact_result_hash
+    value: sha256:84ac0ae3ed44c38581dffc6aa8d4bb56190cd5aa2174213c4bb0f8c0297c99ef
+  - type: schema_hash
+    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+- id: optimize_perf_compact_small_files
+  target: optimize_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:260230f77e26b1a88cdb0f49939988a61b79826c10086460e7efedff50622602
+  - type: schema_hash
+    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+- id: optimize_perf_noop_already_compact
+  target: optimize_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
+  assertions:
+  - type: exact_result_hash
+    value: sha256:260230f77e26b1a88cdb0f49939988a61b79826c10086460e7efedff50622602
+  - type: schema_hash
+    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+- id: vacuum_perf_execute_lite
+  target: optimize_perf
+  runner: rust
+  enabled: true
+  supports_decision: true
+  required_runs: 5
+  decision_threshold_pct: 5.0
+  decision_metric: median
   assertions:
   - type: exact_result_hash
     value: sha256:84ac0ae3ed44c38581dffc6aa8d4bb56190cd5aa2174213c4bb0f8c0297c99ef

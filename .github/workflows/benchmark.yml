@@ -3,23 +3,46 @@ name: PR Benchmark (Option B)
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Existing benchmark pack request_id to replay
+        required: true
+        type: string
 
 permissions:
   contents: read
   issues: write
 
+env:
+  DELTA_BENCH_BOT_DB_PATH: ${{ vars.DELTA_BENCH_BOT_DB_PATH }}
+
 jobs:
-  benchmark:
-    if: github.event.issue.pull_request != null
+  request:
+    if: github.event_name == 'workflow_dispatch' || github.event.issue.pull_request != null
     runs-on: [self-hosted, delta-bench]
-    timeout-minutes: 180
-    concurrency:
-      group: delta-bench-serial
-      cancel-in-progress: false
+    timeout-minutes: 60
+    outputs:
+      mode: ${{ steps.replay.outputs.mode || steps.parse.outputs.mode }}
+      suite: ${{ steps.replay.outputs.suite || steps.parse.outputs.suite }}
+      pack: ${{ steps.replay.outputs.pack || steps.parse.outputs.pack }}
+      compare_mode: ${{ steps.replay.outputs.compare_mode || steps.parse.outputs.compare_mode }}
+      first_line: ${{ steps.replay.outputs.first_line || steps.parse.outputs.first_line }}
+      allowed: ${{ steps.replay.outputs.allowed || steps.auth.outputs.allowed }}
+      permission: ${{ steps.replay.outputs.permission || steps.auth.outputs.permission }}
+      bot_db_ready: ${{ steps.bot_db.outputs.ready }}
+      bot_db_reason: ${{ steps.bot_db.outputs.reason }}
+      base_sha: ${{ steps.replay.outputs.base_sha || steps.pr.outputs.base_sha }}
+      head_sha: ${{ steps.replay.outputs.head_sha || steps.pr.outputs.head_sha }}
+      same_repo: ${{ steps.replay.outputs.same_repo || steps.pr.outputs.same_repo }}
+      deny_reason: ${{ steps.replay.outputs.deny_reason || steps.pr.outputs.deny_reason }}
+      pr_number: ${{ steps.replay.outputs.pr_number || github.event.issue.number }}
+      request_id: ${{ steps.replay.outputs.request_id }}
 
     steps:
       - name: Parse command
         id: parse
+        if: github.event_name != 'workflow_dispatch'
         uses: actions/github-script@v7
         with:
           script: |
@@ -28,9 +51,11 @@ jobs:
             const allowedSuites = new Set([
               "scan",
             ]);
+            // full is a pack alias, not a suite name.
 
             let mode = "ignore";
             let suite = "";
+            let pack = "";
             let compareMode = "exploratory";
             let invalidReason = "";
 
@@ -40,19 +65,41 @@ jobs:
               // Supported commands:
               //   run benchmark scan
               //   run benchmark decision scan
+              //   run benchmark decision full
+              // Operator-only candidate/manual work:
+              //   ./scripts/compare_branch.sh --current-vs-main --methodology-profile <profile> <suite>
+              //   env PYTHONPATH=python python3 -m delta_bench_compare.pack plan --registry bench/evidence/registry.yaml --pack pr-candidate-manual ...
+              // Diagnostic Criterion work:
+              //   ./scripts/run_profile.sh <criterion-profile>
               const match = firstLine.match(/^run benchmark(?:\s+(decision))?\s+(\S+)$/i);
               if (match) {
                 compareMode = match[1] ? "decision" : "exploratory";
-                suite = match[2].toLowerCase();
-                if (allowedSuites.has(suite)) {
-                  mode = "run";
+                const target = match[2].toLowerCase();
+                if (target === "full") {
+                  pack = "full";
+                  if (compareMode !== "decision") {
+                    mode = "invalid";
+                    invalidReason = [
+                      "Reject exploratory 'run benchmark full' initially.",
+                      "Use 'run benchmark decision full'.",
+                      "full is a pack alias, not a suite name.",
+                    ].join(" ");
+                  } else {
+                    mode = "pack";
+                  }
+                } else if (allowedSuites.has(target)) {
+                  suite = target;
+                  mode = "suite";
                 } else {
                   mode = "invalid";
                   invalidReason = [
-                    `invalid command: automated benchmark workflow currently supports only: ${Array.from(allowedSuites).join(", ")}.`,
-                    `Requested suite: ${suite}.`,
-                    `Use 'run benchmark scan' for exploratory output or 'run benchmark decision scan' for decision-grade automation.`,
-                    `Stateful Rust suites and tpcds remain manual-only until workflow fixture provisioning is explicit.`,
+                    `invalid command: PR comment automation only supports ready suites: ${Array.from(allowedSuites).join(", ")}.`,
+                    "Pack alias support is limited to `run benchmark decision full`.",
+                    "Candidate/manual perf suites stay operator-only.",
+                    "Use `./scripts/compare_branch.sh --current-vs-main --methodology-profile <profile> <suite>` for gated single-suite evidence refreshes, or the `pr-candidate-manual` / `s3-candidate-manual` packs for manual batches.",
+                    "Use `./scripts/run_profile.sh <criterion-profile>` for diagnostic Criterion work.",
+                    `Requested target: ${target}.`,
+                    "Use 'run benchmark scan' for exploratory output, 'run benchmark decision scan' for the single-suite decision path, or 'run benchmark decision full' for the pack resolver.",
                   ].join(" ");
                 }
               }
@@ -60,13 +107,14 @@ jobs:
 
             core.setOutput("mode", mode);
             core.setOutput("suite", suite);
+            core.setOutput("pack", pack);
             core.setOutput("compare_mode", compareMode);
             core.setOutput("first_line", firstLine);
             core.setOutput("invalid_reason", invalidReason);
 
       - name: Check authorization
         id: auth
-        if: steps.parse.outputs.mode != 'ignore'
+        if: github.event_name != 'workflow_dispatch' && steps.parse.outputs.mode != 'ignore'
         uses: actions/github-script@v7
         with:
           script: |
@@ -90,7 +138,7 @@ jobs:
             core.setOutput("permission", permission);
 
       - name: Comment unauthorized
-        if: steps.parse.outputs.mode != 'ignore' && steps.auth.outputs.allowed != 'true'
+        if: github.event_name != 'workflow_dispatch' && steps.parse.outputs.mode != 'ignore' && steps.auth.outputs.allowed != 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -108,19 +156,8 @@ jobs:
               body,
             });
 
-      - name: Comment queue unavailable
-        if: steps.parse.outputs.mode == 'queue' && steps.auth.outputs.allowed == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: context.issue.number,
-              body: "Queue status is not available in workflow mode (Option B). Runs are serialized via workflow concurrency.",
-            });
-
       - name: Comment invalid command
-        if: steps.parse.outputs.mode == 'invalid' && steps.auth.outputs.allowed == 'true'
+        if: github.event_name != 'workflow_dispatch' && steps.parse.outputs.mode == 'invalid' && steps.auth.outputs.allowed == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -130,9 +167,128 @@ jobs:
               body: `${{ steps.parse.outputs.invalid_reason }}`,
             });
 
+      - name: Checkout repository
+        if: github.event_name == 'workflow_dispatch' || (steps.parse.outputs.mode != 'ignore' && steps.auth.outputs.allowed == 'true')
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate shared bot database path
+        id: bot_db
+        if: github.event_name == 'workflow_dispatch' || ((steps.parse.outputs.mode == 'queue' || steps.parse.outputs.mode == 'pack') && steps.auth.outputs.allowed == 'true')
+        shell: bash
+        env:
+          DELTA_BENCH_BOT_DB_READY: ${{ vars.DELTA_BENCH_BOT_DB_PATH != '' && 'true' || 'false' }}
+        run: |
+          set -euo pipefail
+          if [[ "${DELTA_BENCH_BOT_DB_READY}" != "true" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "reason<<EOF"
+              echo "DELTA_BENCH_BOT_DB_PATH must be configured to a shared path mounted on every runner."
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "reason=" >> "$GITHUB_OUTPUT"
+
+      - name: Fail when replay database is unavailable
+        if: github.event_name == 'workflow_dispatch' && steps.bot_db.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "${{ steps.bot_db.outputs.reason }}" >&2
+          exit 1
+
+      - name: Initialize bot database
+        if: (github.event_name == 'workflow_dispatch' || ((steps.parse.outputs.mode == 'queue' || steps.parse.outputs.mode == 'pack') && steps.auth.outputs.allowed == 'true')) && steps.bot_db.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state --db "${DELTA_BENCH_BOT_DB_PATH}" init
+
+      - name: Load replay request
+        id: replay
+        if: github.event_name == 'workflow_dispatch' && steps.bot_db.outputs.ready == 'true'
+        shell: bash
+        env:
+          REPLAY_REQUEST_ID: ${{ github.event.inputs.request_id }}
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            request-state \
+            --request-id "${REPLAY_REQUEST_ID}" > replay-request.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(Path("replay-request.json").read_text(encoding="utf-8"))
+          if str(payload.get("repo") or "").lower() != os.environ["GITHUB_REPOSITORY"].lower():
+              raise SystemExit(
+                  f"request_id={payload.get('request_id')} belongs to repo '{payload.get('repo')}', expected '{os.environ['GITHUB_REPOSITORY']}'"
+              )
+          if not payload.get("pack"):
+              raise SystemExit(
+                  f"request_id={payload.get('request_id')} is not a pack request and cannot be replayed via workflow_dispatch"
+              )
+          print("mode=pack")
+          print("suite=")
+          print(f"pack={payload['pack']}")
+          print("compare_mode=decision")
+          print(f"first_line={payload['command']}")
+          print("allowed=true")
+          print("permission=workflow_dispatch")
+          print(f"base_sha={payload['base_sha']}")
+          print(f"head_sha={payload['candidate_sha']}")
+          print("same_repo=true")
+          print("deny_reason=")
+          print(f"pr_number={payload['pr_number']}")
+          print(f"request_id={payload['request_id']}")
+          PY
+
+      - name: Comment queue unavailable
+        if: github.event_name != 'workflow_dispatch' && steps.parse.outputs.mode == 'queue' && steps.auth.outputs.allowed == 'true' && steps.bot_db.outputs.ready != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: "Benchmark queue is unavailable until DELTA_BENCH_BOT_DB_PATH is configured to a shared path mounted on every runner.",
+            });
+
+      - name: Render benchmark queue
+        if: github.event_name != 'workflow_dispatch' && steps.parse.outputs.mode == 'queue' && steps.auth.outputs.allowed == 'true' && steps.bot_db.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state --db "${DELTA_BENCH_BOT_DB_PATH}" queue > benchmark_queue.txt
+
+      - name: Comment queue status
+        if: github.event_name != 'workflow_dispatch' && steps.parse.outputs.mode == 'queue' && steps.auth.outputs.allowed == 'true' && steps.bot_db.outputs.ready == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const queueBody = fs.readFileSync("benchmark_queue.txt", "utf8").trim();
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: [
+                "### Benchmark queue",
+                "",
+                "```text",
+                queueBody || "No active benchmark requests.",
+                "```",
+              ].join("\n"),
+            });
+
       - name: Resolve PR refs
         id: pr
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true'
+        if: github.event_name != 'workflow_dispatch' && (steps.parse.outputs.mode == 'suite' || (steps.parse.outputs.mode == 'pack' && steps.bot_db.outputs.ready == 'true')) && steps.auth.outputs.allowed == 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -143,8 +299,6 @@ jobs:
             const expectedRepo = `${context.repo.owner}/${context.repo.repo}`.toLowerCase();
             const headRepo = (pr.data.head.repo?.full_name || "").toLowerCase();
             const sameRepo = headRepo === expectedRepo;
-            core.setOutput("base_ref", pr.data.base.ref);
-            core.setOutput("head_ref", pr.data.head.ref);
             core.setOutput("base_sha", pr.data.base.sha);
             core.setOutput("head_sha", pr.data.head.sha);
             core.setOutput("same_repo", sameRepo ? "true" : "false");
@@ -156,7 +310,7 @@ jobs:
             }
 
       - name: Comment fork PR blocked
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo != 'true'
+        if: github.event_name != 'workflow_dispatch' && (steps.parse.outputs.mode == 'suite' || (steps.parse.outputs.mode == 'pack' && steps.bot_db.outputs.ready == 'true')) && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo != 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -166,14 +320,33 @@ jobs:
               body: `${{ steps.pr.outputs.deny_reason }}`,
             });
 
+      - name: Comment pack unavailable
+        if: github.event_name != 'workflow_dispatch' && steps.parse.outputs.mode == 'pack' && steps.auth.outputs.allowed == 'true' && steps.bot_db.outputs.ready != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: "Pack automation requires DELTA_BENCH_BOT_DB_PATH to point at a shared path mounted on every runner.",
+            });
+
+  single_suite:
+    needs: request
+    if: needs.request.outputs.mode == 'suite' && needs.request.outputs.allowed == 'true' && needs.request.outputs.same_repo == 'true' && needs.request.outputs.suite == 'scan'
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 180
+    concurrency:
+      group: delta-bench-serial
+      cancel-in-progress: false
+
+    steps:
       - name: Checkout repository
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Enforce runner security preflight
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
         shell: bash
         env:
           DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
@@ -183,12 +356,12 @@ jobs:
 
       - name: Run branch compare
         id: bench
-        if: steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
         shell: bash
         env:
-          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
-          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
-          SUITE: ${{ steps.parse.outputs.suite }}
+          BASE_SHA: ${{ needs.request.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.request.outputs.head_sha }}
+          SUITE: ${{ needs.request.outputs.suite }}
+          COMPARE_MODE: ${{ needs.request.outputs.compare_mode }}
           BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
           BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
           BENCH_BACKEND_PROFILE: ${{ vars.BENCH_BACKEND_PROFILE }}
@@ -197,7 +370,6 @@ jobs:
         run: |
           set -euo pipefail
           status=0
-          compare_mode="${{ steps.parse.outputs.compare_mode }}"
           storage_args=()
           bench_args=()
           compare_args=()
@@ -217,7 +389,7 @@ jobs:
           if [[ -n "${BENCH_RUNNER_MODE:-}" ]]; then
             bench_args+=(--runner "${BENCH_RUNNER_MODE}")
           fi
-          if [[ "${compare_mode}" == "decision" ]]; then
+          if [[ "${COMPARE_MODE}" == "decision" ]]; then
             methodology_args+=(--methodology-profile pr-macro)
             compare_args+=(--fail-on regression,inconclusive)
           fi
@@ -243,48 +415,624 @@ jobs:
             echo "status_label=FAIL" >> "$GITHUB_OUTPUT"
           fi
           if [[ "${status}" -ne 0 ]]; then
-            exit "${status}"
+            true
           fi
 
       - name: Post benchmark result
-        if: always() && steps.parse.outputs.mode == 'run' && steps.auth.outputs.allowed == 'true' && steps.pr.outputs.same_repo == 'true'
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require("fs");
             const issue_number = context.issue.number;
-            const suite = `${{ steps.parse.outputs.suite }}`;
+            const suite = `${{ needs.request.outputs.suite }}`;
             const status = `${{ steps.bench.outputs.status_label }}`;
             const exitCode = `${{ steps.bench.outputs.exit_code }}`;
-            const compareMode = `${{ steps.parse.outputs.compare_mode }}`;
+            const compareMode = `${{ needs.request.outputs.compare_mode }}`;
             const headingByStatus = {
               PASS: "### Benchmark PASS",
               FAIL: "### Benchmark FAIL",
             };
-            const heading = headingByStatus[status] || `### Benchmark ${status}`;
-            let output = "(no output produced)";
-            if (fs.existsSync("benchmark_output.md")) {
-              output = fs.readFileSync("benchmark_output.md", "utf8");
-            }
-            if (output.length > 60000) {
-              output = output.slice(output.length - 60000);
-            }
-
+            const output = fs.existsSync("benchmark_output.md")
+              ? fs.readFileSync("benchmark_output.md", "utf8").trim()
+              : "benchmark output missing";
             const body = [
-              `${heading}: ${suite}`,
-              `Compare mode: ${compareMode}`,
-              `Exit code: ${exitCode}`,
+              headingByStatus[status] || "### Benchmark Result",
+              "",
+              `Suite: \`${suite}\``,
+              `Compare mode: \`${compareMode}\``,
+              `Exit code: \`${exitCode || "n/a"}\``,
               "",
               "<details><summary>compare_branch.sh output</summary>",
               "",
               "```text",
               output,
               "```",
+              "",
               "</details>",
             ].join("\n");
-
             await github.rest.issues.createComment({
               ...context.repo,
               issue_number,
               body,
             });
+
+      - name: Fail job when compare fails
+        if: steps.bench.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="${{ steps.bench.outputs.exit_code }}"
+          if [[ "${status}" -ne 0 ]]; then
+            exit "${status}"
+          fi
+
+  plan_pack:
+    needs: request
+    if: needs.request.outputs.mode == 'pack' && needs.request.outputs.allowed == 'true' && needs.request.outputs.bot_db_ready == 'true' && needs.request.outputs.same_repo == 'true'
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 120
+    outputs:
+      ready: ${{ steps.plan.outputs.ready }}
+      pack_id: ${{ steps.plan_meta.outputs.pack_id }}
+      max_parallel: ${{ steps.plan_meta.outputs.max_parallel }}
+      pack_matrix: ${{ steps.plan_meta.outputs.pack_matrix }}
+      request_id: ${{ steps.prepare_request.outputs.request_id }}
+      execute: ${{ steps.prepare_request.outputs.execute }}
+      request_status: ${{ steps.load_request_state.outputs.request_status }}
+      summary_comment_id: ${{ steps.status_comment.outputs.comment_id }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize bot database
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state --db "${DELTA_BENCH_BOT_DB_PATH}" init
+
+      - name: Enforce runner security preflight
+        shell: bash
+        env:
+          DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
+        run: |
+          set -euo pipefail
+          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
+
+      - name: Resolve pack plan
+        id: plan
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.request.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.request.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          status=0
+          set +e
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.pack plan \
+            --registry bench/evidence/registry.yaml \
+            --pack "${{ needs.request.outputs.pack }}" \
+            --base-sha "$BASE_SHA" \
+            --candidate-sha "$HEAD_SHA" \
+            --format github-matrix \
+            --output pack-plan.json > pack-plan.stdout.json 2> pack-plan.stderr.txt
+          status=$?
+          set -e
+          echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
+          if [[ "${status}" -eq 0 ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract plan metadata
+        id: plan_meta
+        if: steps.plan.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("pack-plan.json").read_text(encoding="utf-8"))
+          print(f"pack_id={payload['pack_id']}")
+          print(f"max_parallel={payload['max_parallel']}")
+          print("pack_matrix<<JSON")
+          print(json.dumps(payload["matrix"]))
+          print("JSON")
+          PY
+
+      - name: Prepare request execution
+        id: prepare_request
+        if: steps.plan.outputs.ready == 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.request.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.request.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+              --db "${DELTA_BENCH_BOT_DB_PATH}" \
+              replay-request \
+              --request-id "${{ needs.request.outputs.request_id }}" \
+              --workflow-run-id "${{ github.run_id }}" \
+              --plan-json pack-plan.json > enqueue-request.json
+          else
+            env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+              --db "${DELTA_BENCH_BOT_DB_PATH}" \
+              enqueue \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pr-number "${{ needs.request.outputs.pr_number }}" \
+              --comment-id "${{ github.event.comment.id }}" \
+              --actor "${{ github.event.comment.user.login }}" \
+              --request-command "${{ needs.request.outputs.first_line }}" \
+              --pack "${{ steps.plan_meta.outputs.pack_id }}" \
+              --base-sha "$BASE_SHA" \
+              --candidate-sha "$HEAD_SHA" \
+              --workflow-run-id "${{ github.run_id }}" \
+              --plan-json pack-plan.json > enqueue-request.json
+          fi
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("enqueue-request.json").read_text(encoding="utf-8"))
+          duplicate = str(bool(payload.get("duplicate", False))).lower()
+          print(f"request_id={payload['request_id']}")
+          print(f"duplicate={duplicate}")
+          if "duplicate" in payload:
+              print(f"execute={'false' if duplicate == 'true' else 'true'}")
+          else:
+              print("execute=true")
+          PY
+
+      - name: Load request state
+        id: load_request_state
+        if: steps.plan.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            request-state \
+            --request-id "${{ steps.prepare_request.outputs.request_id }}" > request-state.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("request-state.json").read_text(encoding="utf-8"))
+          print(f"request_status={payload['status']}")
+          print(f"summary_comment_id={payload.get('summary_comment_id') or ''}")
+          PY
+
+      - name: Create or update status comment
+        id: status_comment
+        if: steps.plan.outputs.ready == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const payload = JSON.parse(fs.readFileSync("pack-plan.json", "utf8"));
+            const requestState = JSON.parse(fs.readFileSync("request-state.json", "utf8"));
+            const suites = payload.include.map(
+              (row) =>
+                `- \`${row.suite}\` via \`${row.profile}\` (${row.timeout_minutes}m, artifact \`${row.artifact_name}\`)`
+            ).join("\n");
+            const body = [
+              "### Benchmark request accepted",
+              "",
+              `Command: \`${{ needs.request.outputs.first_line }}\``,
+              `Pack: \`${payload.pack_id}\` (alias \`${payload.pack_alias}\`)`,
+              `Compare mode: \`${payload.compare_mode}\``,
+              `Base SHA: \`${payload.base_sha}\``,
+              `Candidate SHA: \`${payload.candidate_sha}\``,
+              `Status: \`${requestState.status}\``,
+              "",
+              "Planned shards:",
+              suites,
+            ].join("\n");
+            const existingCommentId = Number(`${{ steps.load_request_state.outputs.summary_comment_id }}` || "0");
+            if (existingCommentId > 0) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existingCommentId,
+                body,
+              });
+              core.setOutput("comment_id", String(existingCommentId));
+              return;
+            }
+            const response = await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: Number(`${{ needs.request.outputs.pr_number }}`),
+              body,
+            });
+            core.setOutput("comment_id", String(response.data.id));
+
+      - name: Persist status comment id
+        if: steps.plan.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            set-request-status \
+            --request-id "${{ steps.prepare_request.outputs.request_id }}" \
+            --status "${{ steps.load_request_state.outputs.request_status }}" \
+            --summary-comment-id "${{ steps.status_comment.outputs.comment_id }}"
+
+      - name: Record blocked request
+        id: blocked_request
+        if: steps.plan.outputs.ready != 'true'
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.request.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.request.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+              --db "${DELTA_BENCH_BOT_DB_PATH}" \
+              set-request-status \
+              --request-id "${{ needs.request.outputs.request_id }}" \
+              --status blocked \
+              --error-message "$(cat pack-plan.stderr.txt)"
+            echo "request_id=${{ needs.request.outputs.request_id }}" >> "$GITHUB_OUTPUT"
+            echo "duplicate=false" >> "$GITHUB_OUTPUT"
+          else
+            printf '%s\n' '{"include":[]}' > blocked-plan.json
+            env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+              --db "${DELTA_BENCH_BOT_DB_PATH}" \
+              enqueue \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pr-number "${{ needs.request.outputs.pr_number }}" \
+              --comment-id "${{ github.event.comment.id }}" \
+              --actor "${{ github.event.comment.user.login }}" \
+              --request-command "${{ needs.request.outputs.first_line }}" \
+              --pack "${{ needs.request.outputs.pack }}" \
+              --base-sha "$BASE_SHA" \
+              --candidate-sha "$HEAD_SHA" \
+              --workflow-run-id "${{ github.run_id }}" \
+              --plan-json blocked-plan.json \
+              --status blocked > blocked-request.json
+            python3 - <<'PY' >> "$GITHUB_OUTPUT"
+            import json
+            from pathlib import Path
+
+            payload = json.loads(Path("blocked-request.json").read_text(encoding="utf-8"))
+            print(f"request_id={payload['request_id']}")
+            print(f"duplicate={str(bool(payload.get('duplicate', False))).lower()}")
+            PY
+          fi
+
+      - name: Load blocked request state
+        id: blocked_request_state
+        if: steps.plan.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            request-state \
+            --request-id "${{ steps.blocked_request.outputs.request_id }}" > blocked-request-state.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("blocked-request-state.json").read_text(encoding="utf-8"))
+          print(f"request_status={payload['status']}")
+          print(f"summary_comment_id={payload.get('summary_comment_id') or ''}")
+          PY
+
+      - name: Create or update blocked pack request comment
+        id: blocked_status_comment
+        if: steps.plan.outputs.ready != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const details = fs.readFileSync("pack-plan.stderr.txt", "utf8").trim();
+            const body = [
+              "### Benchmark request blocked",
+              "",
+              `Command: \`${{ needs.request.outputs.first_line }}\``,
+              `Status: \`${{ steps.blocked_request_state.outputs.request_status }}\``,
+              "",
+              "```text",
+              details,
+              "```",
+            ].join("\n");
+            const existingCommentId = Number(`${{ steps.blocked_request_state.outputs.summary_comment_id }}` || "0");
+            if (existingCommentId > 0) {
+              await github.rest.issues.updateComment({
+                ...context.repo,
+                comment_id: existingCommentId,
+                body,
+              });
+              core.setOutput("comment_id", String(existingCommentId));
+              return;
+            }
+            const response = await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: Number(`${{ needs.request.outputs.pr_number }}`),
+              body,
+            });
+            core.setOutput("comment_id", String(response.data.id));
+
+      - name: Persist blocked request status
+        if: steps.plan.outputs.ready != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            set-request-status \
+            --request-id "${{ steps.blocked_request.outputs.request_id }}" \
+            --status "${{ steps.blocked_request_state.outputs.request_status }}" \
+            --summary-comment-id "${{ steps.blocked_status_comment.outputs.comment_id }}" \
+            --error-message "$(cat pack-plan.stderr.txt)"
+
+      - name: Upload pack plan
+        if: steps.plan.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-plan
+          path: pack-plan.json
+          if-no-files-found: error
+
+  run_pack_shards:
+    needs: [request, plan_pack]
+    if: needs.plan_pack.outputs.ready == 'true' && needs.plan_pack.outputs.execute == 'true'
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJson(needs.plan_pack.outputs.pack_matrix) }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Enforce runner security preflight
+        shell: bash
+        env:
+          DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
+        run: |
+          set -euo pipefail
+          ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
+
+      - name: Mark suite running
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            set-request-status \
+            --request-id "${{ needs.plan_pack.outputs.request_id }}" \
+            --status running
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            set-suite-status \
+            --request-id "${{ needs.plan_pack.outputs.request_id }}" \
+            --suite "${{ matrix.suite }}" \
+            --profile "${{ matrix.profile }}" \
+            --status running
+
+      - name: Run suite shard
+        id: shard
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.request.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.request.outputs.head_sha }}
+          PROFILE: ${{ matrix.profile }}
+          SUITE: ${{ matrix.suite }}
+          TIMEOUT_MINUTES: ${{ matrix.timeout_minutes }}
+          BENCH_BACKEND_PROFILE: ${{ vars.BENCH_BACKEND_PROFILE }}
+          BENCH_RUNNER_MODE: ${{ vars.BENCH_RUNNER_MODE }}
+          BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
+          BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
+        run: |
+          set -euo pipefail
+          artifact_name="${{ matrix.artifact_name }}"
+          shard_status=0
+          profile_args=()
+          if [[ -n "${BENCH_BACKEND_PROFILE:-}" ]]; then
+            profile_args+=(--backend-profile "${BENCH_BACKEND_PROFILE}")
+          fi
+          if [[ -n "${BENCH_RUNNER_MODE:-}" ]]; then
+            profile_args+=(--runner "${BENCH_RUNNER_MODE}")
+          fi
+          set +e
+          timeout --preserve-status "${TIMEOUT_MINUTES}m" \
+            ./scripts/run_profile.sh --base-sha "$BASE_SHA" --candidate-sha "$HEAD_SHA" "$PROFILE" "${profile_args[@]}" > benchmark_output.md 2>&1
+          shard_status=$?
+          set -e
+          echo "exit_code=${shard_status}" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=${artifact_name}" >> "$GITHUB_OUTPUT"
+          if [[ "${shard_status}" -eq 0 ]]; then
+            echo "status_label=PASS" >> "$GITHUB_OUTPUT"
+          else
+            echo "status_label=FAIL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload suite artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.shard.outputs.artifact_name }}
+          path: |
+            benchmark_output.md
+            results/compare/${{ matrix.suite }}/${{ needs.request.outputs.base_sha }}__${{ needs.request.outputs.head_sha }}
+          if-no-files-found: warn
+
+      - name: Update suite status
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          suite_status="completed"
+          if [[ "${{ steps.shard.outputs.exit_code }}" != "0" ]]; then
+            suite_status="failed"
+          fi
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            set-suite-status \
+            --request-id "${{ needs.plan_pack.outputs.request_id }}" \
+            --suite "${{ matrix.suite }}" \
+            --profile "${{ matrix.profile }}" \
+            --status "${suite_status}" \
+            --artifact-name "${{ steps.shard.outputs.artifact_name }}" \
+            --exit-code "${{ steps.shard.outputs.exit_code }}"
+
+      - name: Fail shard when compare fails
+        if: steps.shard.outputs.exit_code != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="${{ steps.shard.outputs.exit_code }}"
+          if [[ "${status}" -ne 0 ]]; then
+            exit "${status}"
+          fi
+
+  aggregate_pack:
+    needs: [request, plan_pack, run_pack_shards]
+    if: always() && needs.plan_pack.outputs.ready == 'true' && needs.plan_pack.outputs.execute == 'true'
+    runs-on: [self-hosted, delta-bench]
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Initialize bot database
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state --db "${DELTA_BENCH_BOT_DB_PATH}" init
+
+      - name: Mark request aggregating
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            set-request-status \
+            --request-id "${{ needs.plan_pack.outputs.request_id }}" \
+            --status aggregating
+
+      - name: Download suite artifacts
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-*
+          path: downloaded-suite-artifacts
+          merge-multiple: false
+
+      - name: Download pack plan
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: pack-plan
+          path: downloaded-pack-plan
+
+      - name: Export request state
+        shell: bash
+        run: |
+          set -euo pipefail
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            request-state \
+            --request-id "${{ needs.plan_pack.outputs.request_id }}" > request-state.json
+
+      - name: Run pack aggregator
+        id: summarize
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.request.outputs.base_sha }}
+          HEAD_SHA: ${{ needs.request.outputs.head_sha }}
+          PACK_ID: ${{ needs.plan_pack.outputs.pack_id }}
+        run: |
+          set -euo pipefail
+          output_dir="results/compare/packs/${PACK_ID}/${BASE_SHA}__${HEAD_SHA}"
+          suite_manifest_args=()
+          while IFS= read -r manifest_path; do
+            suite_manifest_args+=(--suite-manifest "${manifest_path}")
+          done < <(find downloaded-suite-artifacts -name manifest.json -print | sort)
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.pack summarize \
+            --registry bench/evidence/registry.yaml \
+            --pack "${PACK_ID}" \
+            --pack-manifest downloaded-pack-plan/pack-plan.json \
+            --request-state request-state.json \
+            --output-dir "${output_dir}" \
+            "${suite_manifest_args[@]}" > pack-summary.json
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("pack-summary.json").read_text(encoding="utf-8"))
+          print(f"output_dir={Path(manifest['summary_md']).resolve().parent}")
+          print(f"overall_status={manifest['overall_status']}")
+          PY
+
+      - name: Finalize request status
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          request_status="completed"
+          error_message=""
+          if [[ "${{ needs.run_pack_shards.result }}" != "success" || "${{ steps.summarize.outputs.overall_status }}" != "passed" ]]; then
+            request_status="failed"
+            error_message="one or more suite shards failed or the pack summary reported a failing overall gate"
+          fi
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.bot_state \
+            --db "${DELTA_BENCH_BOT_DB_PATH}" \
+            set-request-status \
+            --request-id "${{ needs.plan_pack.outputs.request_id }}" \
+            --status "${request_status}" \
+            --summary-comment-id "${{ needs.plan_pack.outputs.summary_comment_id }}" \
+            --error-message "${error_message}"
+
+      - name: Update status comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require("fs");
+            const summaryPath = `${{ steps.summarize.outputs.output_dir }}/summary.md`;
+            const summary = fs.existsSync(summaryPath)
+              ? fs.readFileSync(summaryPath, "utf8").trim()
+              : "pack summary artifact missing";
+            const shardResult = `${{ needs.run_pack_shards.result }}`;
+            const overallStatus = `${{ steps.summarize.outputs.overall_status }}`;
+            const finalStatus = shardResult === "success" && overallStatus === "passed";
+            const body = [
+              `### Benchmark ${finalStatus ? "PASS" : "FAIL"}`,
+              "",
+              `Command: \`${{ needs.request.outputs.first_line }}\``,
+              `Pack: \`${{ needs.plan_pack.outputs.pack_id }}\``,
+              "Compare mode: `decision`",
+              "",
+              summary,
+            ].join("\n");
+            await github.rest.issues.updateComment({
+              ...context.repo,
+              comment_id: Number(`${{ needs.plan_pack.outputs.summary_comment_id }}`),
+              body,
+            });
+
+      - name: Fail job when pack gate fails
+        if: needs.run_pack_shards.result != 'success' || steps.summarize.outputs.overall_status != 'passed'
+        shell: bash
+        run: |
+          set -euo pipefail
+          exit 1

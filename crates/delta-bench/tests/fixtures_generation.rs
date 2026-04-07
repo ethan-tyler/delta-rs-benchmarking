@@ -1,5 +1,8 @@
 #![allow(clippy::await_holding_lock)]
 
+#[path = "support/env_vars.rs"]
+mod env_vars;
+
 use delta_bench::data::fixtures::{
     generate_fixtures, generate_fixtures_with_profile, load_manifest, narrow_sales_table_url,
     FixtureProfile,
@@ -500,12 +503,5 @@ where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
-    let previous = std::env::var_os(key);
-    std::env::set_var(key, value);
-    f().await;
-    if let Some(value) = previous {
-        std::env::set_var(key, value);
-    } else {
-        std::env::remove_var(key);
-    }
+    env_vars::with_env_vars(&[(key, value)], f).await;
 }

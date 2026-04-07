@@ -47,6 +47,29 @@ PR_MERGE_PERF_PROFILE = REPO_ROOT / "bench" / "methodologies" / "pr-merge-perf.e
 PR_OPTIMIZE_PERF_PROFILE = (
     REPO_ROOT / "bench" / "methodologies" / "pr-optimize-perf.env"
 )
+PR_METADATA_PERF_PROFILE = (
+    REPO_ROOT / "bench" / "methodologies" / "pr-metadata-perf.env"
+)
+METADATA_REPLAY_CRITERION_PROFILE = (
+    REPO_ROOT / "bench" / "methodologies" / "metadata-replay-criterion.env"
+)
+S3_CANDIDATE_PROFILES = {
+    "scan": REPO_ROOT / "bench" / "methodologies" / "scan-s3-candidate.env",
+    "write_perf": REPO_ROOT / "bench" / "methodologies" / "write-perf-s3-candidate.env",
+    "delete_update_perf": REPO_ROOT
+    / "bench"
+    / "methodologies"
+    / "delete-update-perf-s3-candidate.env",
+    "merge_perf": REPO_ROOT / "bench" / "methodologies" / "merge-perf-s3-candidate.env",
+    "optimize_perf": REPO_ROOT
+    / "bench"
+    / "methodologies"
+    / "optimize-perf-s3-candidate.env",
+    "metadata_perf": REPO_ROOT
+    / "bench"
+    / "methodologies"
+    / "metadata-perf-s3-candidate.env",
+}
 COMPARE_DOC = REPO_ROOT / "docs" / "comparing-branches.md"
 README_DOC = REPO_ROOT / "README.md"
 EVIDENCE_REGISTRY = REPO_ROOT / "bench" / "evidence" / "registry.yaml"
@@ -61,6 +84,9 @@ MERGE_PERF_SUITE = (
 )
 OPTIMIZE_PERF_SUITE = (
     REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "optimize_perf.rs"
+)
+METADATA_PERF_SUITE = (
+    REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "metadata_perf.rs"
 )
 TPCDS_SUITE = REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "tpcds" / "mod.rs"
 
@@ -170,6 +196,108 @@ def create_origin_and_fork_repos(temp_root: Path) -> tuple[Path, Path, str]:
     ).stdout.strip()
 
     return origin_repo, fork_repo, candidate_sha
+
+
+def install_validation_script_stubs(
+    temp_root: Path,
+) -> tuple[Path, Path, Path, Path, Path]:
+    scripts_dir = temp_root / "scripts"
+    scripts_dir.mkdir(parents=True)
+
+    validate_copy = scripts_dir / "validate_perf_harness.sh"
+    copy_executable(VALIDATION_SCRIPT, validate_copy)
+
+    prepare_log = temp_root / "prepare-log.jsonl"
+    compare_log = temp_root / "compare-log.jsonl"
+    managed_checkout = temp_root / ".delta-rs-under-test"
+    (managed_checkout / ".git").mkdir(parents=True)
+    fake_bin = temp_root / "bin"
+    fake_bin.mkdir()
+
+    write_executable(
+        scripts_dir / "prepare_delta_rs.sh",
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${{DELTA_RS_DIR}}/.git"
+if [[ -n "${{DELTA_RS_REF:-}}" ]]; then
+  printf '%s\\n' "${{DELTA_RS_REF}}" > "${{DELTA_RS_DIR}}/.bench-current-sha"
+fi
+python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+Path({str(prepare_log)!r}).open("a", encoding="utf-8").write(
+    json.dumps(
+        {{
+            "dir": os.environ.get("DELTA_RS_DIR"),
+            "ref": os.environ.get("DELTA_RS_REF"),
+            "fetch_url": os.environ.get("DELTA_RS_FETCH_URL"),
+            "fetch_ref": os.environ.get("DELTA_RS_FETCH_REF"),
+        }}
+    )
+    + "\\n"
+)
+PY
+echo "delta-rs checkout ready: ${{DELTA_RS_DIR}}"
+""",
+    )
+    write_executable(
+        scripts_dir / "sync_harness_to_delta_rs.sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+""",
+    )
+    write_executable(
+        scripts_dir / "bench.sh",
+        """#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+""",
+    )
+    write_executable(
+        scripts_dir / "compare_branch.sh",
+        f"""#!/usr/bin/env bash
+set -euo pipefail
+python3 - "$@" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+Path({str(compare_log)!r}).open("a", encoding="utf-8").write(
+    json.dumps({{"argv": sys.argv[1:]}}) + "\\n"
+)
+PY
+exit 99
+""",
+    )
+    write_executable(
+        fake_bin / "git",
+        """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "-C" ]]; then
+  repo_dir="$2"
+  shift 2
+else
+  repo_dir="$PWD"
+fi
+if [[ "${1:-}" == "rev-parse" ]]; then
+  shift
+  if [[ "${1:-}" == "--verify" ]]; then
+    shift
+  fi
+  if [[ "${1:-}" == "HEAD" ]]; then
+    cat "${repo_dir}/.bench-current-sha"
+    exit 0
+  fi
+fi
+echo "unsupported fake git invocation: $*" >&2
+exit 97
+""",
+    )
+
+    return validate_copy, prepare_log, compare_log, managed_checkout, fake_bin
 
 
 def assert_order(content: str, earlier: str, later: str) -> None:
@@ -289,6 +417,17 @@ def test_benchmark_workflow_supports_decision_command_grammar() -> None:
     assert (
         "firstLine.match(/^run benchmark(?:\\s+(decision))?\\s+(\\S+)$/i)" in workflow
     )
+
+
+def test_benchmark_workflow_invalid_command_guidance_points_to_operator_and_diagnostic_paths() -> (
+    None
+):
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "ready suites:" in workflow
+    assert "Candidate/manual perf suites stay operator-only." in workflow
+    assert "Use `./scripts/compare_branch.sh --current-vs-main --methodology-profile <profile> <suite>`" in workflow
+    assert "Use `./scripts/run_profile.sh <criterion-profile>` for diagnostic Criterion work." in workflow
 
 
 def test_benchmark_workflow_uses_sha_pins_for_compare_refs() -> None:
@@ -455,7 +594,7 @@ def test_compare_branch_docs_describe_replay_bench_workflow() -> None:
     )
 
     assert "replay-state" in combined
-    assert "scan_replay_bench" in combined
+    assert "metadata_replay_bench" in combined
     assert "scan_planning" not in combined
     assert "scan-plan" not in combined
 
@@ -478,6 +617,14 @@ def test_docs_distinguish_execute_guardrail_from_planning_probe() -> None:
     assert "investigation-grade" in combined
     assert "timing_phase=plan" in combined
     assert "replay-state" in combined
+
+
+def test_compare_branch_usage_and_errors_include_metadata_perf_surface() -> None:
+    script = COMPARE_BRANCH.read_text(encoding="utf-8")
+
+    assert "metadata_perf" in script
+    assert "metadata_replay_bench" in script
+    assert "scan_replay_bench" not in script
 
 
 def test_compare_branch_does_not_retry_benchmark_producing_steps() -> None:
@@ -563,6 +710,55 @@ def test_delete_update_perf_merge_perf_optimize_perf_profiles_use_medium_selecti
         assert profile["AGGREGATION"] == "median"
         assert profile["DATASET_POLICY"] == "shared_run_scope"
         assert profile["SPREAD_METRIC"] == "iqr_ms"
+
+
+def test_metadata_perf_profile_uses_many_versions_compare_contract() -> None:
+    profile = read_env_file(PR_METADATA_PERF_PROFILE)
+
+    assert profile["METHODOLOGY_PROFILE"] == "pr-metadata-perf"
+    assert profile["TARGET"] == "metadata_perf"
+    assert profile["PROFILE_KIND"] == "compare"
+    assert profile["DATASET_ID"] == "many_versions"
+    assert profile["COMPARE_MODE"] == "decision"
+    assert profile["MEASURE_ORDER"] == "alternate"
+    assert profile["TIMING_PHASE"] == "execute"
+    assert profile["AGGREGATION"] == "median"
+    assert profile["DATASET_POLICY"] == "shared_run_scope"
+    assert profile["SPREAD_METRIC"] == "iqr_ms"
+
+
+def test_metadata_replay_profile_stays_criterion_only() -> None:
+    profile = read_env_file(METADATA_REPLAY_CRITERION_PROFILE)
+
+    assert profile["METHODOLOGY_PROFILE"] == "metadata-replay-criterion"
+    assert profile["PROFILE_KIND"] == "criterion"
+    assert profile["TARGET"] == "metadata_perf"
+    assert profile["CRITERION_BENCH"] == "metadata_replay_bench"
+
+
+def test_remote_candidate_profiles_exist_and_pin_s3_backend_defaults() -> None:
+    for profile_name, profile_path in S3_CANDIDATE_PROFILES.items():
+        profile = read_env_file(profile_path)
+        assert profile["PROFILE_KIND"] == "compare"
+        assert profile["STORAGE_BACKEND"] == "s3"
+        assert profile["BACKEND_PROFILE"] == "s3_locking_vultr"
+        assert profile["COMPARE_MODE"] == "decision"
+        assert profile["MEASURE_ORDER"] == "alternate"
+        assert profile["TIMING_PHASE"] == "execute"
+        assert profile["AGGREGATION"] == "median"
+        assert profile["SPREAD_METRIC"] == "iqr_ms"
+
+
+def test_perf_owned_suites_no_longer_hard_reject_non_local_backends() -> None:
+    for suite_path in (
+        WRITE_PERF_SUITE,
+        DELETE_UPDATE_PERF_SUITE,
+        MERGE_PERF_SUITE,
+        OPTIMIZE_PERF_SUITE,
+        METADATA_PERF_SUITE,
+    ):
+        source = suite_path.read_text(encoding="utf-8")
+        assert "does not support non-local storage backend yet" not in source
 
 
 def test_compare_branch_derives_compare_and_manifest_args_from_shared_methodology_settings() -> (
@@ -696,6 +892,90 @@ def test_validation_script_exposes_artifact_dir_contract() -> None:
     assert "summary.md" in script
 
 
+def test_validation_script_seeds_same_sha_compare_from_prepared_execution_checkout() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        validate_copy, _, compare_log, managed_checkout, fake_bin = (
+            install_validation_script_stubs(temp_root)
+        )
+
+        validation_sha = "3fe2fa92a1dc54c8c6b378529b449f5f4c601e39"
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["DELTA_RS_DIR"] = str(managed_checkout)
+        env["VALIDATION_SHA"] = validation_sha
+        env["VALIDATION_ARTIFACT_DIR"] = str(temp_root / "results" / "validation")
+
+        result = subprocess.run(
+            ["bash", str(validate_copy)],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 99, result.stderr or result.stdout
+        compare_entries = [
+            json.loads(line)
+            for line in compare_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert compare_entries, "expected compare_branch.sh to be invoked"
+        first_compare = compare_entries[0]["argv"]
+        assert "--base-fetch-url" in first_compare
+        assert "--candidate-fetch-url" in first_compare
+        assert first_compare[first_compare.index("--base-fetch-url") + 1] == str(
+            managed_checkout
+        )
+        assert first_compare[first_compare.index("--candidate-fetch-url") + 1] == str(
+            managed_checkout
+        )
+
+
+def test_validation_script_threads_validation_fetch_contract_into_checkout_prep() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        validate_copy, prepare_log, _, managed_checkout, fake_bin = (
+            install_validation_script_stubs(temp_root)
+        )
+
+        validation_sha = "3fe2fa92a1dc54c8c6b378529b449f5f4c601e39"
+        fetch_url = str(temp_root / "fork.git")
+        fetch_ref = "refs/heads/pr-head"
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["DELTA_RS_DIR"] = str(managed_checkout)
+        env["VALIDATION_SHA"] = validation_sha
+        env["VALIDATION_FETCH_URL"] = fetch_url
+        env["VALIDATION_FETCH_REF"] = fetch_ref
+        env["VALIDATION_ARTIFACT_DIR"] = str(temp_root / "results" / "validation")
+
+        result = subprocess.run(
+            ["bash", str(validate_copy)],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 99, result.stderr or result.stdout
+        prepare_entries = [
+            json.loads(line)
+            for line in prepare_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert prepare_entries, "expected prepare_delta_rs.sh to be invoked"
+        assert prepare_entries[-1]["ref"] == validation_sha
+        assert prepare_entries[-1]["fetch_url"] == fetch_url
+        assert prepare_entries[-1]["fetch_ref"] == fetch_ref
+
+
 def test_validation_script_covers_all_scan_phase_canaries() -> None:
     script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
 
@@ -754,6 +1034,17 @@ def test_validation_script_covers_delete_update_perf_merge_perf_and_optimize_per
         assert case_name in script
         assert allow_env in script
         assert delay_env in script
+
+
+def test_validation_script_covers_metadata_perf_same_sha_and_regression_canary() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    assert "Running metadata_perf same-SHA branch compare..." in script
+    assert "Running metadata_perf regression-detection canary..." in script
+    assert "--methodology-profile pr-metadata-perf" in script
+    assert "metadata_perf_load_head_long_history" in script
+    assert "DELTA_BENCH_ALLOW_METADATA_PERF_DELAY=1" in script
+    assert "DELTA_BENCH_METADATA_PERF_DELAY_MS" in script
 
 
 def test_validation_script_embedded_python_helpers_compile() -> None:
@@ -931,6 +1222,15 @@ def test_delete_update_perf_merge_perf_and_optimize_perf_suites_contain_validati
         assert case_name in source
 
 
+def test_metadata_perf_suite_contains_validation_only_delay_canary_contract() -> None:
+    source = METADATA_PERF_SUITE.read_text(encoding="utf-8")
+
+    assert "DELTA_BENCH_ALLOW_METADATA_PERF_DELAY" in source
+    assert "DELTA_BENCH_METADATA_PERF_DELAY_MS" in source
+    assert "validation-only metadata_perf delay injection requires" in source
+    assert "metadata_perf_load_head_long_history" in source
+
+
 def test_validation_script_covers_tpcds_same_sha_and_regression_canary() -> None:
     script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
 
@@ -975,6 +1275,24 @@ def test_evidence_registry_lists_delete_update_perf_merge_perf_and_optimize_perf
     assert "delete_update_perf" in candidate_suites
     assert "merge_perf" in candidate_suites
     assert "optimize_perf" in candidate_suites
+
+
+def test_evidence_registry_lists_metadata_perf_as_candidate_manual() -> None:
+    from delta_bench_compare.registry import load_registry, pack_suite_definitions
+
+    registry = load_registry(EVIDENCE_REGISTRY)
+    suite = registry["suites"]["metadata_perf"]
+    assert suite["class"] == "authoritative_macro"
+    assert suite["automation_tier"] == "candidate_pr_bot"
+    assert suite["readiness"] == "gated"
+    assert suite["default_profile"] == "pr-metadata-perf"
+
+    candidate_pack = registry["packs"].get("pr-candidate-manual")
+    assert isinstance(candidate_pack, dict)
+    candidate_suites = [
+        entry["suite"] for entry in pack_suite_definitions(registry, candidate_pack)
+    ]
+    assert "metadata_perf" in candidate_suites
 
 
 def test_evidence_registry_replacement_surfaces_reference_real_suites() -> None:
@@ -1136,13 +1454,72 @@ def test_benchmark_nightly_is_explicit_macro_lane_for_curated_scan_only() -> Non
     assert "--suite write" not in workflow
 
 
-def test_benchmark_prerelease_is_curated_to_scan_only() -> None:
+def test_benchmark_nightly_uses_pack_driven_remote_candidate_path() -> None:
+    workflow = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    assert "s3-candidate-manual" in workflow
+    assert "python3 -m delta_bench_compare.pack plan" in workflow
+    assert "./scripts/run_profile.sh" in workflow
+    assert "Run nightly object-store benchmark" not in workflow
+
+
+def test_benchmark_nightly_accepts_storage_option_overrides_for_remote_pack() -> None:
+    workflow = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    assert "BENCH_STORAGE_OPTIONS" in workflow
+    assert "storage_args = []" in workflow
+    assert 'os.environ.get("BENCH_STORAGE_OPTIONS", "")' in workflow
+    assert "command.extend(storage_args)" in workflow
+    assert 'storage_args.extend(["--storage-option", opt])' in workflow
+
+
+def test_benchmark_nightly_enforces_per_shard_timeouts_and_collects_failures() -> None:
+    workflow = NIGHTLY_WORKFLOW.read_text(encoding="utf-8")
+    assert 'timeout_minutes = int(shard["timeout_minutes"])' in workflow
+    assert "timeout=timeout_minutes * 60" in workflow
+    assert "check=False" in workflow
+    assert "except subprocess.TimeoutExpired:" in workflow
+    assert "failures.append(" in workflow
+    assert "if failures:" in workflow
+
+
+def test_benchmark_prerelease_exposes_declared_remote_candidate_surfaces() -> None:
     workflow = PRERELEASE_WORKFLOW.read_text(encoding="utf-8")
-    assert re.search(r"default:\s*scan", workflow)
-    assert "default: all" not in workflow
-    assert "options:" in workflow
-    assert re.search(r"options:\n(?:\s+- .+\n)*\s+- scan\b", workflow)
+    assert "surface:" in workflow
+    assert re.search(r"default:\s*scan_s3", workflow)
+    assert "s3-candidate-manual" in workflow
+    assert "prerelease-s3-pack-plan.json" in workflow
+    assert "prerelease-s3-surface.json" in workflow
+    for surface_name in (
+        "scan_s3",
+        "delete_update_perf_s3",
+        "merge_perf_s3",
+        "optimize_perf_s3",
+        "metadata_perf_s3",
+    ):
+        assert surface_name in workflow
+    assert "write_perf_s3" not in workflow
     assert "- python" not in workflow
+
+
+def test_benchmark_prerelease_resolves_refs_with_remote_tracking_fallback() -> None:
+    workflow = PRERELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert "resolve_commit_ref()" in workflow
+    assert 'git rev-parse --verify --quiet "${ref}^{commit}"' in workflow
+    assert 'git rev-parse --verify --quiet "refs/remotes/origin/${ref}^{commit}"' in workflow
+    assert 'base_sha="$(resolve_commit_ref "${BASE_REF}")"' in workflow
+    assert 'candidate_sha="$(resolve_commit_ref "${CANDIDATE_REF}")"' in workflow
+
+
+def test_benchmark_prerelease_preserves_compare_hardening_and_storage_overrides() -> (
+    None
+):
+    workflow = PRERELEASE_WORKFLOW.read_text(encoding="utf-8")
+    assert "BENCH_STORAGE_OPTIONS" in workflow
+    assert "storage_args=()" in workflow
+    assert 'storage_args+=(--storage-option "${opt}")' in workflow
+    assert '--enforce-run-mode \\' in workflow
+    assert '--require-no-public-ipv4 \\' in workflow
+    assert '--require-egress-policy \\' in workflow
+    assert '"${storage_args[@]}" \\' in workflow
 
 
 def test_longitudinal_nightly_is_explicit_macro_lane_for_curated_scan_only() -> None:
@@ -3894,6 +4271,8 @@ print("hash policy ok")
             "spread_metric": "iqr_ms",
             "sub_ms_threshold_ms": 1.0,
             "sub_ms_policy": "micro_only",
+            "storage_backend": "local",
+            "backend_profile": None,
         }
         compare_invocations = [
             json.loads(line)

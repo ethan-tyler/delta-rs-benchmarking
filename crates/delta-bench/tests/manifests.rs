@@ -48,19 +48,34 @@ fn loads_p0_rust_manifest_in_file_order() {
             "update_literal_5pct_scattered",
             "update_expr_50pct_broad",
             "update_all_rows_expr",
+            "delete_perf_localized_1pct",
+            "delete_perf_scattered_5pct_small_files",
+            "update_perf_literal_5pct_scattered",
+            "update_perf_all_rows_expr",
             "merge_delete_5pct",
             "merge_upsert_10pct_insert_10pct",
             "merge_upsert_10pct",
             "merge_upsert_50pct",
             "merge_upsert_90pct",
             "merge_localized_1pct",
+            "merge_perf_upsert_10pct",
+            "merge_perf_upsert_50pct",
+            "merge_perf_localized_1pct",
+            "merge_perf_delete_5pct",
             "metadata_load",
             "metadata_time_travel_v0",
+            "metadata_perf_load_head_long_history",
+            "metadata_perf_time_travel_v0_long_history",
+            "metadata_perf_load_checkpointed_head",
+            "metadata_perf_load_uncheckpointed_head",
             "optimize_compact_small_files",
             "optimize_noop_already_compact",
             "optimize_heavy_compaction",
             "vacuum_dry_run_lite",
             "vacuum_execute_lite",
+            "optimize_perf_compact_small_files",
+            "optimize_perf_noop_already_compact",
+            "vacuum_perf_execute_lite",
             "concurrent_table_create",
             "concurrent_append_multi",
             "update_vs_compaction",
@@ -88,6 +103,82 @@ fn p0_rust_manifest_includes_all_write_perf_cases() {
         assert!(
             present,
             "missing write_perf manifest entry for case '{case}'"
+        );
+    }
+}
+
+#[test]
+fn p0_rust_manifest_includes_all_delete_update_perf_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let expected_cases = list_cases_for_target("delete_update_perf")
+        .expect("delete_update_perf should be a registered suite target");
+
+    for case in expected_cases {
+        let present = manifest
+            .cases
+            .iter()
+            .any(|entry| entry.target == "delete_update_perf" && entry.id == case);
+        assert!(
+            present,
+            "missing delete_update_perf manifest entry for case '{case}'"
+        );
+    }
+}
+
+#[test]
+fn p0_rust_manifest_includes_all_merge_perf_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let expected_cases = list_cases_for_target("merge_perf")
+        .expect("merge_perf should be a registered suite target");
+
+    for case in expected_cases {
+        let present = manifest
+            .cases
+            .iter()
+            .any(|entry| entry.target == "merge_perf" && entry.id == case);
+        assert!(
+            present,
+            "missing merge_perf manifest entry for case '{case}'"
+        );
+    }
+}
+
+#[test]
+fn p0_rust_manifest_includes_all_metadata_perf_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let expected_cases = list_cases_for_target("metadata_perf")
+        .expect("metadata_perf should be a registered suite target");
+
+    for case in expected_cases {
+        let present = manifest
+            .cases
+            .iter()
+            .any(|entry| entry.target == "metadata_perf" && entry.id == case);
+        assert!(
+            present,
+            "missing metadata_perf manifest entry for case '{case}'"
+        );
+    }
+}
+
+#[test]
+fn p0_rust_manifest_includes_all_optimize_perf_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let expected_cases = list_cases_for_target("optimize_perf")
+        .expect("optimize_perf should be a registered suite target");
+
+    for case in expected_cases {
+        let present = manifest
+            .cases
+            .iter()
+            .any(|entry| entry.target == "optimize_perf" && entry.id == case);
+        assert!(
+            present,
+            "missing optimize_perf manifest entry for case '{case}'"
         );
     }
 }
@@ -261,6 +352,16 @@ fn p0_rust_manifest_excludes_unqualified_scan_case_from_authoritative_lane() {
     let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");
 
+    let scan_pruning_hit = manifest
+        .cases
+        .iter()
+        .find(|case| case.id == "scan_pruning_hit")
+        .expect("scan_pruning_hit should stay listed for explicit review");
+    assert!(
+        !scan_pruning_hit.enabled,
+        "scan_pruning_hit should stay outside the authoritative macro manifest and move to microbench coverage"
+    );
+
     let scan_pruning_miss = manifest
         .cases
         .iter()
@@ -285,7 +386,6 @@ fn p0_rust_manifest_excludes_unqualified_scan_case_from_authoritative_lane() {
             "scan_full_narrow",
             "scan_projection_region",
             "scan_filter_flag",
-            "scan_pruning_hit",
         ]
     );
 }
@@ -338,6 +438,19 @@ fn p0_rust_manifest_case_ids_match_suite_case_lists() {
             case.target
         );
     }
+}
+
+#[test]
+fn p0_rust_manifest_excludes_scan_planning_cases() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    assert!(
+        manifest
+            .cases
+            .iter()
+            .all(|entry| entry.target != "scan_planning"),
+        "scan_planning should not remain in the public rust manifest"
+    );
 }
 
 #[test]

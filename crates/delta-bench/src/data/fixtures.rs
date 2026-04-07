@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use deltalake_core::arrow;
+use deltalake_core::checkpoints;
 use deltalake_core::protocol::SaveMode;
 use url::Url;
 
@@ -22,11 +23,19 @@ const MERGE_PARTITIONED_TARGET_TABLE_DIR: &str = "merge_partitioned_target_delta
 const OPTIMIZE_SMALL_FILES_TABLE_DIR: &str = "optimize_small_files_delta";
 const OPTIMIZE_COMPACTED_TABLE_DIR: &str = "optimize_compacted_delta";
 const VACUUM_READY_TABLE_DIR: &str = "vacuum_ready_delta";
+const METADATA_LONG_HISTORY_TABLE_DIR: &str = "metadata_long_history_delta";
+const METADATA_CHECKPOINTED_TABLE_DIR: &str = "metadata_checkpointed_delta";
+const METADATA_UNCHECKPOINTED_TABLE_DIR: &str = "metadata_uncheckpointed_delta";
 const TPCDS_DIR: &str = "tpcds";
 const TPCDS_STORE_SALES_TABLE_DIR: &str = "store_sales";
 const FIXTURE_SCHEMA_VERSION: u32 = 3;
 const FIXTURE_GENERATOR_VERSION: u32 = 1;
 const MANY_VERSIONS_APPEND_COMMITS: usize = 12;
+const METADATA_SEED_ROWS: usize = 4_096;
+const METADATA_LONG_HISTORY_APPEND_COMMITS: usize = 48;
+const METADATA_COMPARE_HISTORY_APPEND_COMMITS: usize = 24;
+const METADATA_HISTORY_CHUNK_SIZE: usize = 64;
+const METADATA_CHECKPOINT_INTERVAL: &str = "100000";
 const FIXTURE_LOCK_DIR: &str = ".delta_bench_locks";
 const DEFAULT_FIXTURE_LOCK_TIMEOUT_MS: u64 = 120_000;
 const DEFAULT_FIXTURE_LOCK_RETRY_MS: u64 = 50;
@@ -42,8 +51,8 @@ const TPCDS_DUCKDB_PYTHON_ENV: &str = "DELTA_BENCH_DUCKDB_PYTHON";
 const TPCDS_DUCKDB_SCRIPT_ENV: &str = "DELTA_BENCH_TPCDS_DUCKDB_SCRIPT";
 const TPCDS_DUCKDB_TIMEOUT_ENV: &str = "DELTA_BENCH_TPCDS_DUCKDB_TIMEOUT_MS";
 
-fn fixture_table_inventory() -> Vec<String> {
-    vec![
+fn fixture_table_inventory(profile: FixtureProfile) -> Vec<String> {
+    let mut inventory = vec![
         NARROW_SALES_TABLE_DIR.to_string(),
         MERGE_TARGET_TABLE_DIR.to_string(),
         READ_PARTITIONED_TABLE_DIR.to_string(),
@@ -53,7 +62,15 @@ fn fixture_table_inventory() -> Vec<String> {
         OPTIMIZE_COMPACTED_TABLE_DIR.to_string(),
         VACUUM_READY_TABLE_DIR.to_string(),
         format!("{TPCDS_DIR}/{TPCDS_STORE_SALES_TABLE_DIR}"),
-    ]
+    ];
+    if profile == FixtureProfile::ManyVersions {
+        inventory.extend([
+            METADATA_LONG_HISTORY_TABLE_DIR.to_string(),
+            METADATA_CHECKPOINTED_TABLE_DIR.to_string(),
+            METADATA_UNCHECKPOINTED_TABLE_DIR.to_string(),
+        ]);
+    }
+    inventory
 }
 
 fn compute_dataset_fingerprint(
@@ -91,6 +108,10 @@ fn build_fixture_recipe(
         profile: profile.as_str().to_string(),
         table_inventory,
         many_versions_append_commits: MANY_VERSIONS_APPEND_COMMITS,
+        metadata_seed_rows: METADATA_SEED_ROWS.min(rows),
+        metadata_long_history_append_commits: METADATA_LONG_HISTORY_APPEND_COMMITS,
+        metadata_compare_history_append_commits: METADATA_COMPARE_HISTORY_APPEND_COMMITS,
+        metadata_history_chunk_size: METADATA_HISTORY_CHUNK_SIZE,
         read_partition_chunk_size: READ_PARTITION_CHUNK_SIZE,
         merge_partition_chunk_size: MERGE_PARTITION_CHUNK_SIZE,
         delete_update_partition_chunk_size: DELETE_UPDATE_PARTITION_CHUNK_SIZE,
@@ -167,14 +188,26 @@ pub fn vacuum_ready_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
     fixture_root(fixtures_dir, scale).join(VACUUM_READY_TABLE_DIR)
 }
 
+pub fn metadata_long_history_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixture_root(fixtures_dir, scale).join(METADATA_LONG_HISTORY_TABLE_DIR)
+}
+
+pub fn metadata_checkpointed_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixture_root(fixtures_dir, scale).join(METADATA_CHECKPOINTED_TABLE_DIR)
+}
+
+pub fn metadata_uncheckpointed_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
+    fixture_root(fixtures_dir, scale).join(METADATA_UNCHECKPOINTED_TABLE_DIR)
+}
+
 pub fn tpcds_store_sales_table_path(fixtures_dir: &Path, scale: &str) -> PathBuf {
     fixture_root(fixtures_dir, scale)
         .join(TPCDS_DIR)
         .join(TPCDS_STORE_SALES_TABLE_DIR)
 }
 
-fn required_local_fixture_tables_exist(root: &Path) -> bool {
-    [
+fn required_local_fixture_tables_exist(root: &Path, profile: FixtureProfile) -> bool {
+    let mut required_tables = vec![
         NARROW_SALES_TABLE_DIR,
         MERGE_TARGET_TABLE_DIR,
         READ_PARTITIONED_TABLE_DIR,
@@ -183,9 +216,17 @@ fn required_local_fixture_tables_exist(root: &Path) -> bool {
         OPTIMIZE_COMPACTED_TABLE_DIR,
         VACUUM_READY_TABLE_DIR,
         "tpcds/store_sales",
-    ]
-    .iter()
-    .all(|table| root.join(table).join("_delta_log").exists())
+    ];
+    if profile == FixtureProfile::ManyVersions {
+        required_tables.extend([
+            METADATA_LONG_HISTORY_TABLE_DIR,
+            METADATA_CHECKPOINTED_TABLE_DIR,
+            METADATA_UNCHECKPOINTED_TABLE_DIR,
+        ]);
+    }
+    required_tables
+        .iter()
+        .all(|table| root.join(table).join("_delta_log").exists())
 }
 
 pub fn narrow_sales_table_url(
@@ -281,6 +322,42 @@ pub fn vacuum_ready_table_url(
         &vacuum_ready_table_path(fixtures_dir, scale),
         scale,
         VACUUM_READY_TABLE_DIR,
+    )
+}
+
+pub fn metadata_long_history_table_url(
+    fixtures_dir: &Path,
+    scale: &str,
+    storage: &StorageConfig,
+) -> BenchResult<Url> {
+    storage.table_url_for(
+        &metadata_long_history_table_path(fixtures_dir, scale),
+        scale,
+        METADATA_LONG_HISTORY_TABLE_DIR,
+    )
+}
+
+pub fn metadata_checkpointed_table_url(
+    fixtures_dir: &Path,
+    scale: &str,
+    storage: &StorageConfig,
+) -> BenchResult<Url> {
+    storage.table_url_for(
+        &metadata_checkpointed_table_path(fixtures_dir, scale),
+        scale,
+        METADATA_CHECKPOINTED_TABLE_DIR,
+    )
+}
+
+pub fn metadata_uncheckpointed_table_url(
+    fixtures_dir: &Path,
+    scale: &str,
+    storage: &StorageConfig,
+) -> BenchResult<Url> {
+    storage.table_url_for(
+        &metadata_uncheckpointed_table_path(fixtures_dir, scale),
+        scale,
+        METADATA_UNCHECKPOINTED_TABLE_DIR,
     )
 }
 
@@ -469,7 +546,7 @@ pub async fn generate_fixtures_with_profile(
     let data_path = dataset_dir.join("rows.jsonl");
     let manifest_path = root.join("manifest.json");
     let rows = scale_to_row_count(scale)?;
-    let table_inventory = fixture_table_inventory();
+    let table_inventory = fixture_table_inventory(profile);
 
     if !force
         && profile != FixtureProfile::TpcdsDuckdb
@@ -541,6 +618,7 @@ pub async fn generate_fixtures_with_profile(
             storage,
         )
         .await?;
+        write_metadata_history_tables(fixtures_dir, scale, &data, &fixture_recipe, storage).await?;
     }
 
     write_delta_table_partitioned_small_files(
@@ -718,7 +796,8 @@ fn existing_fixture_manifest_matches(
     storage: &StorageConfig,
 ) -> bool {
     let root = fixture_root(fixtures_dir, scale);
-    let local_tables_ready = !storage.is_local() || required_local_fixture_tables_exist(&root);
+    let local_tables_ready =
+        !storage.is_local() || required_local_fixture_tables_exist(&root, profile);
 
     existing.schema_version == FIXTURE_SCHEMA_VERSION
         && existing.seed == seed
@@ -832,19 +911,126 @@ pub(crate) async fn write_vacuum_ready_table(
     Ok(())
 }
 
+async fn write_metadata_history_tables(
+    fixtures_dir: &Path,
+    scale: &str,
+    rows: &[NarrowSaleRow],
+    recipe: &FixtureRecipe,
+    storage: &StorageConfig,
+) -> BenchResult<()> {
+    let metadata_rows = rows
+        .iter()
+        .take(recipe.metadata_seed_rows.max(1))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let long_history_url = metadata_long_history_table_url(fixtures_dir, scale, storage)?;
+    write_delta_table_with_checkpoint_interval(
+        long_history_url.clone(),
+        &metadata_rows,
+        METADATA_CHECKPOINT_INTERVAL,
+        storage,
+    )
+    .await?;
+    append_narrow_sales_versions(
+        long_history_url,
+        &metadata_rows,
+        recipe.metadata_long_history_append_commits,
+        recipe.metadata_history_chunk_size,
+        storage,
+    )
+    .await?;
+
+    let checkpointed_url = metadata_checkpointed_table_url(fixtures_dir, scale, storage)?;
+    write_delta_table_with_checkpoint_interval(
+        checkpointed_url.clone(),
+        &metadata_rows,
+        METADATA_CHECKPOINT_INTERVAL,
+        storage,
+    )
+    .await?;
+    append_narrow_sales_versions(
+        checkpointed_url.clone(),
+        &metadata_rows,
+        recipe.metadata_compare_history_append_commits,
+        recipe.metadata_history_chunk_size,
+        storage,
+    )
+    .await?;
+    let checkpointed_table = storage.open_table(checkpointed_url).await?;
+    checkpoints::create_checkpoint(&checkpointed_table, None).await?;
+
+    let uncheckpointed_url = metadata_uncheckpointed_table_url(fixtures_dir, scale, storage)?;
+    write_delta_table_with_checkpoint_interval(
+        uncheckpointed_url.clone(),
+        &metadata_rows,
+        METADATA_CHECKPOINT_INTERVAL,
+        storage,
+    )
+    .await?;
+    append_narrow_sales_versions(
+        uncheckpointed_url,
+        &metadata_rows,
+        recipe.metadata_compare_history_append_commits,
+        recipe.metadata_history_chunk_size,
+        storage,
+    )
+    .await?;
+
+    Ok(())
+}
+
+async fn write_delta_table_with_checkpoint_interval(
+    table_url: Url,
+    rows: &[NarrowSaleRow],
+    checkpoint_interval: &str,
+    storage: &StorageConfig,
+) -> BenchResult<()> {
+    prepare_local_table_dir(&table_url)?;
+
+    let batch = rows_to_batch(rows)?;
+    let _ = storage
+        .try_from_url_for_write(table_url)
+        .await?
+        .write(vec![batch])
+        .with_save_mode(SaveMode::Overwrite)
+        .with_configuration([("delta.checkpointInterval", Some(checkpoint_interval))])
+        .await?;
+
+    Ok(())
+}
+
 async fn write_many_narrow_sales_versions(
     table_url: Url,
     rows: &[NarrowSaleRow],
     storage: &StorageConfig,
 ) -> BenchResult<()> {
-    if rows.is_empty() {
+    let chunk_size = (rows.len() / 64).clamp(32, 256);
+    append_narrow_sales_versions(
+        table_url,
+        rows,
+        MANY_VERSIONS_APPEND_COMMITS,
+        chunk_size,
+        storage,
+    )
+    .await
+}
+
+async fn append_narrow_sales_versions(
+    table_url: Url,
+    rows: &[NarrowSaleRow],
+    commit_count: usize,
+    chunk_size: usize,
+    storage: &StorageConfig,
+) -> BenchResult<()> {
+    if rows.is_empty() || commit_count == 0 {
         return Ok(());
     }
 
     let mut table = storage.try_from_url_for_write(table_url).await?;
-    let chunk_size = (rows.len() / 64).clamp(32, 256);
+    let chunk_size = chunk_size.max(1);
 
-    for commit_idx in 0..MANY_VERSIONS_APPEND_COMMITS {
+    for commit_idx in 0..commit_count {
         let start = (commit_idx * chunk_size) % rows.len();
         let end = (start + chunk_size).min(rows.len());
         let mut chunk = rows[start..end].to_vec();

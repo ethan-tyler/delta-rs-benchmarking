@@ -20,7 +20,7 @@ use crate::storage::StorageConfig;
 use crate::validation::{lane_requires_semantic_validation, validate_table_state};
 
 #[derive(Clone, Copy)]
-enum DmlOperation {
+pub(crate) enum DmlOperation {
     Delete,
     UpdateLiteral,
     UpdateExpression,
@@ -28,12 +28,12 @@ enum DmlOperation {
 }
 
 #[derive(Clone, Copy)]
-struct DeleteUpdateCase {
-    name: &'static str,
-    operation: DmlOperation,
-    rows_matched_fraction: Option<f64>,
-    partition_localized: bool,
-    small_files_seed: bool,
+pub(crate) struct DeleteUpdateCase {
+    pub(crate) name: &'static str,
+    pub(crate) operation: DmlOperation,
+    pub(crate) rows_matched_fraction: Option<f64>,
+    pub(crate) partition_localized: bool,
+    pub(crate) small_files_seed: bool,
 }
 
 struct IterationSetup {
@@ -205,7 +205,7 @@ pub async fn run(
     Ok(out)
 }
 
-async fn run_delete_update_case(
+pub(crate) async fn run_delete_update_case(
     table: DeltaTable,
     case: DeleteUpdateCase,
     lane: BenchmarkLane,

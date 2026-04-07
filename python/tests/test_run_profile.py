@@ -123,7 +123,7 @@ def test_run_profile_dry_run_uses_criterion_metadata() -> None:
         ),
         (
             "metadata-replay-criterion",
-            "cargo bench -p delta-bench --bench scan_replay_bench",
+            "cargo bench -p delta-bench --bench metadata_replay_bench",
         ),
     ],
 )
@@ -142,6 +142,78 @@ def test_run_profile_dry_run_resolves_committed_criterion_profiles(
     assert result.returncode == 0
     assert result.stderr == ""
     assert result.stdout.strip() == expected_command
+
+
+def test_run_profile_dry_run_resolves_scan_s3_candidate_compare_command() -> None:
+    result = subprocess.run(
+        [str(RUN_PROFILE), "--dry-run", "--current-vs-main", "scan-s3-candidate"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == (
+        "./scripts/compare_branch.sh --current-vs-main "
+        "--storage-backend s3 --backend-profile s3_locking_vultr "
+        "--methodology-profile scan-s3-candidate scan"
+    )
+
+
+def test_run_profile_dry_run_preserves_explicit_storage_contract_overrides() -> None:
+    result = subprocess.run(
+        [
+            str(RUN_PROFILE),
+            "--dry-run",
+            "--current-vs-main",
+            "scan-s3-candidate",
+            "--storage-backend",
+            "s3",
+            "--backend-profile",
+            "custom_remote",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == (
+        "./scripts/compare_branch.sh --current-vs-main "
+        "--methodology-profile scan-s3-candidate "
+        "--storage-backend s3 --backend-profile custom_remote"
+    )
+
+
+def test_run_profile_dry_run_accepts_compare_hardening_flags() -> None:
+    result = subprocess.run(
+        [
+            str(RUN_PROFILE),
+            "--dry-run",
+            "--current-vs-main",
+            "--enforce-run-mode",
+            "--require-no-public-ipv4",
+            "--require-egress-policy",
+            "scan-s3-candidate",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == (
+        "./scripts/compare_branch.sh --current-vs-main "
+        "--enforce-run-mode --require-no-public-ipv4 --require-egress-policy "
+        "--storage-backend s3 --backend-profile s3_locking_vultr "
+        "--methodology-profile scan-s3-candidate scan"
+    )
 
 
 def test_run_profile_dry_run_resolves_metadata_log_criterion_command() -> None:

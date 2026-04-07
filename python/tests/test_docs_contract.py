@@ -235,6 +235,41 @@ def test_docs_cover_pack_based_pr_decision_contract() -> None:
     assert "tpcds remains candidate/manual" in combined
 
 
+def test_docs_define_ready_vs_candidate_vs_diagnostic_entrypoints() -> None:
+    combined = "\n".join(
+        (
+            (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "reference.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "validation.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "architecture.md").read_text(encoding="utf-8"),
+        )
+    )
+
+    assert "run benchmark decision scan" in combined
+    assert "run benchmark decision full" in combined
+    assert (
+        "./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf"
+        in combined
+    )
+    assert (
+        "./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf"
+        in combined
+    )
+    assert "./scripts/run_profile.sh scan-phase-criterion" in combined
+    assert "./scripts/run_profile.sh metadata-replay-criterion" in combined
+
+
+def test_validation_docs_include_metadata_perf_in_validator_scope_summary() -> None:
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+
+    for line in validation.splitlines():
+        if "`./scripts/validate_perf_harness.sh` reruns" in line:
+            assert "metadata_perf" in line
+            break
+    else:
+        raise AssertionError("missing validator scope summary line")
+
+
 def test_cloud_runner_docs_cover_enforced_workflows_and_required_env() -> None:
     markdown = (DOCS_DIR / "cloud-runner.md").read_text(encoding="utf-8")
     workflow_names = _self_hosted_benchmark_workflow_names()
@@ -299,6 +334,23 @@ def test_validation_docs_match_artifact_dir_contract() -> None:
     assert "summary.md" in compare_doc
     assert "comparison.json" in reference
     assert "manifest.json" in reference
+
+
+def test_docs_define_validation_fetch_contract_for_trusted_runner_shas() -> None:
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+    cloud_runner = (DOCS_DIR / "cloud-runner.md").read_text(encoding="utf-8")
+    tracker = (DOCS_DIR / "plans" / "2026-04-05-pr-suite-rollout-tracker.md").read_text(
+        encoding="utf-8"
+    )
+
+    combined = "\n".join((validation, compare_doc, reference, cloud_runner, tracker))
+    assert "./scripts/validate_perf_harness.sh --sha" in combined
+    assert "--fetch-url" in combined
+    assert "VALIDATION_FETCH_URL" in combined
+    assert ".delta-rs-under-test" in combined
+    assert ".delta-rs-source" in combined
 
 
 def test_validation_docs_record_all_scan_phase_canaries() -> None:
@@ -426,7 +478,7 @@ def test_docs_publish_criterion_family_map_and_diagnostic_policy() -> None:
 
     for profile_name, bench_name in (
         ("scan-phase-criterion", "scan_phase_bench"),
-        ("metadata-replay-criterion", "scan_replay_bench"),
+        ("metadata-replay-criterion", "metadata_replay_bench"),
     ):
         assert profile_name in combined
         assert bench_name in combined
@@ -440,7 +492,7 @@ def test_validation_docs_use_replay_bench_instead_of_scan_planning_compare() -> 
     validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
 
     assert "metadata-replay-criterion" in validation
-    assert "scan_replay_bench" in validation
+    assert "metadata_replay_bench" in validation
     assert "scan_planning" not in validation
     assert "scan-plan" not in validation
 
@@ -508,6 +560,28 @@ def test_docs_require_tpcds_gate_before_promotion() -> None:
         "./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate"
         in combined
     )
+
+
+def test_docs_cover_remote_candidate_manual_profiles_and_pack() -> None:
+    combined = "\n".join(
+        (
+            (DOCS_DIR / "getting-started.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "cloud-runner.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "reference.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "architecture.md").read_text(encoding="utf-8"),
+        )
+    )
+
+    for token in (
+        "scan-s3-candidate",
+        "metadata-perf-s3-candidate",
+        "write-perf-s3-candidate",
+        "s3-candidate-manual",
+        "storage_backend",
+        "backend_profile",
+        "s3_locking_vultr",
+    ):
+        assert token in combined
 
 
 def test_readme_and_architecture_drop_stale_suite_counts_and_include_concurrency() -> (

@@ -4,6 +4,7 @@ pub mod sql_loader;
 
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::cli::TimingPhase;
 use crate::error::BenchResult;
@@ -22,6 +23,10 @@ use deltalake_core::datafusion::execution::context::TaskContext;
 use deltalake_core::datafusion::physical_plan::collect;
 use deltalake_core::datafusion::physical_plan::ExecutionPlan;
 use deltalake_core::datafusion::prelude::SessionContext;
+
+const TPCDS_DELAY_ENV: &str = "DELTA_BENCH_TPCDS_DELAY_MS";
+const TPCDS_ALLOW_DELAY_ENV: &str = "DELTA_BENCH_ALLOW_TPCDS_DELAY";
+const TPCDS_VALIDATION_CANARY_CASE_ID: &str = "tpcds_q03";
 
 struct LoadedTpcdsQuery {
     ctx: SessionContext,
@@ -122,8 +127,10 @@ pub(crate) async fn run_with_specs_and_sql_dir(
         let fixture_root = fixtures_dir.to_path_buf();
         let scale = scale.to_string();
         let storage = storage.clone();
+        let run_case_name = case_name.clone();
         let result =
             run_case_async_with_timing_phase(&case_name, warmup, iterations, timing_phase, || {
+                let case_name = run_case_name.clone();
                 let sql = sql.clone();
                 let fixture_root = fixture_root.clone();
                 let scale = scale.clone();
@@ -141,7 +148,7 @@ pub(crate) async fn run_with_specs_and_sql_dir(
                         .map_err(|err| err.to_string())?;
                     let planning_elapsed_ms = planning_start.elapsed().as_secs_f64() * 1000.0;
 
-                    let executed = execute_prepared_query(prepared)
+                    let executed = execute_prepared_query(&case_name, prepared)
                         .await
                         .map_err(|err| err.to_string())?;
                     let execution_elapsed_ms = executed.execution_elapsed_ms;
@@ -196,8 +203,12 @@ async fn plan_loaded_query(loaded: LoadedTpcdsQuery, sql: &str) -> BenchResult<P
     Ok(PreparedTpcdsQuery { plan, task_ctx })
 }
 
-async fn execute_prepared_query(prepared: PreparedTpcdsQuery) -> BenchResult<ExecutedTpcdsQuery> {
+async fn execute_prepared_query(
+    case_id: &str,
+    prepared: PreparedTpcdsQuery,
+) -> BenchResult<ExecutedTpcdsQuery> {
     let timed_start = std::time::Instant::now();
+    apply_validation_delay(case_id).await?;
     let batches = collect(prepared.plan.clone(), prepared.task_ctx).await?;
     let elapsed_ms = timed_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -248,6 +259,38 @@ async fn validate_executed_query(
     ))
 }
 
+async fn apply_validation_delay(case_id: &str) -> BenchResult<()> {
+    let Some(delay) = parse_validation_delay(case_id)? else {
+        return Ok(());
+    };
+    // Validation-only canaries inject a fixed delay into one measured execute path.
+    tokio::time::sleep(delay).await;
+    Ok(())
+}
+
+fn parse_validation_delay(case_id: &str) -> BenchResult<Option<Duration>> {
+    let Some(raw) = std::env::var_os(TPCDS_DELAY_ENV) else {
+        return Ok(None);
+    };
+    if std::env::var(TPCDS_ALLOW_DELAY_ENV).as_deref() != Ok("1") {
+        return Err(crate::error::BenchError::InvalidArgument(format!(
+            "validation-only tpcds delay injection requires {TPCDS_ALLOW_DELAY_ENV}=1"
+        )));
+    }
+    if case_id != TPCDS_VALIDATION_CANARY_CASE_ID {
+        return Ok(None);
+    }
+    let raw = raw.into_string().map_err(|_| {
+        crate::error::BenchError::InvalidArgument(format!("{TPCDS_DELAY_ENV} must be valid UTF-8"))
+    })?;
+    let delay_ms = raw.parse::<u64>().map_err(|_| {
+        crate::error::BenchError::InvalidArgument(format!(
+            "{TPCDS_DELAY_ENV} must be an unsigned integer number of milliseconds"
+        ))
+    })?;
+    Ok(Some(Duration::from_millis(delay_ms)))
+}
+
 fn skipped_case_result(case: String, skip_reason: Option<&str>) -> CaseResult {
     CaseResult {
         case,
@@ -284,9 +327,15 @@ fn into_case_result(result: CaseExecutionResult) -> CaseResult {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
     use super::{
-        catalog::TpcdsQuerySpec, execute_prepared_query, load_query_context, plan_loaded_query,
-        run_with_specs_and_sql_dir, validate_executed_query,
+        catalog::TpcdsQuerySpec, execute_prepared_query, load_query_context,
+        parse_validation_delay, plan_loaded_query, run_with_specs_and_sql_dir,
+        validate_executed_query, TPCDS_ALLOW_DELAY_ENV, TPCDS_DELAY_ENV,
+        TPCDS_VALIDATION_CANARY_CASE_ID,
     };
     use crate::cli::TimingPhase;
     use crate::data::fixtures::generate_fixtures;
@@ -295,6 +344,43 @@ mod tests {
     use deltalake_core::datafusion::physical_plan::metrics::{
         ExecutionPlanMetricsSet, MetricBuilder,
     };
+
+    struct EnvRestoreGuard {
+        previous: Vec<(String, Option<OsString>)>,
+    }
+
+    impl EnvRestoreGuard {
+        fn set(entries: &[(&str, &str)]) -> Self {
+            let previous = entries
+                .iter()
+                .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
+                .collect::<Vec<_>>();
+            for (key, value) in entries {
+                // Safety: tests serialize environment mutation through env_mutex().
+                unsafe { std::env::set_var(key, value) };
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for EnvRestoreGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                if let Some(value) = value {
+                    // Safety: tests serialize environment mutation through env_mutex().
+                    unsafe { std::env::set_var(&key, value) };
+                } else {
+                    // Safety: tests serialize environment mutation through env_mutex().
+                    unsafe { std::env::remove_var(&key) };
+                }
+            }
+        }
+    }
+
+    fn env_mutex() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn sum_pruned_metrics_includes_pruning_metrics_values() {
@@ -327,7 +413,7 @@ mod tests {
         let prepared = plan_loaded_query(loaded, "SELECT COUNT(*) FROM store_sales")
             .await
             .expect("plan query");
-        let executed = execute_prepared_query(prepared)
+        let executed = execute_prepared_query("tpcds_q03", prepared)
             .await
             .expect("execute query");
         let elapsed_ms = executed.execution_elapsed_ms;
@@ -379,5 +465,37 @@ mod tests {
             msg.contains("failed to load sql"),
             "expected missing SQL failure, got: {msg}"
         );
+    }
+
+    #[test]
+    fn tpcds_delay_requires_explicit_validation_opt_in() {
+        let _env_guard = env_mutex().lock().expect("env mutex");
+        let _restore_guard =
+            EnvRestoreGuard::set(&[(TPCDS_ALLOW_DELAY_ENV, ""), (TPCDS_DELAY_ENV, "25")]);
+        // Safety: env mutation is serialized by env_mutex().
+        unsafe { std::env::remove_var(TPCDS_ALLOW_DELAY_ENV) };
+
+        let error = parse_validation_delay(TPCDS_VALIDATION_CANARY_CASE_ID)
+            .expect_err("delay env without allow env should fail closed");
+        assert!(
+            error
+                .to_string()
+                .contains("validation-only tpcds delay injection requires"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn tpcds_delay_only_applies_to_validation_canary_case() {
+        let _env_guard = env_mutex().lock().expect("env mutex");
+        let _restore_guard =
+            EnvRestoreGuard::set(&[(TPCDS_ALLOW_DELAY_ENV, "1"), (TPCDS_DELAY_ENV, "25")]);
+
+        let skipped = parse_validation_delay("tpcds_q07").expect("non-canary case should parse");
+        let selected =
+            parse_validation_delay(TPCDS_VALIDATION_CANARY_CASE_ID).expect("canary case parses");
+
+        assert_eq!(skipped, None);
+        assert_eq!(selected, Some(Duration::from_millis(25)));
     }
 }

@@ -70,7 +70,7 @@ Run command options:
   ./scripts/bench.sh run [options]
     --scale <sf1>
     --dataset-id <tiny_smoke|medium_selective|small_files|many_versions|tpcds_duckdb>
-    --suite <scan|write|write_perf|delete_update|delete_update_perf|merge|merge_perf|metadata|optimize_perf|optimize_vacuum|tpcds|interop_py|all>
+    --suite <scan|write|write_perf|delete_update|delete_update_perf|merge|merge_perf|metadata|metadata_perf|optimize_perf|optimize_vacuum|tpcds|interop_py|all>
     --case-filter <SUBSTR>
     --runner <rust|python|all>
     --lane <smoke|correctness|macro>

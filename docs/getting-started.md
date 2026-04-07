@@ -148,9 +148,11 @@ Each dataset ID controls which fixtures are generated and at what scale. The see
 | `medium_selective` | sf10 (100K rows) | Realistic workloads with selective query patterns.                                           |
 | `small_files`      | sf1 (10K rows)   | Generates many small files for optimize/vacuum testing.                                      |
 | `many_versions`    | sf1 (10K rows)   | Creates 12 commits to build a version history for time-travel tests.                         |
-| `tpcds_duckdb`     | sf1 (10K rows)   | TPC-DS `store_sales` table sourced from DuckDB. Requires `python3` and `pip install duckdb`. |
+| `tpcds_duckdb`     | sf1 (10K rows)   | TPC-DS `store_sales` table sourced from DuckDB. Requires `python3` and `pip install duckdb`. Used by the trusted self-hosted `pr-tpcds` contract. |
 
 See [reference.md](reference.md#datasets-and-scales) for scale factors, fixture profiles, and fixture table details.
+
+For trusted self-hosted `pr-tpcds` runs, pre-provision the fixture root on every runner before collecting evidence. The expected path is `/var/lib/delta-bench/fixtures/sf1/tpcds/store_sales`, and `tpcds_q72` remains outside the PR decision surface.
 
 ## Choosing a Backend
 
@@ -199,6 +201,9 @@ Notes:
 - The `write` suite currently supports only local storage.
 - The `delete_update` suite seeds isolated remote tables per iteration to keep DML runs independent.
 - GitHub-hosted CI runs smoke and correctness lanes only. Self-hosted workflows run `--lane macro` on curated `scan` cases and are the only automated path for macro perf or longitudinal claims.
+- Remote candidate/manual evidence surfaces are declared in `bench/evidence/registry.yaml` instead of ad hoc shell flags. The current first-class S3 surfaces are `scan_s3`, `delete_update_perf_s3`, `merge_perf_s3`, `optimize_perf_s3`, and `metadata_perf_s3`.
+- Their backing methodology profiles (`scan-s3-candidate`, `write-perf-s3-candidate`, `delete-update-perf-s3-candidate`, `merge-perf-s3-candidate`, `optimize-perf-s3-candidate`, and `metadata-perf-s3-candidate`) pin `storage_backend=s3` and `backend_profile=s3_locking_vultr`. The matching `s3-candidate-manual` pack batches the declared ready-for-operator surfaces through the same compare/profile contract used by the rest of the harness.
+- `write_perf_s3` is declared via `write-perf-s3-candidate` but remains explicitly gated and is intentionally excluded from `s3-candidate-manual` until non-local write throughput evidence is closed out.
 
 ## Cleanup
 

@@ -10,13 +10,17 @@ on:
       candidate_ref:
         description: Candidate branch/ref to compare
         required: true
-      suite:
-        description: Benchmark suite
+      surface:
+        description: Declared remote candidate surface from s3-candidate-manual
         required: true
         type: choice
-        default: scan
+        default: scan_s3
         options:
-          - scan
+          - scan_s3
+          - delete_update_perf_s3
+          - merge_perf_s3
+          - optimize_perf_s3
+          - metadata_perf_s3
       runner_mode:
         description: Runner mode (rust)
         required: true
@@ -40,8 +44,6 @@ jobs:
       group: delta-bench-prerelease
       cancel-in-progress: false
     env:
-      BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
-      BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
       DELTA_BENCH_EGRESS_POLICY_SHA256: ${{ vars.DELTA_BENCH_EGRESS_POLICY_SHA256 }}
 
     steps:
@@ -56,35 +58,129 @@ jobs:
           set -euo pipefail
           ./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy
 
-      - name: Run branch comparison
+      - name: Resolve remote candidate surface
         shell: bash
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          REMOTE_SURFACE: ${{ inputs.surface }}
         run: |
           set -euo pipefail
+          resolve_commit_ref() {
+            local ref="${1:-}"
+            if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null; then
+              git rev-parse --verify "${ref}^{commit}"
+              return 0
+            fi
+            if git rev-parse --verify --quiet "refs/remotes/origin/${ref}^{commit}" >/dev/null; then
+              git rev-parse --verify "refs/remotes/origin/${ref}^{commit}"
+              return 0
+            fi
+            echo "unable to resolve commit for ref '${ref}'" >&2
+            exit 1
+          }
+
+          base_sha="$(resolve_commit_ref "${BASE_REF}")"
+          candidate_sha="$(resolve_commit_ref "${CANDIDATE_REF}")"
+
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.pack plan \
+            --registry bench/evidence/registry.yaml \
+            --pack s3-candidate-manual \
+            --base-sha "${base_sha}" \
+            --candidate-sha "${candidate_sha}" \
+            --output prerelease-s3-pack-plan.json
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          wanted = os.environ["REMOTE_SURFACE"]
+          payload = json.loads(Path("prerelease-s3-pack-plan.json").read_text(encoding="utf-8"))
+          for row in payload["include"]:
+              if row.get("surface") == wanted:
+                  Path("prerelease-s3-surface.json").write_text(
+                      json.dumps(row, indent=2) + "\n",
+                      encoding="utf-8",
+                  )
+                  break
+          else:
+              available = ", ".join(
+                  str(row.get("surface") or row["suite"]) for row in payload["include"]
+              )
+              raise SystemExit(
+                  f"surface {wanted!r} is not declared in s3-candidate-manual; available: {available}"
+              )
+          PY
+
+      - name: Run branch comparison
+        shell: bash
+        env:
+          BASE_REF: ${{ inputs.base_ref }}
+          CANDIDATE_REF: ${{ inputs.candidate_ref }}
+          BENCH_STORAGE_OPTIONS: ${{ vars.BENCH_STORAGE_OPTIONS }}
+        run: |
+          set -euo pipefail
+          resolve_commit_ref() {
+            local ref="${1:-}"
+            if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null; then
+              git rev-parse --verify "${ref}^{commit}"
+              return 0
+            fi
+            if git rev-parse --verify --quiet "refs/remotes/origin/${ref}^{commit}" >/dev/null; then
+              git rev-parse --verify "refs/remotes/origin/${ref}^{commit}"
+              return 0
+            fi
+            echo "unable to resolve commit for ref '${ref}'" >&2
+            exit 1
+          }
+
+          base_sha="$(resolve_commit_ref "${BASE_REF}")"
+          candidate_sha="$(resolve_commit_ref "${CANDIDATE_REF}")"
+
+          readarray -t surface_row < <(
+            python3 - <<'PY'
+            import json
+            from pathlib import Path
+
+            payload = json.loads(Path("prerelease-s3-surface.json").read_text(encoding="utf-8"))
+            print(payload["profile"])
+            print(payload.get("storage_backend") or "")
+            print(payload.get("backend_profile") or "")
+            PY
+          )
+
+          profile="${surface_row[0]}"
+          storage_backend="${surface_row[1]}"
+          resolved_backend_profile="${surface_row[2]}"
           storage_args=()
-          if [[ -n "${BENCH_STORAGE_BACKEND:-}" ]]; then
-            storage_args+=(--storage-backend "${BENCH_STORAGE_BACKEND}")
-          fi
+          profile_args=()
           if [[ -n "${BENCH_STORAGE_OPTIONS:-}" ]]; then
             while IFS= read -r opt; do
               [[ -z "${opt}" ]] && continue
               storage_args+=(--storage-option "${opt}")
             done <<< "${BENCH_STORAGE_OPTIONS}"
           fi
-          profile_args=()
-          if [[ -n "${{ inputs.backend_profile }}" ]]; then
-            profile_args+=(--backend-profile "${{ inputs.backend_profile }}")
+          if [[ -n "${storage_backend}" ]]; then
+            profile_args+=(--storage-backend "${storage_backend}")
           fi
+          if [[ -n "${{ inputs.backend_profile }}" ]]; then
+            resolved_backend_profile="${{ inputs.backend_profile }}"
+          fi
+          if [[ -n "${resolved_backend_profile}" ]]; then
+            profile_args+=(--backend-profile "${resolved_backend_profile}")
+          fi
+          profile_args+=(--runner "${{ inputs.runner_mode }}")
 
-          ./scripts/compare_branch.sh \
-            "${storage_args[@]}" \
-            "${profile_args[@]}" \
+          ./scripts/run_profile.sh \
             --enforce-run-mode \
             --require-no-public-ipv4 \
             --require-egress-policy \
-            --runner "${{ inputs.runner_mode }}" \
-            "${{ inputs.base_ref }}" \
-            "${{ inputs.candidate_ref }}" \
-            "${{ inputs.suite }}" | tee prerelease_compare_output.txt
+            --base-sha "${base_sha}" \
+            --candidate-sha "${candidate_sha}" \
+            "${profile}" \
+            "${storage_args[@]}" \
+            "${profile_args[@]}" | tee prerelease_compare_output.txt
 
       - name: Upload compare output
         if: always()
@@ -92,6 +188,8 @@ jobs:
         with:
           name: prerelease-benchmark-output
           path: |
+            prerelease-s3-pack-plan.json
+            prerelease-s3-surface.json
             prerelease_compare_output.txt
             results/
           if-no-files-found: warn

@@ -1,0 +1,173 @@
+schema_version: 1
+
+suites:
+  scan:
+    class: authoritative_macro
+    automation_tier: pr_bot
+    default_profile: pr-macro
+    readiness: ready
+  write_perf:
+    class: authoritative_macro
+    automation_tier: candidate_pr_bot
+    default_profile: pr-write-perf
+    readiness: gated
+    readiness_reason: "await same-SHA stability + regression canary + runtime signoff"
+  tpcds:
+    class: authoritative_macro
+    automation_tier: candidate_pr_bot
+    default_profile: pr-tpcds
+    readiness: gated
+    readiness_reason: "await explicit fixture provisioning + validation signoff"
+  delete_update_perf:
+    class: authoritative_macro
+    automation_tier: candidate_pr_bot
+    default_profile: pr-delete-update-perf
+    readiness: gated
+    readiness_reason: "await same-SHA stability + delayed canary + runtime signoff + case-list freeze"
+  merge_perf:
+    class: authoritative_macro
+    automation_tier: candidate_pr_bot
+    default_profile: pr-merge-perf
+    readiness: gated
+    readiness_reason: "await same-SHA stability + delayed canary + runtime signoff + case-list freeze"
+  optimize_perf:
+    class: authoritative_macro
+    automation_tier: candidate_pr_bot
+    default_profile: pr-optimize-perf
+    readiness: gated
+    readiness_reason: "await same-SHA stability + delayed canary + runtime signoff + case-list freeze"
+  metadata_perf:
+    class: authoritative_macro
+    automation_tier: candidate_pr_bot
+    default_profile: pr-metadata-perf
+    readiness: gated
+    readiness_reason: "await same-SHA stability + delayed canary + runtime signoff + checkpoint-vs-uncheckpointed distinction"
+  write:
+    class: correctness_only
+    automation_tier: hosted_correctness
+    replacement_surface: write_perf
+  delete_update:
+    class: correctness_only
+    automation_tier: hosted_correctness
+    replacement_surface: delete_update_perf
+  merge:
+    class: correctness_only
+    automation_tier: hosted_correctness
+    replacement_surface: merge_perf
+  metadata:
+    class: correctness_only
+    automation_tier: hosted_correctness
+    replacement_surface: metadata_perf
+  optimize_vacuum:
+    class: correctness_only
+    automation_tier: hosted_correctness
+    replacement_surface: optimize_perf
+  concurrency:
+    class: correctness_only
+    automation_tier: manual_only
+  interop_py:
+    class: correctness_only
+    automation_tier: hosted_correctness
+
+surfaces:
+  scan_s3:
+    suite: scan
+    profile: scan-s3-candidate
+    automation_tier: candidate_manual
+    readiness: gated
+    readiness_reason: "await same-SHA stability on the remote runner class + explicit backend-profile artifact contract + fixture isolation/cleanup proof + runtime signoff"
+    storage_backend: s3
+    backend_profile: s3_locking_vultr
+  write_perf_s3:
+    suite: write_perf
+    profile: write-perf-s3-candidate
+    automation_tier: candidate_manual
+    readiness: gated
+    readiness_reason: "await non-local write throughput qualification before adding write_perf_s3 to the declared remote candidate pack"
+    storage_backend: s3
+    backend_profile: s3_locking_vultr
+  delete_update_perf_s3:
+    suite: delete_update_perf
+    profile: delete-update-perf-s3-candidate
+    automation_tier: candidate_manual
+    readiness: gated
+    readiness_reason: "await same-SHA stability on the remote runner class + explicit backend-profile artifact contract + fixture isolation/cleanup proof + runtime signoff"
+    storage_backend: s3
+    backend_profile: s3_locking_vultr
+  merge_perf_s3:
+    suite: merge_perf
+    profile: merge-perf-s3-candidate
+    automation_tier: candidate_manual
+    readiness: gated
+    readiness_reason: "await same-SHA stability on the remote runner class + explicit backend-profile artifact contract + fixture isolation/cleanup proof + runtime signoff"
+    storage_backend: s3
+    backend_profile: s3_locking_vultr
+  optimize_perf_s3:
+    suite: optimize_perf
+    profile: optimize-perf-s3-candidate
+    automation_tier: candidate_manual
+    readiness: gated
+    readiness_reason: "await same-SHA stability on the remote runner class + explicit backend-profile artifact contract + fixture isolation/cleanup proof + runtime signoff"
+    storage_backend: s3
+    backend_profile: s3_locking_vultr
+  metadata_perf_s3:
+    suite: metadata_perf
+    profile: metadata-perf-s3-candidate
+    automation_tier: candidate_manual
+    readiness: gated
+    readiness_reason: "await same-SHA stability on the remote runner class + explicit backend-profile artifact contract + fixture isolation/cleanup proof + runtime signoff"
+    storage_backend: s3
+    backend_profile: s3_locking_vultr
+
+packs:
+  pr-full-decision:
+    alias: full
+    pack_version: 1
+    compare_mode: decision
+    strict_mode: require_all_ready
+    max_parallel: 2
+    overall_fail_on: [regression, inconclusive]
+    suites:
+      - suite: scan
+        profile: pr-macro
+        timeout_minutes: 90
+  pr-candidate-manual:
+    pack_version: 1
+    compare_mode: decision
+    max_parallel: 1
+    overall_fail_on: [regression, inconclusive]
+    suites:
+      - suite: write_perf
+        profile: pr-write-perf
+        timeout_minutes: 120
+      - suite: delete_update_perf
+        profile: pr-delete-update-perf
+        timeout_minutes: 120
+      - suite: merge_perf
+        profile: pr-merge-perf
+        timeout_minutes: 120
+      - suite: optimize_perf
+        profile: pr-optimize-perf
+        timeout_minutes: 120
+      - suite: metadata_perf
+        profile: pr-metadata-perf
+        timeout_minutes: 120
+      - suite: tpcds
+        profile: pr-tpcds
+        timeout_minutes: 150
+  s3-candidate-manual:
+    pack_version: 1
+    compare_mode: decision
+    max_parallel: 1
+    overall_fail_on: [regression, inconclusive]
+    suites:
+      - surface: scan_s3
+        timeout_minutes: 120
+      - surface: delete_update_perf_s3
+        timeout_minutes: 120
+      - surface: merge_perf_s3
+        timeout_minutes: 120
+      - surface: optimize_perf_s3
+        timeout_minutes: 120
+      - surface: metadata_perf_s3
+        timeout_minutes: 120

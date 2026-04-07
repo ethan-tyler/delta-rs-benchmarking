@@ -216,7 +216,7 @@ Use `./scripts/run_profile.sh <profile>` for committed Criterion entrypoints. Ex
 | Family | Status | Profile | Bench file | Intended use |
 | --- | --- | --- | --- | --- |
 | `scan_phase` | Existing | `scan-phase-criterion` | `scan_phase_bench.rs` | Phase-isolated scan microbench for `scan_filter_flag`, `scan_projection_region`, and `scan_pruning_hit` |
-| `metadata_replay` | Existing | `metadata-replay-criterion` | `scan_replay_bench.rs` | Snapshot/provider replay probes for the existing scan replay bench |
+| `metadata_replay` | Existing | `metadata-replay-criterion` | `metadata_replay_bench.rs` | Snapshot/provider replay probes for the dedicated metadata replay bench |
 | `metadata_log` | Existing | `metadata-log-criterion` | `metadata_log_bench.rs` | Log parsing and snapshot materialization internals |
 | `file_selection` | Planned | `file-selection-criterion` (planned) | `file_selection_bench.rs` | Shared delete/update file-finding and predicate-selection internals |
 | `merge_filter` | Planned | `merge-filter-criterion` (planned) | `merge_filter_bench.rs` | Merge early-filter and placeholder-expansion planning |
@@ -396,7 +396,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--dataset-id`               | —             | Dataset id forwarded to fixture generation and benchmark runs                                                                                                                       |
 | `--timing-phase`             | `execute`     | Timing phase forwarded to `bench.sh run`                                                                                                                                            |
 
-Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes, `./scripts/run_profile.sh metadata-replay-criterion` for replay/provider diagnostics, and `./scripts/run_profile.sh metadata-log-criterion`, which resolves to `metadata_log_bench`, for metadata/log internals.
+Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes, `./scripts/run_profile.sh metadata-replay-criterion` for replay/provider diagnostics, and `./scripts/run_profile.sh metadata-log-criterion`, which resolves to `metadata_log_bench`, for metadata/log internals. The older `timing_phase=plan` approximation stays investigation-grade only.
 
 ### `run_profile.sh` — Invoke committed methodology profiles
 
@@ -413,14 +413,22 @@ Self-hosted PR automation uses `--methodology-profile pr-macro` instead of resta
 Current committed Criterion profiles:
 
 - `scan-phase-criterion` -> `scan_phase_bench`
-- `metadata-replay-criterion` -> `scan_replay_bench`
+- `metadata-replay-criterion` -> `metadata_replay_bench`
 - `metadata-log-criterion` -> `metadata_log_bench`
 
 Criterion profiles are diagnostic-only and intended for local or trusted self-hosted investigation. Pass extra Criterion arguments after `--` when you need a narrower filter or a saved baseline, for example `./scripts/run_profile.sh scan-phase-criterion -- scan_pruning_hit/phase/execute --save-baseline pr-base`.
 
 PR pack automation reads `bench/evidence/registry.yaml`. The currently defined pack alias is `full`, which resolves to `pr-full-decision`. `run benchmark decision full` is therefore a pack request, not a suite request, and full does not mean --suite all.
 
-`pr-full-decision` contains only `readiness=ready` suites. In plain terms, it contains only readiness=ready suites. Gated perf-owned suites move to `pr-candidate-manual` so operators can refresh manual/candidate evidence without widening PR comment automation. `pr-candidate-manual` currently carries `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds`; `tpcds` remains candidate/manual in that pack until its gates are fully closed.
+`pr-full-decision` contains only `readiness=ready` suites. In plain terms, it contains only readiness=ready suites. Gated perf-owned suites move to `pr-candidate-manual` so operators can refresh manual/candidate evidence without widening PR comment automation. `pr-candidate-manual` currently carries `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`; `tpcds` remains candidate/manual in that pack until its gates are fully closed.
+
+Keep the entrypoints split:
+
+- Ready PR comment grammar: `run benchmark scan`, `run benchmark decision scan`, `run benchmark decision full`
+- Candidate/manual operator compares: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds`
+- Diagnostic Criterion probes: `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, `./scripts/run_profile.sh metadata-log-criterion`
+
+Remote candidate/manual surfaces use the same registry/profile model. The currently declared S3 surface ids are `scan_s3`, `delete_update_perf_s3`, `merge_perf_s3`, `optimize_perf_s3`, and `metadata_perf_s3`; their backing methodology profiles pin `storage_backend=s3` and `backend_profile=s3_locking_vultr`, and the `s3-candidate-manual` pack batches those remote shards through the same compare flow. `write_perf_s3` is declared separately but remains gated until non-local write throughput evidence is complete.
 
 Compare automation artifacts are written to `results/compare/<suite>/<base_sha>__<candidate_sha>/`. The directory includes:
 
@@ -436,7 +444,7 @@ Compare automation artifacts are written to `results/compare/<suite>/<base_sha>_
 
 `manifest.json` contains these top-level keys: `suite`, `base_sha`, `candidate_sha`, `base_json`, `candidate_json`, `stdout_report`, `markdown_report`, `comparison_json`, `hash_policy_report`, `compare_mode`, `aggregation`, `noise_threshold`, `methodology_profile`, `methodology_version`, and `methodology_settings`.
 
-`methodology_settings` records the resolved compare settings used for the run: `compare_mode`, `warmup`, `iters`, `prewarm_iters`, `compare_runs`, `measure_order`, `timing_phase`, `aggregation`, `dataset_id`, `dataset_policy`, `spread_metric`, `sub_ms_threshold_ms`, and `sub_ms_policy`. For an exact `pr-macro` invocation, `methodology_profile` and `methodology_version` identify that canonical self-hosted PR macro contract. If explicit CLI overrides change any profile-owned setting, the manifest leaves those two top-level fields null and relies on `methodology_settings` to describe the effective non-canonical run.
+`methodology_settings` records the resolved compare settings used for the run: `compare_mode`, `warmup`, `iters`, `prewarm_iters`, `compare_runs`, `measure_order`, `timing_phase`, `aggregation`, `dataset_id`, `dataset_policy`, `spread_metric`, `sub_ms_threshold_ms`, `sub_ms_policy`, `storage_backend`, and `backend_profile`. For an exact `pr-macro` invocation, `methodology_profile` and `methodology_version` identify that canonical self-hosted PR macro contract. If explicit CLI overrides change any profile-owned setting, the manifest leaves those two top-level fields null and relies on `methodology_settings` to describe the effective non-canonical run, including the resolved storage contract for remote/object-store surfaces.
 
 Pack automation writes an additional bundle under `results/compare/packs/<pack_id>/<base_sha>__<candidate_sha>/` with the same stable filenames: `summary.md`, `comparison.json`, `hash-policy.txt`, and `manifest.json`. Pack-level `comparison.json` flattens suite rows and adds a required `suite` field.
 
@@ -447,7 +455,7 @@ Decision compare accepts only schema v5 aggregated inputs and fails closed when 
 ### `validate_perf_harness.sh` — Trust contract verification
 
 ```bash
-./scripts/validate_perf_harness.sh [--sha <commit>] [--dataset-id <id>] [--artifact-dir <path>]
+./scripts/validate_perf_harness.sh [--sha <commit>] [--fetch-url <url>] [--fetch-ref <ref>] [--dataset-id <id>] [--artifact-dir <path>]
 ```
 
 ### `publish_contract.sh` — Publish the operator contract bundle
@@ -460,12 +468,15 @@ Copies the current README, key docs, manifests, and wrapper entrypoints into `re
 
 Runs the focused trust-contract suites used to justify trustworthy PR perf claims. By default the script writes a timestamped artifact tree under `results/validation/` and stores the Markdown summary at `summary.md` inside that directory. Use `--artifact-dir` to choose a stable directory such as `results/validation/latest`.
 
+If `--sha <commit>` points at an immutable ref that `origin` does not advertise, pass `--fetch-url <trusted-clone-url>` and optionally `--fetch-ref <ref>` (or set `VALIDATION_FETCH_URL` / `VALIDATION_FETCH_REF`). The validator prepares `.delta-rs-under-test` at that SHA first, then seeds same-SHA compare pinning into `.delta-rs-source` from the prepared execution checkout.
+
 The same validator covers the candidate/manual perf-owned DML and maintenance suites too. Their operator compare entrypoints are:
 
 ```bash
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf
 ```
 
 Passing `--dataset-id tpcds_duckdb` enables the dedicated TPC-DS promotion gate in the same script. The primary scan and DML/maintenance validation blocks remain pinned to their own contract datasets; the flag only turns on the extra TPC-DS surface. The operator-facing invocation is:
@@ -569,6 +580,15 @@ These commands are the current repo-wide baseline for code, dependency, and self
 | ----------------------------- | ------------- | ---------------------------------------------------------------------------------------- |
 | `DELTA_RS_FETCH_URL`          | —             | Alternate fetch URL used when `DELTA_RS_REF` is not reachable from `origin`             |
 | `DELTA_RS_FETCH_REF`          | `DELTA_RS_REF`| Optional advertised branch/ref to fetch when the checkout commit differs from the fetch target |
+
+### Validation checkout overrides
+
+These are validation-only controls used by `./scripts/validate_perf_harness.sh` when a trusted runner needs to prepare an immutable SHA before the same-SHA compare seeds `.delta-rs-source` from `.delta-rs-under-test`.
+
+| Variable                      | Default          | Description                                                                 |
+| ----------------------------- | ---------------- | --------------------------------------------------------------------------- |
+| `VALIDATION_FETCH_URL`        | —                | Alternate fetch URL used when `VALIDATION_SHA` is not reachable from `origin` |
+| `VALIDATION_FETCH_REF`        | `VALIDATION_SHA` | Optional advertised branch/ref to fetch before resolving `VALIDATION_SHA`   |
 
 ### Scan phase canary injection
 

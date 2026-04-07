@@ -1,6 +1,7 @@
 use std::cmp::min;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 
 use deltalake_core::arrow::array::{Array, BooleanArray, Int32Array, Int64Array};
 use deltalake_core::arrow::datatypes::{DataType, Field, Schema};
@@ -19,6 +20,9 @@ use crate::storage::StorageConfig;
 
 const PARTITION_COLUMN_NAME: &str = "part";
 const WRITE_PERF_BATCH_ROWS: usize = 131_072;
+const WRITE_PERF_DELAY_ENV: &str = "DELTA_BENCH_WRITE_PERF_DELAY_MS";
+const WRITE_PERF_ALLOW_DELAY_ENV: &str = "DELTA_BENCH_ALLOW_WRITE_PERF_DELAY";
+const WRITE_PERF_VALIDATION_CANARY_CASE_ID: &str = "write_perf_unpartitioned_1m";
 
 #[derive(Clone, Copy, Debug)]
 struct WritePerfCaseSpec {
@@ -58,7 +62,7 @@ pub fn case_names() -> Vec<String> {
 }
 
 struct WritePerfIterationSetup {
-    _temp: tempfile::TempDir,
+    _temp: Option<tempfile::TempDir>,
     table: DeltaTable,
     batches: Arc<Vec<RecordBatch>>,
     spec: WritePerfCaseSpec,
@@ -66,18 +70,11 @@ struct WritePerfIterationSetup {
 
 pub async fn run(
     _fixtures_dir: &Path,
-    _scale: &str,
+    scale: &str,
     warmup: u32,
     iterations: u32,
     storage: &StorageConfig,
 ) -> BenchResult<Vec<CaseResult>> {
-    if !storage.is_local() {
-        return Ok(super::fixture_error_cases(
-            case_names(),
-            "write_perf suite does not support non-local storage backend yet",
-        ));
-    }
-
     let mut results = Vec::with_capacity(WRITE_PERF_CASES.len());
     for spec in WRITE_PERF_CASES {
         let batches = Arc::new(generate_write_perf_batches(spec)?);
@@ -85,10 +82,15 @@ pub async fn run(
             spec.id,
             warmup,
             iterations,
-            || async {
-                prepare_write_perf_iteration(spec, Arc::clone(&batches))
-                    .await
-                    .map_err(|e| e.to_string())
+            || {
+                let batches = Arc::clone(&batches);
+                let storage = storage.clone();
+                let scale = scale.to_string();
+                async move {
+                    prepare_write_perf_iteration(spec, Arc::clone(&batches), &storage, &scale)
+                        .await
+                        .map_err(|e| e.to_string())
+                }
             },
             |setup| async move { run_write_perf_case(setup).await.map_err(|e| e.to_string()) },
         )
@@ -102,15 +104,22 @@ pub async fn run(
 async fn prepare_write_perf_iteration(
     spec: WritePerfCaseSpec,
     batches: Arc<Vec<RecordBatch>>,
+    storage: &StorageConfig,
+    scale: &str,
 ) -> BenchResult<WritePerfIterationSetup> {
-    let temp = tempfile::tempdir()?;
-    let table_url = Url::from_directory_path(temp.path()).map_err(|()| {
-        BenchError::InvalidArgument(format!(
-            "failed to create URL for {}",
-            temp.path().display()
-        ))
-    })?;
-    let table = DeltaTable::try_from_url(table_url).await?;
+    let (temp, table) = if storage.is_local() {
+        let temp = tempfile::tempdir()?;
+        let table_url = Url::from_directory_path(temp.path()).map_err(|()| {
+            BenchError::InvalidArgument(format!(
+                "failed to create URL for {}",
+                temp.path().display()
+            ))
+        })?;
+        (Some(temp), DeltaTable::try_from_url(table_url).await?)
+    } else {
+        let table_url = storage.isolated_table_url(scale, "write_perf_delta", spec.id)?;
+        (None, storage.try_from_url_for_write(table_url).await?)
+    };
     Ok(WritePerfIterationSetup {
         _temp: temp,
         table,
@@ -127,6 +136,7 @@ async fn run_write_perf_case(setup: WritePerfIterationSetup) -> BenchResult<Samp
     if setup.spec.partition_count.is_some() {
         builder = builder.with_partition_columns([PARTITION_COLUMN_NAME]);
     }
+    apply_validation_delay(setup.spec.id).await?;
     let table = builder.await?;
 
     let table_version = table.version().map(|version| version as u64);
@@ -163,6 +173,38 @@ async fn run_write_perf_case(setup: WritePerfIterationSetup) -> BenchResult<Samp
                 validation_summary: None,
             }),
     )
+}
+
+async fn apply_validation_delay(case_id: &str) -> BenchResult<()> {
+    let Some(delay) = parse_validation_delay(case_id)? else {
+        return Ok(());
+    };
+    // Validation-only canaries inject a fixed delay into one measured write path.
+    tokio::time::sleep(delay).await;
+    Ok(())
+}
+
+fn parse_validation_delay(case_id: &str) -> BenchResult<Option<Duration>> {
+    let Some(raw) = std::env::var_os(WRITE_PERF_DELAY_ENV) else {
+        return Ok(None);
+    };
+    if std::env::var(WRITE_PERF_ALLOW_DELAY_ENV).as_deref() != Ok("1") {
+        return Err(BenchError::InvalidArgument(format!(
+            "validation-only write_perf delay injection requires {WRITE_PERF_ALLOW_DELAY_ENV}=1"
+        )));
+    }
+    if case_id != WRITE_PERF_VALIDATION_CANARY_CASE_ID {
+        return Ok(None);
+    }
+    let raw = raw.into_string().map_err(|_| {
+        BenchError::InvalidArgument(format!("{WRITE_PERF_DELAY_ENV} must be valid UTF-8"))
+    })?;
+    let delay_ms = raw.parse::<u64>().map_err(|_| {
+        BenchError::InvalidArgument(format!(
+            "{WRITE_PERF_DELAY_ENV} must be an unsigned integer number of milliseconds"
+        ))
+    })?;
+    Ok(Some(Duration::from_millis(delay_ms)))
 }
 
 fn generate_write_perf_batches(spec: WritePerfCaseSpec) -> BenchResult<Vec<RecordBatch>> {
@@ -232,7 +274,52 @@ fn generate_write_perf_batch(
 
 #[cfg(test)]
 mod tests {
-    use super::{generate_write_perf_batches, WritePerfCaseSpec, WRITE_PERF_BATCH_ROWS};
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    use super::{
+        generate_write_perf_batches, parse_validation_delay, WritePerfCaseSpec,
+        WRITE_PERF_ALLOW_DELAY_ENV, WRITE_PERF_BATCH_ROWS, WRITE_PERF_DELAY_ENV,
+        WRITE_PERF_VALIDATION_CANARY_CASE_ID,
+    };
+
+    struct EnvRestoreGuard {
+        previous: Vec<(String, Option<OsString>)>,
+    }
+
+    impl EnvRestoreGuard {
+        fn set(entries: &[(&str, &str)]) -> Self {
+            let previous = entries
+                .iter()
+                .map(|(key, _)| ((*key).to_string(), std::env::var_os(key)))
+                .collect::<Vec<_>>();
+            for (key, value) in entries {
+                // Safety: tests serialize environment mutation through env_mutex().
+                unsafe { std::env::set_var(key, value) };
+            }
+            Self { previous }
+        }
+    }
+
+    impl Drop for EnvRestoreGuard {
+        fn drop(&mut self) {
+            for (key, value) in self.previous.drain(..) {
+                if let Some(value) = value {
+                    // Safety: tests serialize environment mutation through env_mutex().
+                    unsafe { std::env::set_var(&key, value) };
+                } else {
+                    // Safety: tests serialize environment mutation through env_mutex().
+                    unsafe { std::env::remove_var(&key) };
+                }
+            }
+        }
+    }
+
+    fn env_mutex() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn partitioned_write_perf_batches_include_partition_column() {
@@ -269,5 +356,43 @@ mod tests {
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[0].num_rows(), WRITE_PERF_BATCH_ROWS);
         assert_eq!(batches[1].num_rows(), 1);
+    }
+
+    #[test]
+    fn write_perf_delay_requires_explicit_validation_opt_in() {
+        let _env_guard = env_mutex().lock().expect("env mutex");
+        let _restore_guard = EnvRestoreGuard::set(&[
+            (WRITE_PERF_ALLOW_DELAY_ENV, ""),
+            (WRITE_PERF_DELAY_ENV, "150"),
+        ]);
+
+        let err = parse_validation_delay(WRITE_PERF_VALIDATION_CANARY_CASE_ID)
+            .expect_err("delay injection should fail closed without opt-in");
+
+        assert!(
+            err.to_string()
+                .contains("validation-only write_perf delay injection requires DELTA_BENCH_ALLOW_WRITE_PERF_DELAY=1"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn write_perf_delay_targets_only_validation_canary_case() {
+        let _env_guard = env_mutex().lock().expect("env mutex");
+        let _restore_guard = EnvRestoreGuard::set(&[
+            (WRITE_PERF_ALLOW_DELAY_ENV, "1"),
+            (WRITE_PERF_DELAY_ENV, "150"),
+        ]);
+
+        assert_eq!(
+            parse_validation_delay(WRITE_PERF_VALIDATION_CANARY_CASE_ID)
+                .expect("canary case delay should parse"),
+            Some(Duration::from_millis(150))
+        );
+        assert_eq!(
+            parse_validation_delay("write_perf_partitioned_1m_parts_010")
+                .expect("non-canary cases should stay unchanged"),
+            None
+        );
     }
 }

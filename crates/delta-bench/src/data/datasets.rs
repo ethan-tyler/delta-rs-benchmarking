@@ -31,6 +31,14 @@ pub struct FixtureRecipe {
     pub profile: String,
     pub table_inventory: Vec<String>,
     pub many_versions_append_commits: usize,
+    #[serde(default)]
+    pub metadata_seed_rows: usize,
+    #[serde(default)]
+    pub metadata_long_history_append_commits: usize,
+    #[serde(default)]
+    pub metadata_compare_history_append_commits: usize,
+    #[serde(default)]
+    pub metadata_history_chunk_size: usize,
     pub read_partition_chunk_size: usize,
     pub merge_partition_chunk_size: usize,
     pub delete_update_partition_chunk_size: usize,

@@ -37,6 +37,8 @@ BACKEND_PROFILE="${BENCH_BACKEND_PROFILE:-}"
 RUNNER_MODE="${BENCH_RUNNER_MODE:-all}"
 BENCHMARK_MODE="${BENCH_BENCHMARK_MODE:-perf}"
 DATASET_ID="${BENCH_DATASET_ID:-}"
+PROFILE_KIND=""
+TARGET=""
 TIMING_PHASE="${BENCH_TIMING_PHASE:-execute}"
 DATASET_POLICY=""
 SPREAD_METRIC=""
@@ -44,12 +46,15 @@ SUB_MS_THRESHOLD_MS=""
 SUB_MS_POLICY=""
 AGGREGATION_EXPLICIT=0
 COMPARE_MODE_EXPLICIT=0
+STORAGE_BACKEND_EXPLICIT=0
+BACKEND_PROFILE_EXPLICIT=0
 BENCH_WARMUP_EXPLICIT=0
 BENCH_ITERS_EXPLICIT=0
 BENCH_PREWARM_ITERS_EXPLICIT=0
 BENCH_COMPARE_RUNS_EXPLICIT=0
 BENCH_MEASURE_ORDER_EXPLICIT=0
 TIMING_PHASE_EXPLICIT=0
+DATASET_ID_EXPLICIT=0
 
 sanitize_label() {
 	local raw="${1:-}"
@@ -72,21 +77,44 @@ is_non_negative_integer() {
 
 methodology_profile_path() {
 	local profile_name="${1:-}"
-	case "${profile_name}" in
-	pr-macro)
-		printf '%s\n' "${ROOT_DIR}/bench/methodologies/pr-macro.env"
-		;;
-	*)
-		return 1
-		;;
-	esac
+	local profile_path
+	local -a profile_paths=("${ROOT_DIR}/bench/methodologies"/*.env)
+	for profile_path in "${profile_paths[@]}"; do
+		[[ -f "${profile_path}" ]] || continue
+		if [[ "$(basename "${profile_path}" .env)" == "${profile_name}" ]]; then
+			printf '%s\n' "${profile_path}"
+			return 0
+		fi
+	done
+	return 1
+}
+
+methodology_profile_names() {
+	local profile_path
+	local -a profile_paths=("${ROOT_DIR}/bench/methodologies"/*.env)
+	local -a profile_names=()
+	for profile_path in "${profile_paths[@]}"; do
+		[[ -f "${profile_path}" ]] || continue
+		profile_names+=("$(basename "${profile_path}" .env)")
+	done
+	if ((${#profile_names[@]} == 0)); then
+		return 0
+	fi
+	local IFS=', '
+	printf '%s\n' "${profile_names[*]}"
 }
 
 load_methodology_profile() {
 	local profile_name="${1:-}"
 	local profile_path=""
 	if ! profile_path="$(methodology_profile_path "${profile_name}")"; then
-		echo "unknown --methodology-profile '${profile_name}'; expected one of: pr-macro" >&2
+		local profile_names=""
+		profile_names="$(methodology_profile_names)"
+		if [[ -n "${profile_names}" ]]; then
+			echo "unknown --methodology-profile '${profile_name}'; expected one of: ${profile_names}" >&2
+		else
+			echo "unknown --methodology-profile '${profile_name}'; no methodology profiles found under ${ROOT_DIR}/bench/methodologies" >&2
+		fi
 		exit 1
 	fi
 	if [[ ! -f "${profile_path}" ]]; then
@@ -101,7 +129,12 @@ load_methodology_profile() {
 			source "${profile_path}"
 			printf 'METHODOLOGY_PROFILE=%s\n' "${METHODOLOGY_PROFILE-}"
 			printf 'METHODOLOGY_VERSION=%s\n' "${METHODOLOGY_VERSION-}"
+			printf 'DATASET_ID=%s\n' "${DATASET_ID-}"
+			printf 'PROFILE_KIND=%s\n' "${PROFILE_KIND-}"
+			printf 'TARGET=%s\n' "${TARGET-}"
 			printf 'COMPARE_MODE=%s\n' "${COMPARE_MODE-}"
+			printf 'STORAGE_BACKEND=%s\n' "${STORAGE_BACKEND-}"
+			printf 'BACKEND_PROFILE=%s\n' "${BACKEND_PROFILE-}"
 			printf 'WARMUP=%s\n' "${WARMUP-}"
 			printf 'ITERS=%s\n' "${ITERS-}"
 			printf 'PREWARM_ITERS=%s\n' "${PREWARM_ITERS-}"
@@ -118,7 +151,12 @@ load_methodology_profile() {
 
 	local profile_declared_name=""
 	local profile_version=""
+	local profile_dataset_id=""
+	local profile_kind=""
+	local profile_target=""
 	local profile_compare_mode=""
+	local profile_storage_backend=""
+	local profile_backend_profile=""
 	local profile_warmup=""
 	local profile_iters=""
 	local profile_prewarm_iters=""
@@ -140,8 +178,23 @@ load_methodology_profile() {
 		METHODOLOGY_VERSION)
 			profile_version="${value}"
 			;;
+		DATASET_ID)
+			profile_dataset_id="${value}"
+			;;
+		PROFILE_KIND)
+			profile_kind="${value}"
+			;;
+		TARGET)
+			profile_target="${value}"
+			;;
 		COMPARE_MODE)
 			profile_compare_mode="${value}"
+			;;
+		STORAGE_BACKEND)
+			profile_storage_backend="${value}"
+			;;
+		BACKEND_PROFILE)
+			profile_backend_profile="${value}"
 			;;
 		WARMUP)
 			profile_warmup="${value}"
@@ -183,12 +236,30 @@ load_methodology_profile() {
 		echo "methodology profile '${profile_name}' is missing METHODOLOGY_PROFILE" >&2
 		exit 1
 	fi
+	if [[ -z "${profile_version}" ]]; then
+		echo "methodology profile '${profile_name}' is missing METHODOLOGY_VERSION" >&2
+		exit 1
+	fi
+	if [[ -z "${profile_kind}" ]]; then
+		echo "methodology profile '${profile_name}' is missing PROFILE_KIND" >&2
+		exit 1
+	fi
+	if [[ -z "${profile_target}" ]]; then
+		echo "methodology profile '${profile_name}' is missing TARGET" >&2
+		exit 1
+	fi
 	if [[ "${profile_declared_name}" != "${profile_name}" ]]; then
 		echo "methodology profile '${profile_name}' declares METHODOLOGY_PROFILE='${profile_declared_name}'" >&2
 		exit 1
 	fi
+	if [[ "${profile_kind}" != "compare" ]]; then
+		echo "methodology profile '${profile_name}' has PROFILE_KIND='${profile_kind}'; compare_branch.sh only supports compare profiles and rejects run or criterion profiles" >&2
+		exit 1
+	fi
 
 	METHODOLOGY_VERSION="${profile_version}"
+	PROFILE_KIND="${profile_kind}"
+	TARGET="${profile_target}"
 	DATASET_POLICY="${profile_dataset_policy}"
 	SPREAD_METRIC="${profile_spread_metric}"
 	SUB_MS_THRESHOLD_MS="${profile_sub_ms_threshold_ms}"
@@ -199,6 +270,21 @@ load_methodology_profile() {
 	if ((COMPARE_MODE_EXPLICIT == 0)) && [[ -n "${profile_compare_mode}" ]]; then
 		COMPARE_MODE="${profile_compare_mode}"
 	elif ((COMPARE_MODE_EXPLICIT != 0)) && [[ "${COMPARE_MODE}" != "${profile_compare_mode}" ]]; then
+		canonical_profile_identity=0
+	fi
+	if ((STORAGE_BACKEND_EXPLICIT == 0)) && [[ -n "${profile_storage_backend}" ]]; then
+		STORAGE_BACKEND="${profile_storage_backend}"
+	elif ((STORAGE_BACKEND_EXPLICIT != 0)) && [[ "${STORAGE_BACKEND}" != "${profile_storage_backend}" ]]; then
+		canonical_profile_identity=0
+	fi
+	if ((BACKEND_PROFILE_EXPLICIT == 0)) && [[ -n "${profile_backend_profile}" ]]; then
+		BACKEND_PROFILE="${profile_backend_profile}"
+	elif ((BACKEND_PROFILE_EXPLICIT != 0)) && [[ "${BACKEND_PROFILE}" != "${profile_backend_profile}" ]]; then
+		canonical_profile_identity=0
+	fi
+	if ((DATASET_ID_EXPLICIT == 0)) && [[ -n "${profile_dataset_id}" ]]; then
+		DATASET_ID="${profile_dataset_id}"
+	elif ((DATASET_ID_EXPLICIT != 0)) && [[ "${DATASET_ID}" != "${profile_dataset_id}" ]]; then
 		canonical_profile_identity=0
 	fi
 	if ((BENCH_WARMUP_EXPLICIT == 0)) && [[ -n "${profile_warmup}" ]]; then
@@ -252,6 +338,9 @@ build_resolved_methodology_settings() {
 		profile "${MANIFEST_METHODOLOGY_PROFILE}"
 		version "${MANIFEST_METHODOLOGY_VERSION}"
 		compare_mode "${COMPARE_MODE}"
+		storage_backend "${STORAGE_BACKEND}"
+		backend_profile "${BACKEND_PROFILE}"
+		dataset_id "${DATASET_ID}"
 		warmup "${BENCH_WARMUP}"
 		iters "${BENCH_ITERS}"
 		prewarm_iters "${BENCH_PREWARM_ITERS}"
@@ -308,6 +397,9 @@ build_manifest_methodology_args() {
 	local profile=""
 	local version=""
 	local compare_mode=""
+	local storage_backend=""
+	local backend_profile=""
+	local dataset_id=""
 	local warmup=""
 	local iters=""
 	local prewarm_iters=""
@@ -323,6 +415,9 @@ build_manifest_methodology_args() {
 	profile="$(resolved_methodology_setting profile)"
 	version="$(resolved_methodology_setting version)"
 	compare_mode="$(resolved_methodology_setting compare_mode)"
+	storage_backend="$(resolved_methodology_setting storage_backend)"
+	backend_profile="$(resolved_methodology_setting backend_profile)"
+	dataset_id="$(resolved_methodology_setting dataset_id)"
 	warmup="$(resolved_methodology_setting warmup)"
 	iters="$(resolved_methodology_setting iters)"
 	prewarm_iters="$(resolved_methodology_setting prewarm_iters)"
@@ -351,6 +446,9 @@ build_manifest_methodology_args() {
 	if [[ -n "${version}" ]]; then
 		manifest_methodology_args+=(--methodology-version "${version}")
 	fi
+	if [[ -n "${dataset_id}" ]]; then
+		manifest_methodology_args+=(--methodology-dataset-id "${dataset_id}")
+	fi
 	if [[ -n "${dataset_policy}" ]]; then
 		manifest_methodology_args+=(--methodology-dataset-policy "${dataset_policy}")
 	fi
@@ -362,6 +460,12 @@ build_manifest_methodology_args() {
 	fi
 	if [[ -n "${sub_ms_policy}" ]]; then
 		manifest_methodology_args+=(--methodology-sub-ms-policy "${sub_ms_policy}")
+	fi
+	if [[ -n "${storage_backend}" ]]; then
+		manifest_methodology_args+=(--methodology-storage-backend "${storage_backend}")
+	fi
+	if [[ -n "${backend_profile}" ]]; then
+		manifest_methodology_args+=(--methodology-backend-profile "${backend_profile}")
 	fi
 }
 
@@ -387,6 +491,9 @@ Options:
   --noise-threshold <float>       Override compare.py noise threshold (default: 0.05)
   --aggregation <min|median|p95>  Representative sample aggregation for compare.py (default: median)
   --methodology-profile <name>    Load a harness-owned profile from bench/methodologies/<name>.env
+                                  Decision-grade execute runs use pr-macro
+                                  Canonical PR macro profile: bench/methodologies/pr-macro.env
+                                  For replay-state investigation, pair suite metadata_perf with cargo bench -p delta-bench --bench metadata_replay_bench
   --compare-mode <exploratory|decision>
                                   Compare classification mode passed to compare.py (default: ${COMPARE_MODE})
   --fail-on <statuses>            Comma-separated compare statuses that force exit code 2 (for decision automation)
@@ -411,15 +518,15 @@ Options:
   --mode <perf|assert>            Benchmark mode forwarded to bench.sh run (default: perf)
   --dataset-id <id>               Dataset id forwarded to bench.sh data/run
   --timing-phase <phase>          Timing phase forwarded to bench.sh run (default: execute)
-                                  Trusted macro-lane compare suites: scan, write_perf, tpcds (default: scan)
+                                  Curated compare suites: scan, write_perf, tpcds, delete_update_perf, merge_perf, optimize_perf, metadata_perf (default: scan)
   -h, --help                      Show this help
 EOF
 }
 
-trusted_macro_compare_suite() {
+supported_compare_suite() {
 	local requested_suite="${1:-}"
 	case "${requested_suite}" in
-	scan | write_perf | tpcds)
+	scan | write_perf | tpcds | delete_update_perf | merge_perf | optimize_perf | metadata_perf)
 		return 0
 		;;
 	*)
@@ -523,6 +630,7 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--storage-backend)
 		STORAGE_BACKEND="$2"
+		STORAGE_BACKEND_EXPLICIT=1
 		shift 2
 		;;
 	--storage-option)
@@ -531,6 +639,7 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--backend-profile)
 		BACKEND_PROFILE="$2"
+		BACKEND_PROFILE_EXPLICIT=1
 		shift 2
 		;;
 	--runner)
@@ -543,6 +652,7 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--dataset-id)
 		DATASET_ID="$2"
+		DATASET_ID_EXPLICIT=1
 		shift 2
 		;;
 	--timing-phase)
@@ -578,6 +688,10 @@ fi
 base_ref="${positional_refs[0]:-main}"
 candidate_ref="${positional_refs[1]:-}"
 suite="${positional_refs[2]:-scan}"
+suite_explicit=0
+if ((${#positional_refs[@]} >= 3)); then
+	suite_explicit=1
+fi
 base_ref_mode="auto"
 candidate_ref_mode="auto"
 
@@ -594,6 +708,11 @@ if ((WORKING_VS_UPSTREAM_MAIN != 0)); then
 	base_ref=""
 	candidate_ref=""
 	suite="${positional_refs[0]:-scan}"
+	if ((${#positional_refs[@]} >= 1)); then
+		suite_explicit=1
+	else
+		suite_explicit=0
+	fi
 fi
 
 if [[ -n "${BASE_SHA_OVERRIDE}" ]]; then
@@ -607,9 +726,12 @@ fi
 
 if [[ -n "${BASE_SHA_OVERRIDE}" && -n "${CANDIDATE_SHA_OVERRIDE}" ]]; then
 	case "${#positional_refs[@]}" in
-	0) ;;
+	0)
+		suite_explicit=0
+		;;
 	1)
-		suite="${positional_refs[0]}"
+		suite="${positional_refs[0]:-scan}"
+		suite_explicit=1
 		;;
 	*)
 		echo "when using both --base-sha and --candidate-sha, provide at most one positional [suite]" >&2
@@ -628,6 +750,19 @@ if [[ -n "${METHODOLOGY_PROFILE}" ]]; then
 	load_methodology_profile "${METHODOLOGY_PROFILE}"
 fi
 
+if [[ -n "${METHODOLOGY_PROFILE}" ]]; then
+	if ((suite_explicit == 0)); then
+		suite="${TARGET}"
+	elif [[ "${suite}" != "${TARGET}" ]]; then
+		echo "suite '${suite}' does not match methodology profile '${METHODOLOGY_PROFILE}' target '${TARGET}'" >&2
+		exit 1
+	fi
+fi
+
+if [[ -z "${suite}" ]]; then
+	suite="scan"
+fi
+
 case "${AGGREGATION}" in
 min | median | p95) ;;
 *)
@@ -644,10 +779,10 @@ exploratory | decision) ;;
 	;;
 esac
 
-if ! trusted_macro_compare_suite "${suite}"; then
-	echo "suite '${suite}' is not supported for macro-lane branch compare." >&2
-	echo "compare_branch.sh supports only trusted perf suites: scan, write_perf, tpcds." >&2
-	echo "use suite 'scan' for the curated default, or run unsupported stateful suites through purpose-built validation/longitudinal flows." >&2
+if ! supported_compare_suite "${suite}"; then
+	echo "suite '${suite}' is not supported for compare_branch.sh." >&2
+	echo "compare_branch.sh supports only curated compare suites: scan, write_perf, tpcds, delete_update_perf, merge_perf, optimize_perf, metadata_perf." >&2
+	echo "use suite 'scan' for the execute-phase guardrail, pair metadata and replay investigations with cargo bench -p delta-bench --bench metadata_replay_bench, use the dedicated perf-owned DML, maintenance, and metadata suites for candidate/manual evidence refresh, or run unsupported stateful suites through purpose-built validation/longitudinal flows." >&2
 	exit 1
 fi
 
@@ -1361,6 +1496,7 @@ run_command_to_file "${hash_policy_txt}" "${hash_policy_cmd[@]}"
 manifest_cmd=(env PYTHONPATH="${RUNNER_ROOT}/python" python3 -m delta_bench_compare.manifest
 	--output "${manifest_json}"
 	--suite "${suite}"
+	--profile "${METHODOLOGY_PROFILE:-${suite}}"
 	--base-sha "${base_ref}"
 	--candidate-sha "${candidate_ref}"
 	--base-json "${base_json}"

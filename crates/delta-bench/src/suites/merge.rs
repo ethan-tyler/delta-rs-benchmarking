@@ -216,7 +216,7 @@ pub async fn run(
     Ok(out)
 }
 
-fn merge_fixture_table_path(
+pub(crate) fn merge_fixture_table_path(
     fixtures_dir: &Path,
     scale: &str,
     profile: MergeTargetProfile,
@@ -256,7 +256,7 @@ async fn prepare_merge_iteration(
     })
 }
 
-async fn run_merge_case(
+pub(crate) async fn run_merge_case(
     table: DeltaTable,
     source: DataFrame,
     source_rows: usize,
@@ -346,7 +346,7 @@ async fn run_merge_case(
     )
 }
 
-async fn seed_merge_target_table(
+pub(crate) async fn seed_merge_target_table(
     rows: &[NarrowSaleRow],
     table_url: Url,
     case: MergeCase,
@@ -375,7 +375,7 @@ async fn seed_merge_target_table(
     Ok(())
 }
 
-fn build_source_df(
+pub(crate) fn build_source_df(
     rows: &[NarrowSaleRow],
     match_ratio: f64,
     mode: MergeMode,

@@ -22,7 +22,7 @@ use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
 use crate::validation::{lane_requires_semantic_validation, validate_table_state};
 
-const OPTIMIZE_COMPACT_TARGET_SIZE: u64 = 1_000_000;
+pub(crate) const OPTIMIZE_COMPACT_TARGET_SIZE: u64 = 1_000_000;
 const OPTIMIZE_HEAVY_TARGET_SIZE: u64 = 64_000;
 
 struct IterationSetup {
@@ -366,7 +366,7 @@ pub async fn run(
     Ok(out)
 }
 
-async fn run_optimize_case(
+pub(crate) async fn run_optimize_case(
     table: DeltaTable,
     target_size: u64,
     lane: BenchmarkLane,
@@ -436,7 +436,7 @@ fn normalize_target_size(target_size: u64) -> BenchResult<NonZeroU64> {
     })
 }
 
-async fn run_vacuum_case(
+pub(crate) async fn run_vacuum_case(
     table: DeltaTable,
     dry_run: bool,
     lane: BenchmarkLane,

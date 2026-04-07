@@ -66,23 +66,35 @@ Example with all preflight checks enabled:
 
 For trusted fork SHAs, add `--candidate-fetch-url <clone-url>` or `--base-fetch-url <clone-url>` so the runner can fetch immutable refs that are not advertised by `origin`. Prefer the full 40-character SHA for these runs, or set `DELTA_RS_FETCH_REF` if you need to fetch an advertised branch/ref and then resolve an abbreviated commit from that history.
 
+The same immutable-SHA contract applies to trust validation on trusted runners. If `./scripts/validate_perf_harness.sh --sha <commit>` targets a SHA that `origin` does not advertise, run it with `--fetch-url <trusted-clone-url>` and optionally `--fetch-ref <ref>`. Validation prepares `.delta-rs-under-test` at that SHA first, then seeds same-SHA compare pinning into `.delta-rs-source` from the prepared execution checkout:
+
+```bash
+./scripts/validate_perf_harness.sh \
+  --sha 3fe2fa92a1dc54c8c6b378529b449f5f4c601e39 \
+  --fetch-url https://github.com/example/delta-rs \
+  --artifact-dir results/validation/fork-sha
+```
+
 Remote compare also writes a stable artifact bundle under `<remote-root>/results/compare/<suite>/<base>__<candidate>/`. Automation can upload `summary.md` directly and read `manifest.json` to locate `comparison.json` and `hash-policy.txt` without scraping stdout.
 
 The self-hosted GitHub Actions workflows enforce the same preflight contract:
 
 - `benchmark.yml` passes `--enforce-run-mode`, `--require-no-public-ipv4`, and `--require-egress-policy` directly into `./scripts/compare_branch.sh`
-- `benchmark-prerelease.yml` passes the same hardening flags into `./scripts/compare_branch.sh`
-- `benchmark-nightly.yml` runs `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` before benchmark execution
+- `benchmark-prerelease.yml` resolves a declared remote surface such as `scan_s3` or `metadata_perf_s3` from the `s3-candidate-manual` pack, then executes the resolved shard through `./scripts/run_profile.sh`
+- `benchmark-nightly.yml` runs `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` before benchmark execution, then resolves the `s3-candidate-manual` pack and executes its declared remote surfaces through `./scripts/run_profile.sh`
 - `longitudinal-nightly.yml` runs `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` before `run-matrix`
 - `longitudinal-release-history.yml` runs `./scripts/security_check.sh --enforce-run-mode --require-no-public-ipv4 --require-egress-policy` before `run-matrix`
 
 Workflow variables for self-hosted runs:
 
 - Required: `DELTA_BENCH_EGRESS_POLICY_SHA256` for the expected hash of the active nftables ruleset
+- Required: `DELTA_BENCH_BOT_DB_PATH` for the PR bot SQLite database used by `show benchmark queue` and pack request tracking. The path must be a shared path mounted on every runner that can execute `benchmark.yml`.
 - Optional: `BENCH_STORAGE_BACKEND` for benchmark jobs that read or write remote storage
 - Optional: `BENCH_STORAGE_OPTIONS` for newline-delimited `KEY=VALUE` storage options
-- Optional: `BENCH_BACKEND_PROFILE` for nightly and compare workflows
+- Optional: `BENCH_BACKEND_PROFILE` for ad hoc compare overrides outside the declared remote candidate surfaces
 - Optional: `BENCH_RUNNER_MODE` for `benchmark.yml` runner selection (`rust`, `python`, or `all`)
+
+For the declared remote compare surfaces, the pack plan resolves both the surface id and its storage contract. The backing methodology profile still carries `storage_backend=s3` and `backend_profile=s3_locking_vultr`, but the workflows now pass the resolved storage settings from the pack shard so nightly and manual runs share the same contract. `write_perf_s3` remains declared-but-gated and is intentionally not part of `s3-candidate-manual` yet.
 
 ## Backend Profile and Secret Handling
 

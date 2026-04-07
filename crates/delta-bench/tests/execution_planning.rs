@@ -88,6 +88,60 @@ fn write_perf_case_filter_can_select_single_scenario() {
     assert_eq!(ids, vec!["write_perf_partitioned_1m_parts_010"]);
 }
 
+#[test]
+fn delete_update_perf_case_filter_can_select_single_scenario() {
+    let plan = plan_run_cases(
+        "delete_update_perf",
+        RunnerMode::Rust,
+        Some("update_perf_all_rows_expr"),
+    )
+    .expect("plan should build");
+    let ids = plan.iter().map(|case| case.id.as_str()).collect::<Vec<_>>();
+
+    assert_eq!(ids, vec!["update_perf_all_rows_expr"]);
+}
+
+#[test]
+fn merge_perf_case_filter_can_select_single_scenario() {
+    let plan = plan_run_cases(
+        "merge_perf",
+        RunnerMode::Rust,
+        Some("merge_perf_upsert_50pct"),
+    )
+    .expect("plan should build");
+    let ids = plan.iter().map(|case| case.id.as_str()).collect::<Vec<_>>();
+
+    assert_eq!(ids, vec!["merge_perf_upsert_50pct"]);
+}
+
+#[test]
+fn optimize_perf_case_filter_can_select_single_scenario() {
+    let plan = plan_run_cases(
+        "optimize_perf",
+        RunnerMode::Rust,
+        Some("vacuum_perf_execute_lite"),
+    )
+    .expect("plan should build");
+    let ids = plan.iter().map(|case| case.id.as_str()).collect::<Vec<_>>();
+
+    assert_eq!(ids, vec!["vacuum_perf_execute_lite"]);
+}
+
+#[test]
+fn scan_macro_plan_excludes_microbench_and_disabled_cases() {
+    let plan = plan_run_cases("scan", RunnerMode::Rust, None).expect("plan should build");
+    let ids = plan.iter().map(|case| case.id.as_str()).collect::<Vec<_>>();
+
+    assert_eq!(
+        ids,
+        vec![
+            "scan_full_narrow",
+            "scan_projection_region",
+            "scan_filter_flag",
+        ]
+    );
+}
+
 #[tokio::test]
 async fn run_planned_cases_applies_assertions_and_can_fail_case() {
     let temp = tempfile::tempdir().expect("tempdir");

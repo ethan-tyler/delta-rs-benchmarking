@@ -2,7 +2,7 @@
 name = "delta-bench-compare"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["PyYAML>=6,<7"]
 
 [project.scripts]
 delta-bench-compare = "delta_bench_compare.compare:main"

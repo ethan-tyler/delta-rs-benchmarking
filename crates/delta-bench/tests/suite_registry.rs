@@ -41,10 +41,28 @@ fn list_targets_includes_write_perf() {
 }
 
 #[test]
+fn list_targets_include_new_perf_owned_dml_and_maintenance_suites() {
+    for target in ["delete_update_perf", "merge_perf", "optimize_perf"] {
+        assert!(
+            list_targets().contains(&target),
+            "{target} target missing from list_targets"
+        );
+    }
+}
+
+#[test]
 fn list_targets_includes_concurrency() {
     assert!(
         list_targets().contains(&"concurrency"),
         "concurrency target missing from list_targets"
+    );
+}
+
+#[test]
+fn list_targets_excludes_scan_planning() {
+    assert!(
+        !list_targets().contains(&"scan_planning"),
+        "scan_planning should not be a public suite target"
     );
 }
 
@@ -78,6 +96,47 @@ fn write_perf_case_list_is_exact() {
 }
 
 #[test]
+fn delete_update_perf_case_list_is_exact() {
+    let cases = list_cases_for_target("delete_update_perf").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "delete_perf_localized_1pct".to_string(),
+            "delete_perf_scattered_5pct_small_files".to_string(),
+            "update_perf_literal_5pct_scattered".to_string(),
+            "update_perf_all_rows_expr".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn merge_perf_case_list_is_exact() {
+    let cases = list_cases_for_target("merge_perf").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "merge_perf_upsert_10pct".to_string(),
+            "merge_perf_upsert_50pct".to_string(),
+            "merge_perf_localized_1pct".to_string(),
+            "merge_perf_delete_5pct".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn optimize_perf_case_list_is_exact() {
+    let cases = list_cases_for_target("optimize_perf").expect("known target should work");
+    assert_eq!(
+        cases,
+        vec![
+            "optimize_perf_compact_small_files".to_string(),
+            "optimize_perf_noop_already_compact".to_string(),
+            "vacuum_perf_execute_lite".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn scan_case_list_is_exact() {
     let cases = list_cases_for_target("scan").expect("known target should work");
     assert_eq!(
@@ -89,6 +148,16 @@ fn scan_case_list_is_exact() {
             "scan_pruning_hit".to_string(),
             "scan_pruning_miss".to_string(),
         ]
+    );
+}
+
+#[test]
+fn scan_planning_target_is_rejected() {
+    let err = list_cases_for_target("scan_planning")
+        .expect_err("scan_planning should not be a public suite target");
+    assert!(
+        err.to_string().contains("unknown suite target"),
+        "unexpected error: {err}"
     );
 }
 
@@ -167,6 +236,22 @@ fn all_case_list_excludes_write_perf_cases() {
         cases.iter().all(|case| !case.starts_with("write_perf_")),
         "all target should exclude opt-in write_perf cases"
     );
+}
+
+#[test]
+fn all_case_list_excludes_new_perf_owned_dml_and_maintenance_cases() {
+    let cases = list_cases_for_target("all").expect("known target should work");
+    for prefix in [
+        "delete_perf_",
+        "merge_perf_",
+        "optimize_perf_",
+        "vacuum_perf_",
+    ] {
+        assert!(
+            cases.iter().all(|case| !case.starts_with(prefix)),
+            "all target should exclude opt-in perf cases with prefix {prefix}"
+        );
+    }
 }
 
 #[test]

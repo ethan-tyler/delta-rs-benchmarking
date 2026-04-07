@@ -73,11 +73,20 @@ The compare pipeline runs the macro lane in `--mode perf`. By default `compare_b
 
 `--methodology-profile pr-tpcds` resolves the TPC-DS contract: `dataset_id=tpcds_duckdb`, `compare_mode=decision`, `warmup=1`, `iters=5`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. Use it only on trusted self-hosted runners with the DuckDB-backed fixture tree provisioned ahead of time. `tpcds_q72` remains outside the PR decision surface, and the suite stays gated in `bench/evidence/registry.yaml` until fixture provisioning plus validation signoff evidence exists. Refresh the dedicated gate with `./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate`.
 
-Criterion profiles live in the same `bench/methodologies/` directory, but `compare_branch.sh` intentionally rejects `PROFILE_KIND=criterion`. Invoke them through `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, or `./scripts/run_profile.sh metadata-log-criterion` instead. `metadata-replay-criterion` resolves to `scan_replay_bench`, `metadata-log-criterion` resolves to `metadata_log_bench`, and all committed Criterion profiles stay diagnostic-only rather than authoritative PR evidence.
+Criterion profiles live in the same `bench/methodologies/` directory, but `compare_branch.sh` intentionally rejects `PROFILE_KIND=criterion`. Invoke them through `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, or `./scripts/run_profile.sh metadata-log-criterion` instead. `metadata-replay-criterion` resolves to `metadata_replay_bench`, `metadata-log-criterion` resolves to `metadata_log_bench`, and all committed Criterion profiles stay diagnostic-only rather than authoritative PR evidence.
 
 Before treating a machine or workflow as trustworthy for perf claims, rerun `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
 
-> **Automation scope.** PR comments support `run benchmark scan` (exploratory), `run benchmark decision scan` (decision-grade), `run benchmark decision full`, and `show benchmark queue`. The single-suite decision path runs `./scripts/compare_branch.sh --methodology-profile pr-macro ...` on self-hosted hardware. The `full` command resolves the harness-owned `pr-full-decision` pack from `bench/evidence/registry.yaml`; full does not mean --suite all, and `pr-full-decision` contains only `readiness=ready` suites. Operators can still batch gated perf suites through `pr-candidate-manual`; that candidate/manual pack now includes `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds`. The legacy `metadata`, `delete_update`, `merge`, and `optimize_vacuum` suites stay correctness-only, so forcing those originals through macro lane still produces operational but not `perf_status=trusted` results. `scan_pruning_hit` moved to Criterion microbench coverage because it is too small/cache-sensitive to treat as a normal macro verdict row. `scan_pruning_miss` remains disabled until it is requalified. GitHub-hosted CI stays on smoke and correctness lanes.
+> **Automation scope.** PR comments support `run benchmark scan` (exploratory), `run benchmark decision scan` (decision-grade), `run benchmark decision full`, and `show benchmark queue`. The single-suite decision path runs `./scripts/compare_branch.sh --methodology-profile pr-macro ...` on self-hosted hardware. The `full` command resolves the harness-owned `pr-full-decision` pack from `bench/evidence/registry.yaml`; full does not mean --suite all, and `pr-full-decision` contains only `readiness=ready` suites. Operators can still batch gated perf suites through `pr-candidate-manual`; that candidate/manual pack now includes `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`. The legacy `metadata`, `delete_update`, `merge`, and `optimize_vacuum` suites stay correctness-only, so forcing those originals through macro lane still produces operational but not `perf_status=trusted` results. `scan_pruning_hit` moved to Criterion microbench coverage because it is too small/cache-sensitive to treat as a normal macro verdict row. `scan_pruning_miss` remains disabled until it is requalified. GitHub-hosted CI stays on smoke and correctness lanes.
+
+### Decision Surface Contract
+
+Keep the entrypoints split by evidence class:
+
+- Ready PR automation: `run benchmark scan`, `run benchmark decision scan`, `run benchmark decision full`
+- Candidate/manual operator compares: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds`
+- Candidate/manual multi-suite packs: `pr-candidate-manual` and `s3-candidate-manual` via the pack tooling, never via `run benchmark decision full`
+- Diagnostic Criterion probes: `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, `./scripts/run_profile.sh metadata-log-criterion`
 
 ## Replay-State Probes
 
@@ -90,7 +99,9 @@ Use the public `scan` contract for the product-facing PR verdict, then run the n
 ./scripts/run_profile.sh metadata-replay-criterion
 ```
 
-`metadata-replay-criterion` resolves to `scan_replay_bench`. It is investigation-grade, isolates snapshot/provider replay work behind the existing scan replay bench, and does not replace the macro `scan` compare surface or enter PR verdict logic.
+`metadata-replay-criterion` resolves to `metadata_replay_bench`. It is investigation-grade, isolates snapshot/provider replay work behind the dedicated metadata replay bench, and does not replace the macro `scan` compare surface or enter PR verdict logic.
+
+If you need the old approximation path for historical comparison work, `timing_phase=plan` stays investigation-grade only. It is useful for ad hoc replay-state triangulation, but it is not authoritative proof of the dedicated replay bench path.
 
 Operator rule set:
 
@@ -120,9 +131,17 @@ Use `--methodology-profile <name>` to load harness-owned compare defaults from `
 
 `pr-delete-update-perf`, `pr-merge-perf`, and `pr-optimize-perf` are the perf-owned DML and maintenance operator profiles. They all fix `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. Use them for candidate/manual evidence refreshes on `delete_update_perf`, `merge_perf`, and `optimize_perf`; the underlying correctness suites remain correctness-only and are not perf evidence.
 
-`pr-tpcds` is the TPC-DS operator profile. It fixes `dataset_id=tpcds_duckdb`, expects the fixture root to exist on trusted self-hosted runners before the compare begins, and keeps `tpcds_q72` outside the PR decision surface. Use it for dedicated TPC-DS evidence and rerun `./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate` before treating the output as promotion evidence.
+`pr-metadata-perf` is the metadata/replay macro operator profile. It fixes `dataset_id=many_versions`, uses decision-mode compare defaults, and stays candidate/manual until same-SHA stability, delayed-canary validation, runtime signoff, and checkpoint-vs-uncheckpointed coverage signoff are all closed. Use it with:
 
-The PR pack registry lives in `bench/evidence/registry.yaml`. `pr-full-decision` maps the `full` alias to the ready PR decision surface only and contains only `readiness=ready` suites. `pr-candidate-manual` collects gated perf-owned suites for operator-run evidence refreshes: `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, and `tpcds`. `tpcds` remains candidate/manual there and stays out of PR comment automation until its gates are closed.
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf
+```
+
+`pr-tpcds` is the TPC-DS operator profile. It fixes `dataset_id=tpcds_duckdb`, expects the fixture root to exist on trusted self-hosted runners before the compare begins, and keeps `tpcds_q72` outside the PR decision surface. Use it for dedicated TPC-DS evidence and rerun `./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate` before treating the output as promotion evidence. In plain terms, tpcds remains candidate/manual until its trusted-runner promotion gate closes.
+
+The PR pack registry lives in `bench/evidence/registry.yaml`. `pr-full-decision` maps the `full` alias to the ready PR decision surface only and contains only `readiness=ready` suites. `pr-candidate-manual` collects gated perf-owned suites for operator-run evidence refreshes: `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`. `tpcds` remains candidate/manual there and stays out of PR comment automation until its gates are closed.
+
+Remote candidate/manual surfaces use the same compare path instead of a second harness. Profiles such as `scan-s3-candidate`, `write-perf-s3-candidate`, and `metadata-perf-s3-candidate` carry `storage_backend=s3` and `backend_profile=s3_locking_vultr` directly in `bench/methodologies/`. The matching `s3-candidate-manual` pack batches those remote shards without widening the authoritative PR bot contract.
 
 ### Named branch-to-branch
 
@@ -164,6 +183,8 @@ If a trusted PR head SHA lives on a fork remote instead of `origin`, pass the fo
 ```
 
 Use `--base-fetch-url` the same way when the base SHA is only reachable from a non-`origin` remote. Prefer the full 40-character SHA when you use an alternate fetch URL. If you only have an abbreviated SHA and it is not directly advertised by the alternate remote, set `DELTA_RS_FETCH_REF` to an advertised branch/ref so the checkout can fetch that history first. The lower-level checkout contract is also available through `prepare_delta_rs.sh` via `DELTA_RS_FETCH_URL` and `DELTA_RS_FETCH_REF`.
+
+The validation entrypoint uses the same lower-level immutable-fetch contract. When `./scripts/validate_perf_harness.sh --sha <commit>` targets a SHA that `origin` does not advertise, add `--fetch-url <trusted-clone-url>` and optionally `--fetch-ref <ref>`. The validator prepares `.delta-rs-under-test` at that SHA first, then seeds same-SHA compare pinning into `.delta-rs-source` from the prepared execution checkout so the shared source checkout does not need manual repair.
 
 By default compare keeps two local delta-rs roots with different responsibilities:
 
@@ -291,7 +312,7 @@ export CARGO_TARGET_DIR="$PWD/target"
 5. **Keep alternating order.** The default `--measure-order alternate` reduces drift from cache warming, thermal throttling, and background processes by interleaving base and candidate runs.
 6. **Use median aggregation.** The default `median` is robust to outliers. Switch to `p95` only when analyzing tail latency.
 7. **Watch for noise.** If `cv_pct` (coefficient of variation) exceeds 10% for a case, the measurement is noisy. Rerun with higher `--compare-runs` or `--iters` to increase sample size.
-8. **Revalidate the harness before using the output as evidence.** Run `./scripts/validate_perf_harness.sh` and inspect the refreshed `summary.md` in its artifact directory against the operator guidance in `docs/validation.md`. If you want a stable local path, use `--artifact-dir results/validation/latest`.
+8. **Revalidate the harness before using the output as evidence.** Run `./scripts/validate_perf_harness.sh` and inspect the refreshed `summary.md` in its artifact directory against the operator guidance in `docs/validation.md`. If you want a stable local path, use `--artifact-dir results/validation/latest`. If the validation SHA is not reachable from `origin`, add `--sha <commit> --fetch-url <trusted-clone-url>` so the validator can seed `.delta-rs-source` from the prepared `.delta-rs-under-test` checkout.
 
 Decision-grade command with the current explicit trust contract:
 

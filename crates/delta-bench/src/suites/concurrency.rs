@@ -386,7 +386,7 @@ async fn execute_update_vs_compaction(setup: ContendedSampleSetup) -> BenchResul
                         Worker::Compact(table) => classify_table_version_result(
                             table
                                 .optimize()
-                                .with_target_size(contended_optimize_target_size())
+                                .with_target_size(contended_optimize_target_size().into())
                                 .await
                                 .map(|(table, _)| table.version().map(|version| version as u64)),
                         ),
@@ -428,7 +428,7 @@ async fn execute_delete_vs_compaction(setup: ContendedSampleSetup) -> BenchResul
                         Worker::Compact(table) => classify_table_version_result(
                             table
                                 .optimize()
-                                .with_target_size(contended_optimize_target_size())
+                                .with_target_size(contended_optimize_target_size().into())
                                 .await
                                 .map(|(table, _)| table.version().map(|version| version as u64)),
                         ),
@@ -459,7 +459,7 @@ async fn execute_optimize_vs_optimize_overlap(
                     classify_table_version_result(
                         table
                             .optimize()
-                            .with_target_size(contended_optimize_target_size())
+                            .with_target_size(contended_optimize_target_size().into())
                             .await
                             .map(|(table, _)| table.version().map(|version| version as u64)),
                     )

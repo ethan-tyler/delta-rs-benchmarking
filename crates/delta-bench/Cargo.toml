@@ -30,5 +30,13 @@ name = "scan_phase_bench"
 harness = false
 
 [[bench]]
+name = "scan_replay_bench"
+harness = false
+
+[[bench]]
+name = "metadata_replay_bench"
+harness = false
+
+[[bench]]
 name = "metadata_log_bench"
 harness = false

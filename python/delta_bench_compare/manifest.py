@@ -20,6 +20,7 @@ def _optional_float(value: str | None) -> float | None:
 def build_manifest(args: argparse.Namespace) -> dict[str, object]:
     return {
         "suite": args.suite,
+        "profile": args.profile or args.suite,
         "base_sha": args.base_sha,
         "candidate_sha": args.candidate_sha,
         "base_json": args.base_json,
@@ -42,12 +43,15 @@ def build_manifest(args: argparse.Namespace) -> dict[str, object]:
             "measure_order": args.methodology_measure_order,
             "timing_phase": args.methodology_timing_phase,
             "aggregation": args.methodology_aggregation,
+            "dataset_id": args.methodology_dataset_id or None,
             "dataset_policy": args.methodology_dataset_policy or None,
             "spread_metric": args.methodology_spread_metric or None,
             "sub_ms_threshold_ms": _optional_float(
                 args.methodology_sub_ms_threshold_ms
             ),
             "sub_ms_policy": args.methodology_sub_ms_policy or None,
+            "storage_backend": args.methodology_storage_backend or None,
+            "backend_profile": args.methodology_backend_profile or None,
         },
     }
 
@@ -56,6 +60,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Write compare artifact manifest")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--suite", required=True)
+    parser.add_argument("--profile")
     parser.add_argument("--base-sha", required=True)
     parser.add_argument("--candidate-sha", required=True)
     parser.add_argument("--base-json", required=True)
@@ -77,10 +82,13 @@ def main() -> None:
     parser.add_argument("--methodology-measure-order", required=True)
     parser.add_argument("--methodology-timing-phase", required=True)
     parser.add_argument("--methodology-aggregation", required=True)
+    parser.add_argument("--methodology-dataset-id")
     parser.add_argument("--methodology-dataset-policy")
     parser.add_argument("--methodology-spread-metric")
     parser.add_argument("--methodology-sub-ms-threshold-ms")
     parser.add_argument("--methodology-sub-ms-policy")
+    parser.add_argument("--methodology-storage-backend")
+    parser.add_argument("--methodology-backend-profile")
     args = parser.parse_args()
 
     args.output.write_text(

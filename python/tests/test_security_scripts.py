@@ -205,7 +205,7 @@ def test_ci_workflow_configures_dependency_audits_and_dependabot() -> None:
     assert 'package-ecosystem: "cargo"' in dependabot
     assert 'package-ecosystem: "pip"' in dependabot
 
-    for package in ("pandas", "polars", "pyarrow", "duckdb"):
+    for package in ("pandas", "polars", "pyarrow", "duckdb", "PyYAML"):
         assert package in requirements
 
 

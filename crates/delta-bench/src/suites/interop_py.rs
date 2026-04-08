@@ -1,8 +1,11 @@
+use std::collections::BTreeMap;
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 use std::time::Instant;
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::cli::BenchmarkLane;
 use crate::error::{BenchError, BenchResult};
@@ -12,6 +15,7 @@ use crate::results::{
 };
 use crate::stats::compute_stats;
 use crate::storage::StorageConfig;
+use crate::system::PYTHON_INTEROP_REQUIRED_MODULES;
 use crate::validation::lane_requires_semantic_validation;
 
 const CASES: [&str; 3] = [
@@ -21,6 +25,7 @@ const CASES: [&str; 3] = [
 ];
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
 const DEFAULT_RETRIES: u32 = 1;
+const INTEROP_AUDIT_REQUIREMENTS_RELATIVE_PATH: &str = "python/requirements-audit.txt";
 
 #[derive(Debug, Deserialize)]
 struct InteropCaseOutput {
@@ -95,6 +100,12 @@ impl InteropRuntimeConfig {
     }
 }
 
+#[derive(Debug)]
+struct PythonModuleVersionProbeResult {
+    versions: BTreeMap<String, Option<String>>,
+    probe_error: Option<String>,
+}
+
 fn parse_env_u64(name: &str, default: u64) -> BenchResult<u64> {
     let Some(raw) = std::env::var(name).ok() else {
         return Ok(default);
@@ -149,6 +160,11 @@ pub async fn run(
     }
 
     let runtime = InteropRuntimeConfig::from_env()?;
+    if lane_requires_semantic_validation(lane) {
+        if let Some(message) = interop_dependency_version_mismatch(&runtime)? {
+            return Ok(interop_dependency_mismatch_results(&message));
+        }
+    }
     let mut out = Vec::new();
     for case in CASES {
         out.push(
@@ -165,6 +181,222 @@ pub async fn run(
         );
     }
     Ok(out)
+}
+
+fn interop_dependency_mismatch_results(message: &str) -> Vec<CaseResult> {
+    case_names()
+        .into_iter()
+        .map(|case| CaseResult {
+            case,
+            success: false,
+            validation_passed: false,
+            perf_status: PerfStatus::Invalid,
+            classification: "supported".to_string(),
+            samples: Vec::new(),
+            elapsed_stats: None,
+            run_summary: None,
+            run_summaries: None,
+            suite_manifest_hash: None,
+            case_definition_hash: None,
+            compatibility_key: None,
+            supports_decision: None,
+            required_runs: None,
+            decision_threshold_pct: None,
+            decision_metric: None,
+            failure_kind: Some(FAILURE_KIND_EXECUTION_ERROR.to_string()),
+            failure: Some(CaseFailure {
+                message: message.to_string(),
+            }),
+        })
+        .collect()
+}
+
+fn interop_dependency_version_mismatch(
+    runtime: &InteropRuntimeConfig,
+) -> BenchResult<Option<String>> {
+    let requirements_path = interop_audit_requirements_path();
+    let expected_versions = load_expected_interop_versions(&requirements_path)?;
+    let probe =
+        probe_python_module_versions(&runtime.python_executable, &PYTHON_INTEROP_REQUIRED_MODULES);
+    if let Some(error) = probe.probe_error {
+        return Ok(Some(format!(
+            "python interop dependency version mismatch: failed to probe '{}' ({error}); exact semantic assertions require versions from {}",
+            runtime.python_executable,
+            requirements_path.display()
+        )));
+    }
+
+    let mismatches = PYTHON_INTEROP_REQUIRED_MODULES
+        .iter()
+        .filter_map(|module| {
+            let expected = expected_versions.get(*module)?;
+            let found = probe
+                .versions
+                .get(*module)
+                .and_then(|value| value.as_deref());
+            if found == Some(expected.as_str()) {
+                None
+            } else {
+                Some(format!(
+                    "{} expected {}, found {}",
+                    module,
+                    expected,
+                    found.unwrap_or("missing")
+                ))
+            }
+        })
+        .collect::<Vec<_>>();
+    if mismatches.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(format!(
+            "python interop dependency version mismatch: {}; exact semantic assertions require versions from {}",
+            mismatches.join("; "),
+            requirements_path.display()
+        )))
+    }
+}
+
+fn interop_audit_requirements_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(INTEROP_AUDIT_REQUIREMENTS_RELATIVE_PATH)
+}
+
+fn load_expected_interop_versions(path: &Path) -> BenchResult<BTreeMap<String, String>> {
+    let content = std::fs::read_to_string(path).map_err(|error| {
+        BenchError::InvalidArgument(format!(
+            "failed to read python interop requirements at {}: {error}",
+            path.display()
+        ))
+    })?;
+    let mut versions = BTreeMap::new();
+    for raw_line in content.lines() {
+        let line = raw_line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some((name, version)) = line.split_once("==") else {
+            continue;
+        };
+        let name = name.trim();
+        if PYTHON_INTEROP_REQUIRED_MODULES.contains(&name) {
+            versions.insert(name.to_string(), version.trim().to_string());
+        }
+    }
+    for module in PYTHON_INTEROP_REQUIRED_MODULES {
+        if !versions.contains_key(module) {
+            return Err(BenchError::InvalidArgument(format!(
+                "python interop requirements file {} is missing pinned version for {}",
+                path.display(),
+                module
+            )));
+        }
+    }
+    Ok(versions)
+}
+
+fn probe_python_module_versions(
+    python_executable: &str,
+    modules: &[&str],
+) -> PythonModuleVersionProbeResult {
+    if modules.is_empty() {
+        return PythonModuleVersionProbeResult {
+            versions: BTreeMap::new(),
+            probe_error: None,
+        };
+    }
+
+    const PROBE_SCRIPT: &str = r#"
+import importlib
+import importlib.util
+import json
+import sys
+
+out = {}
+for name in sys.argv[1:]:
+    spec = importlib.util.find_spec(name)
+    if spec is None:
+        out[name] = None
+        continue
+    module = importlib.import_module(name)
+    out[name] = getattr(module, "__version__", None)
+print(json.dumps(out, sort_keys=True))
+"#;
+
+    let output = match std::process::Command::new(python_executable)
+        .arg("-c")
+        .arg(PROBE_SCRIPT)
+        .args(modules)
+        .output()
+    {
+        Ok(output) => output,
+        Err(error) => {
+            return PythonModuleVersionProbeResult {
+                versions: BTreeMap::new(),
+                probe_error: Some(format!("failed to execute '{python_executable}': {error}")),
+            };
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            format!("'{python_executable}' exited with status {}", output.status)
+        } else {
+            format!(
+                "'{python_executable}' exited with status {}: {stderr}",
+                output.status
+            )
+        };
+        return PythonModuleVersionProbeResult {
+            versions: BTreeMap::new(),
+            probe_error: Some(message),
+        };
+    }
+
+    let parsed = match serde_json::from_slice::<Value>(&output.stdout) {
+        Ok(value) => value,
+        Err(error) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let snippet = if stdout.is_empty() {
+                "empty stdout".to_string()
+            } else {
+                format!("stdout='{stdout}'")
+            };
+            return PythonModuleVersionProbeResult {
+                versions: BTreeMap::new(),
+                probe_error: Some(format!(
+                    "failed to parse version probe output from '{python_executable}': {error} ({snippet})"
+                )),
+            };
+        }
+    };
+
+    let Some(object) = parsed.as_object() else {
+        return PythonModuleVersionProbeResult {
+            versions: BTreeMap::new(),
+            probe_error: Some(format!(
+                "invalid version probe output from '{python_executable}': expected JSON object"
+            )),
+        };
+    };
+
+    let versions = modules
+        .iter()
+        .map(|module| {
+            let value = object
+                .get(*module)
+                .and_then(|entry| entry.as_str())
+                .map(|entry| entry.to_string());
+            ((*module).to_string(), value)
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    PythonModuleVersionProbeResult {
+        versions,
+        probe_error: None,
+    }
 }
 
 async fn run_case(

@@ -341,11 +341,8 @@ def test_docs_define_validation_fetch_contract_for_trusted_runner_shas() -> None
     compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
     reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
     cloud_runner = (DOCS_DIR / "cloud-runner.md").read_text(encoding="utf-8")
-    tracker = (DOCS_DIR / "plans" / "2026-04-05-pr-suite-rollout-tracker.md").read_text(
-        encoding="utf-8"
-    )
 
-    combined = "\n".join((validation, compare_doc, reference, cloud_runner, tracker))
+    combined = "\n".join((validation, compare_doc, reference, cloud_runner))
     assert "./scripts/validate_perf_harness.sh --sha" in combined
     assert "--fetch-url" in combined
     assert "VALIDATION_FETCH_URL" in combined

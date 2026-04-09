@@ -22,6 +22,7 @@ use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics};
 use crate::runner::{run_case_async, run_case_async_with_setup};
 use crate::storage::StorageConfig;
 use crate::validation::{lane_requires_semantic_validation, validate_table_state};
+use crate::version_compat::{optional_table_version_to_u64, snapshot_version_arg};
 
 const METADATA_PERF_DELAY_ENV: &str = "DELTA_BENCH_METADATA_PERF_DELAY_MS";
 const METADATA_PERF_ALLOW_DELAY_ENV: &str = "DELTA_BENCH_ALLOW_METADATA_PERF_DELAY";
@@ -251,13 +252,10 @@ pub async fn benchmark_snapshot_at_version(
     loaded: &LoadedMetadataReplayTable,
     version: u64,
 ) -> BenchResult<Snapshot> {
-    let version = i64::try_from(version).map_err(|_| {
-        BenchError::InvalidArgument(format!("snapshot version {version} does not fit into i64"))
-    })?;
     Ok(Snapshot::try_new(
         loaded.table.log_store().as_ref(),
         Default::default(),
-        Some(version),
+        Some(snapshot_version_arg(version)?),
     )
     .await?)
 }
@@ -300,7 +298,7 @@ async fn build_metadata_observation(
     table: &DeltaTable,
     lane: BenchmarkLane,
 ) -> BenchResult<(Option<u64>, String, Option<String>, Option<String>)> {
-    let table_version = table.version().map(|version| version as u64);
+    let table_version = optional_table_version_to_u64(table.version())?;
     let mut schema_hash = hash_json(&json!(["operation:string", "table_version:u64"]))?;
     let mut semantic_state_digest = None;
     let mut validation_summary = None;

@@ -15,6 +15,7 @@ use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics};
 use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
 use crate::validation::{lane_requires_semantic_validation, validate_table_state};
+use crate::version_compat::optional_table_version_to_u64;
 
 pub fn case_names() -> Vec<String> {
     vec![
@@ -136,7 +137,7 @@ async fn run_append_case(
         table = table.write(vec![batch]).with_save_mode(mode).await?;
     }
 
-    let table_version = table.version().map(|v| v as u64);
+    let table_version = optional_table_version_to_u64(table.version())?;
     let result_hash = hash_json(&json!({
         "rows_processed": rows.len() as u64,
         "operations": operations,
@@ -197,7 +198,7 @@ async fn run_overwrite_case(
         .with_save_mode(SaveMode::Overwrite)
         .await?;
 
-    let table_version = table.version().map(|v| v as u64);
+    let table_version = optional_table_version_to_u64(table.version())?;
     let result_hash = hash_json(&json!({
         "rows_processed": (rows.len() as u64) * 2,
         "operations": 2_u64,

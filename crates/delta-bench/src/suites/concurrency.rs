@@ -27,6 +27,7 @@ use crate::results::{
 };
 use crate::stats::compute_stats;
 use crate::storage::StorageConfig;
+use crate::version_compat::optional_table_version_to_u64;
 
 const CREATE_WORKER_COUNT: usize = 4;
 const APPEND_WORKER_COUNT: usize = 4;
@@ -325,7 +326,7 @@ async fn execute_concurrent_table_create(setup: CreateSampleSetup) -> BenchResul
                         .with_columns(schema.fields().cloned())
                         .with_save_mode(SaveMode::Ignore)
                         .await
-                        .map(|table| table.version().map(|version| version as u64)),
+                        .and_then(|table| checked_table_version(&table)),
                 )
             }
         }),
@@ -349,7 +350,7 @@ async fn execute_concurrent_append_multi(setup: AppendSampleSetup) -> BenchResul
                     .write(vec![worker.batch])
                     .with_save_mode(SaveMode::Append)
                     .await
-                    .map(|table| table.version().map(|version| version as u64)),
+                    .and_then(|table| checked_table_version(&table)),
             )
         }),
     )
@@ -381,14 +382,14 @@ async fn execute_update_vs_compaction(setup: ContendedSampleSetup) -> BenchResul
                                 .with_predicate(update_vs_compaction_predicate())
                                 .with_update("value_i64", "value_i64 + 1")
                                 .await
-                                .map(|(table, _)| table.version().map(|version| version as u64)),
+                                .and_then(|(table, _)| checked_table_version(&table)),
                         ),
                         Worker::Compact(table) => classify_table_version_result(
                             table
                                 .optimize()
                                 .with_target_size(contended_optimize_target_size().into())
                                 .await
-                                .map(|(table, _)| table.version().map(|version| version as u64)),
+                                .and_then(|(table, _)| checked_table_version(&table)),
                         ),
                     }
                 }),
@@ -423,14 +424,14 @@ async fn execute_delete_vs_compaction(setup: ContendedSampleSetup) -> BenchResul
                                 .delete()
                                 .with_predicate(delete_vs_compaction_predicate())
                                 .await
-                                .map(|(table, _)| table.version().map(|version| version as u64)),
+                                .and_then(|(table, _)| checked_table_version(&table)),
                         ),
                         Worker::Compact(table) => classify_table_version_result(
                             table
                                 .optimize()
                                 .with_target_size(contended_optimize_target_size().into())
                                 .await
-                                .map(|(table, _)| table.version().map(|version| version as u64)),
+                                .and_then(|(table, _)| checked_table_version(&table)),
                         ),
                     }
                 }),
@@ -461,7 +462,7 @@ async fn execute_optimize_vs_optimize_overlap(
                             .optimize()
                             .with_target_size(contended_optimize_target_size().into())
                             .await
-                            .map(|(table, _)| table.version().map(|version| version as u64)),
+                            .and_then(|(table, _)| checked_table_version(&table)),
                     )
                 }),
             )
@@ -509,6 +510,11 @@ fn classify_table_version_result(result: Result<Option<u64>, DeltaTableError>) -
         Ok(table_version) => WorkerOutcome::Success { table_version },
         Err(error) => classify_delta_error(error),
     }
+}
+
+fn checked_table_version(table: &DeltaTable) -> Result<Option<u64>, DeltaTableError> {
+    optional_table_version_to_u64(table.version())
+        .map_err(|error| DeltaTableError::Generic(error.to_string()))
 }
 
 fn classify_delta_error(error: DeltaTableError) -> WorkerOutcome {

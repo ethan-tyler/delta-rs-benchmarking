@@ -1326,6 +1326,16 @@ prepare_ref_checkout_once() {
 	run_step env DELTA_RS_DIR="${checkout_dir}" ./scripts/sync_harness_to_delta_rs.sh
 }
 
+run_benchmark_doctor_for_checkout() {
+	local checkout_dir="$1"
+	local side_label="$2"
+	local ref="$3"
+	local doctor_label="${side_label}-${ref}-doctor"
+
+	echo "  -> ${side_label} (${ref:0:10}...)"
+	run_step_no_retry env DELTA_RS_DIR="${checkout_dir}" DELTA_BENCH_EXEC_ROOT="${checkout_dir}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${doctor_label}" ./scripts/bench.sh doctor
+}
+
 run_benchmark_suite_for_checkout() {
 	local checkout_dir="$1"
 	local label="$2"
@@ -1388,7 +1398,7 @@ aggregate_run_labels() {
 }
 
 # Calculate total phases for progress display
-total_phases=$((1 + (BENCH_PREWARM_ITERS > 0 ? 1 : 0) + BENCH_COMPARE_RUNS + 1 + 1))
+total_phases=$((2 + (BENCH_PREWARM_ITERS > 0 ? 1 : 0) + BENCH_COMPARE_RUNS + 1 + 1))
 current_phase=1
 
 phase "${current_phase}" "${total_phases}" "Preparing delta-rs checkout and fixtures"
@@ -1418,6 +1428,13 @@ candidate_checkout_dir="$(checkout_dir_for_ref "${candidate_ref}")"
 
 prepare_ref_checkout_once "${base_ref}" "${base_checkout_dir}" "${BASE_FETCH_URL}"
 prepare_ref_checkout_once "${candidate_ref}" "${candidate_checkout_dir}" "${CANDIDATE_FETCH_URL}"
+
+phase "${current_phase}" "${total_phases}" "Compiling synced delta-bench harness"
+current_phase=$((current_phase + 1))
+
+run_benchmark_doctor_for_checkout "${base_checkout_dir}" "base" "${base_ref}"
+run_benchmark_doctor_for_checkout "${candidate_checkout_dir}" "candidate" "${candidate_ref}"
+
 data_cmd=(./scripts/bench.sh data --scale sf1 --seed 42)
 if [[ -n "${DATASET_ID}" ]]; then
 	data_cmd+=(--dataset-id "${DATASET_ID}")

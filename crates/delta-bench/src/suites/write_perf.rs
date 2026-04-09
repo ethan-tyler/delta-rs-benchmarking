@@ -17,6 +17,7 @@ use crate::fingerprint::hash_json;
 use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics};
 use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
+use crate::version_compat::optional_table_version_to_u64;
 
 const PARTITION_COLUMN_NAME: &str = "part";
 const WRITE_PERF_BATCH_ROWS: usize = 131_072;
@@ -139,7 +140,7 @@ async fn run_write_perf_case(setup: WritePerfIterationSetup) -> BenchResult<Samp
     apply_validation_delay(setup.spec.id).await?;
     let table = builder.await?;
 
-    let table_version = table.version().map(|version| version as u64);
+    let table_version = optional_table_version_to_u64(table.version())?;
     let result_hash = hash_json(&json!({
         "rows_processed": setup.spec.rows as u64,
         "operations": 1_u64,

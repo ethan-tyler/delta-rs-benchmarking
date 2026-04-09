@@ -11,12 +11,13 @@ use deltalake_core::DeltaTable;
 use url::Url;
 
 use crate::data::fixtures::narrow_sales_table_url;
-use crate::error::{BenchError, BenchResult};
+use crate::error::BenchResult;
 use crate::fingerprint::{hash_arrow_schema, hash_record_batches_unordered};
 use crate::replay_snapshot::clone_plain_snapshot_from_loaded_table;
 use crate::results::{RuntimeIOMetrics, SampleMetrics, ScanRewriteMetrics};
 use crate::storage::StorageConfig;
 use crate::suites::scan_metrics::extract_scan_metrics;
+use crate::version_compat::snapshot_version_arg;
 
 const REPLAY_PROBE_SQL: &str = "SELECT COUNT(*) FROM bench WHERE flag = true AND value_i64 > 0";
 
@@ -101,13 +102,10 @@ pub async fn benchmark_snapshot_at_version(
     loaded: &LoadedReplayQuery,
     version: u64,
 ) -> BenchResult<Snapshot> {
-    let version = i64::try_from(version).map_err(|_| {
-        BenchError::InvalidArgument(format!("snapshot version {version} does not fit into i64"))
-    })?;
     Ok(Snapshot::try_new(
         loaded.table.log_store().as_ref(),
         Default::default(),
-        Some(version),
+        Some(snapshot_version_arg(version)?),
     )
     .await?)
 }

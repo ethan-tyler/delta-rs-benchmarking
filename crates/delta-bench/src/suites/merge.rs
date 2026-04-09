@@ -21,6 +21,7 @@ use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMet
 use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
 use crate::validation::{lane_requires_semantic_validation, validate_table_state};
+use crate::version_compat::optional_table_version_to_u64;
 
 #[derive(Clone, Copy, Debug)]
 pub struct MergeCase {
@@ -299,7 +300,7 @@ pub(crate) async fn run_merge_case(
         }
     };
 
-    let table_version = table.version().map(|v| v as u64);
+    let table_version = optional_table_version_to_u64(table.version())?;
     let result_hash = hash_json(&json!({
         "source_rows": source_rows as u64,
         "table_version": table_version,

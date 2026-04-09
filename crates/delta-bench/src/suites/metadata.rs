@@ -12,6 +12,7 @@ use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics};
 use crate::runner::{run_case_async, run_case_async_with_setup};
 use crate::storage::StorageConfig;
 use crate::validation::{lane_requires_semantic_validation, validate_table_state};
+use crate::version_compat::optional_table_version_to_u64;
 
 struct MetadataIterationSetup {
     _temp: tempfile::TempDir,
@@ -73,7 +74,8 @@ pub async fn run(
                         .open_table(table_url)
                         .await
                         .map_err(|e| e.to_string())?;
-                    let table_version = table.version().map(|v| v as u64);
+                    let table_version = optional_table_version_to_u64(table.version())
+                        .map_err(|e| e.to_string())?;
                     let result_hash = hash_json(&json!({
                         "operation": "metadata_load",
                         "table_version": table_version,
@@ -120,7 +122,8 @@ pub async fn run(
                         .await
                         .map_err(|e| e.to_string())?;
                     table.load_version(0).await.map_err(|e| e.to_string())?;
-                    let table_version = table.version().map(|v| v as u64);
+                    let table_version = optional_table_version_to_u64(table.version())
+                        .map_err(|e| e.to_string())?;
                     let result_hash = hash_json(&json!({
                         "operation": "metadata_time_travel_v0",
                         "table_version": table_version,
@@ -166,7 +169,8 @@ pub async fn run(
                 .open_table(table_url)
                 .await
                 .map_err(|e| e.to_string())?;
-            let table_version = table.version().map(|v| v as u64);
+            let table_version =
+                optional_table_version_to_u64(table.version()).map_err(|e| e.to_string())?;
             let result_hash = hash_json(&json!({
                 "operation": "metadata_load",
                 "table_version": table_version,
@@ -205,7 +209,8 @@ pub async fn run(
                 .await
                 .map_err(|e| e.to_string())?;
             table.load_version(0).await.map_err(|e| e.to_string())?;
-            let table_version = table.version().map(|v| v as u64);
+            let table_version =
+                optional_table_version_to_u64(table.version()).map_err(|e| e.to_string())?;
             let result_hash = hash_json(&json!({
                 "operation": "metadata_time_travel_v0",
                 "table_version": table_version,

@@ -4,6 +4,7 @@ use deltalake_core::DeltaTable;
 use crate::cli::BenchmarkLane;
 use crate::error::BenchResult;
 use crate::fingerprint::{hash_record_batch_schema, hash_record_batches_unordered};
+use crate::version_compat::optional_table_version_to_u64;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SemanticValidation {
@@ -27,7 +28,7 @@ pub async fn validate_table_state(table: &DeltaTable) -> BenchResult<SemanticVal
         .sum::<u64>();
     let digest = hash_record_batches_unordered(&batches)?;
     let schema_hash = hash_record_batch_schema(&batches)?;
-    let summary = match table.version().map(|version| version as u64) {
+    let summary = match optional_table_version_to_u64(table.version())? {
         Some(version) => format!("rows={row_count};table_version={version}"),
         None => format!("rows={row_count};table_version=unknown"),
     };

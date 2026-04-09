@@ -69,8 +69,10 @@ async fn metadata_bench_support_many_versions_snapshot_helpers_cover_head_and_ve
     let materialized = benchmark_materialize_files(&ctx)
         .await
         .expect("materialized head files");
+    let version_zero_version = u64::try_from(version_zero.version())
+        .expect("version-zero snapshot version should be non-negative");
     assert!(
-        materialized.version > version_zero.version(),
+        materialized.version > version_zero_version,
         "materialization helper should stay on the head path"
     );
     assert!(

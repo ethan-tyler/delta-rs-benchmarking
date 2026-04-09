@@ -88,7 +88,9 @@ OPTIMIZE_PERF_SUITE = (
 METADATA_PERF_SUITE = (
     REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "metadata_perf.rs"
 )
-TPCDS_SUITE = REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "tpcds" / "mod.rs"
+TPCDS_SUITE = (
+    REPO_ROOT / "crates" / "delta-bench" / "src" / "suites" / "tpcds" / "mod.rs"
+)
 
 
 def read_env_file(path: Path) -> dict[str, str]:
@@ -426,8 +428,14 @@ def test_benchmark_workflow_invalid_command_guidance_points_to_operator_and_diag
 
     assert "ready suites:" in workflow
     assert "Candidate/manual perf suites stay operator-only." in workflow
-    assert "Use `./scripts/compare_branch.sh --current-vs-main --methodology-profile <profile> <suite>`" in workflow
-    assert "Use `./scripts/run_profile.sh <criterion-profile>` for diagnostic Criterion work." in workflow
+    assert (
+        "Use `./scripts/compare_branch.sh --current-vs-main --methodology-profile <profile> <suite>`"
+        in workflow
+    )
+    assert (
+        "Use `./scripts/run_profile.sh <criterion-profile>` for diagnostic Criterion work."
+        in workflow
+    )
 
 
 def test_benchmark_workflow_uses_sha_pins_for_compare_refs() -> None:
@@ -454,7 +462,7 @@ def test_benchmark_workflow_uses_pack_planning_matrix_and_aggregation() -> None:
     assert "matrix.timeout_minutes" in workflow
     assert "timeout --preserve-status" in workflow
     assert "./scripts/run_profile.sh --base-sha" in workflow
-    assert '\"$PROFILE\"' in workflow or '"$PROFILE"' in workflow
+    assert '"$PROFILE"' in workflow or '"$PROFILE"' in workflow
     assert "python3 -m delta_bench_compare.pack summarize" in workflow
     assert "actions/download-artifact@v4" in workflow
 
@@ -481,8 +489,14 @@ def test_benchmark_workflow_requires_shared_bot_db_path_for_queue_and_pack() -> 
     assert "Validate shared bot database path" in workflow
     assert "DELTA_BENCH_BOT_DB_READY" in workflow
     assert "shared path mounted on every runner" in workflow
-    assert "Benchmark queue is unavailable until DELTA_BENCH_BOT_DB_PATH is configured" in workflow
-    assert "Pack automation requires DELTA_BENCH_BOT_DB_PATH to point at a shared path" in workflow
+    assert (
+        "Benchmark queue is unavailable until DELTA_BENCH_BOT_DB_PATH is configured"
+        in workflow
+    )
+    assert (
+        "Pack automation requires DELTA_BENCH_BOT_DB_PATH to point at a shared path"
+        in workflow
+    )
 
 
 def test_show_benchmark_queue_reads_persistent_bot_db() -> None:
@@ -688,7 +702,9 @@ def test_pr_write_perf_profile_uses_intrinsic_case_workload_policy() -> None:
     assert "DATASET_ID" not in profile
 
 
-def test_delete_update_perf_merge_perf_optimize_perf_profiles_use_medium_selective_compare_contract() -> None:
+def test_delete_update_perf_merge_perf_optimize_perf_profiles_use_medium_selective_compare_contract() -> (
+    None
+):
     for profile_path, expected_profile, expected_target in (
         (
             PR_DELETE_UPDATE_PERF_PROFILE,
@@ -1003,7 +1019,9 @@ def test_validation_script_covers_write_perf_same_sha_and_regression_canary() ->
     assert "DELTA_BENCH_WRITE_PERF_DELAY_MS" in script
 
 
-def test_validation_script_covers_delete_update_perf_merge_perf_and_optimize_perf_canaries() -> None:
+def test_validation_script_covers_delete_update_perf_merge_perf_and_optimize_perf_canaries() -> (
+    None
+):
     script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
 
     for banner, profile_name, case_name, allow_env, delay_env in (
@@ -1036,7 +1054,9 @@ def test_validation_script_covers_delete_update_perf_merge_perf_and_optimize_per
         assert delay_env in script
 
 
-def test_validation_script_covers_metadata_perf_same_sha_and_regression_canary() -> None:
+def test_validation_script_covers_metadata_perf_same_sha_and_regression_canary() -> (
+    None
+):
     script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
 
     assert "Running metadata_perf same-SHA branch compare..." in script
@@ -1162,13 +1182,21 @@ def test_validation_script_regression_canary_helper_executes_successfully(
     assert f"Regression canary: {case_name} classified as regression" in result.stdout
 
 
-def test_validation_script_keeps_scan_and_perf_owned_gates_on_their_contract_dataset() -> None:
+def test_validation_script_keeps_scan_and_perf_owned_gates_on_their_contract_dataset() -> (
+    None
+):
     script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
 
     assert 'PRIMARY_VALIDATION_DATASET_ID="medium_selective"' in script
     assert 'TPCDS_VALIDATION_DATASET_ID="tpcds_duckdb"' in script
-    assert 'PRIMARY_FIXTURES_DIR="${VALIDATION_ARTIFACT_DIR}/fixtures-medium_selective"' in script
-    assert 'TPCDS_FIXTURES_DIR="${VALIDATION_ARTIFACT_DIR}/fixtures-tpcds_duckdb"' in script
+    assert (
+        'PRIMARY_FIXTURES_DIR="${VALIDATION_ARTIFACT_DIR}/fixtures-medium_selective"'
+        in script
+    )
+    assert (
+        'TPCDS_FIXTURES_DIR="${VALIDATION_ARTIFACT_DIR}/fixtures-tpcds_duckdb"'
+        in script
+    )
     assert '--dataset-id "${PRIMARY_VALIDATION_DATASET_ID}"' in script
     assert '--dataset-id "${TPCDS_VALIDATION_DATASET_ID}"' in script
     assert "Use --dataset-id tpcds_duckdb to enable it." in script
@@ -1190,7 +1218,9 @@ def test_write_perf_suite_contains_validation_only_delay_canary_contract() -> No
     assert "write_perf_unpartitioned_1m" in source
 
 
-def test_delete_update_perf_merge_perf_and_optimize_perf_suites_contain_validation_only_delay_canary_contracts() -> None:
+def test_delete_update_perf_merge_perf_and_optimize_perf_suites_contain_validation_only_delay_canary_contracts() -> (
+    None
+):
     for source_path, allow_env, delay_env, message, case_name in (
         (
             DELETE_UPDATE_PERF_SUITE,
@@ -1251,7 +1281,9 @@ def test_tpcds_suite_contains_validation_only_delay_canary_contract() -> None:
     assert "tpcds_q03" in source
 
 
-def test_evidence_registry_lists_delete_update_perf_merge_perf_and_optimize_perf_as_candidate_manual() -> None:
+def test_evidence_registry_lists_delete_update_perf_merge_perf_and_optimize_perf_as_candidate_manual() -> (
+    None
+):
     from delta_bench_compare.registry import load_registry, pack_suite_definitions
 
     registry = load_registry(EVIDENCE_REGISTRY)
@@ -1429,8 +1461,14 @@ def test_benchmark_workflow_pack_status_comment_fails_closed_when_any_shard_fail
 ):
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "const shardResult = `${{ needs.run_pack_shards.result }}`;" in workflow
-    assert "const overallStatus = `${{ steps.summarize.outputs.overall_status }}`;" in workflow
-    assert 'const finalStatus = shardResult === "success" && overallStatus === "passed"' in workflow
+    assert (
+        "const overallStatus = `${{ steps.summarize.outputs.overall_status }}`;"
+        in workflow
+    )
+    assert (
+        'const finalStatus = shardResult === "success" && overallStatus === "passed"'
+        in workflow
+    )
     assert '`### Benchmark ${finalStatus ? "PASS" : "FAIL"}`' in workflow
 
 
@@ -1504,7 +1542,10 @@ def test_benchmark_prerelease_resolves_refs_with_remote_tracking_fallback() -> N
     workflow = PRERELEASE_WORKFLOW.read_text(encoding="utf-8")
     assert "resolve_commit_ref()" in workflow
     assert 'git rev-parse --verify --quiet "${ref}^{commit}"' in workflow
-    assert 'git rev-parse --verify --quiet "refs/remotes/origin/${ref}^{commit}"' in workflow
+    assert (
+        'git rev-parse --verify --quiet "refs/remotes/origin/${ref}^{commit}"'
+        in workflow
+    )
     assert 'base_sha="$(resolve_commit_ref "${BASE_REF}")"' in workflow
     assert 'candidate_sha="$(resolve_commit_ref "${CANDIDATE_REF}")"' in workflow
 
@@ -1516,9 +1557,9 @@ def test_benchmark_prerelease_preserves_compare_hardening_and_storage_overrides(
     assert "BENCH_STORAGE_OPTIONS" in workflow
     assert "storage_args=()" in workflow
     assert 'storage_args+=(--storage-option "${opt}")' in workflow
-    assert '--enforce-run-mode \\' in workflow
-    assert '--require-no-public-ipv4 \\' in workflow
-    assert '--require-egress-policy \\' in workflow
+    assert "--enforce-run-mode \\" in workflow
+    assert "--require-no-public-ipv4 \\" in workflow
+    assert "--require-egress-policy \\" in workflow
     assert '"${storage_args[@]}" \\' in workflow
 
 
@@ -4508,6 +4549,226 @@ print("hash policy ok")
             str(checkout_root / base_sha),
             str(checkout_root / candidate_sha),
         ]
+
+
+def test_compare_branch_runs_doctor_preflight_for_each_pinned_checkout_before_data() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+
+        prep_log = temp_root / "prep-log.jsonl"
+        bench_log = temp_root / "bench-log.jsonl"
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+(checkout_dir / ".git").mkdir(exist_ok=True)
+ref = os.environ.get("DELTA_RS_REF") or os.environ.get("DELTA_RS_BRANCH") or ""
+(checkout_dir / ".bench-current-sha").write_text(ref or "0" * 40, encoding="utf-8")
+with open({str(prep_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(
+        json.dumps(
+            {{
+                "ref": os.environ.get("DELTA_RS_REF"),
+                "branch": os.environ.get("DELTA_RS_BRANCH"),
+                "dir": os.environ["DELTA_RS_DIR"],
+            }}
+        )
+        + "\\n"
+    )
+print(f"delta-rs checkout ready: {{checkout_dir}}")
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            """#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p "${DELTA_RS_DIR}/crates/delta-bench"
+: > "${DELTA_RS_DIR}/crates/delta-bench/Cargo.toml"
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+        write_executable(
+            scripts_dir / "bench.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+command = args[0]
+cwd = Path.cwd()
+entry = {{
+    "command": command,
+    "cwd": str(cwd),
+    "label": os.environ.get("DELTA_BENCH_LABEL"),
+    "exec_root": os.environ.get("DELTA_BENCH_EXEC_ROOT"),
+}}
+with open({str(bench_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(entry) + "\\n")
+
+if command == "doctor":
+    print("delta-bench doctor")
+    sys.exit(0)
+
+if command == "data":
+    sys.exit(0)
+
+if command == "run":
+    results_dir = Path(os.environ["DELTA_BENCH_RESULTS"])
+    label = os.environ["DELTA_BENCH_LABEL"]
+    suite = value(args, "--suite", "scan")
+    out_dir = results_dir / label
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{{suite}}.json").write_text(
+        json.dumps({{"label": label, "suite": suite}}),
+        encoding="utf-8",
+    )
+    sys.exit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            """#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${1:-}" in
+    clean|fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "${repo}/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+        checkout_root = temp_root / "prepared-checkouts"
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
+        env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+        env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(checkout_root)
+
+        result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        bench_entries = [
+            json.loads(line)
+            for line in bench_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert [entry["command"] for entry in bench_entries[:2]] == ["doctor", "doctor"]
+        assert [Path(entry["exec_root"]).resolve() for entry in bench_entries[:2]] == [
+            (checkout_root / base_sha).resolve(),
+            (checkout_root / candidate_sha).resolve(),
+        ]
+        assert bench_entries[2]["command"] == "data"
 
 
 def test_bench_wrapper_anchors_relative_fixture_and_result_paths_to_harness_root_when_exec_root_differs() -> (

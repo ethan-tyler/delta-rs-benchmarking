@@ -21,6 +21,7 @@ use crate::results::{CaseResult, RuntimeIOMetrics, SampleMetrics, ScanRewriteMet
 use crate::runner::run_case_async_with_async_setup;
 use crate::storage::StorageConfig;
 use crate::validation::{lane_requires_semantic_validation, validate_table_state};
+use crate::version_compat::optional_table_version_to_u64;
 
 pub(crate) const OPTIMIZE_COMPACT_TARGET_SIZE: u64 = 1_000_000;
 const OPTIMIZE_HEAVY_TARGET_SIZE: u64 = 64_000;
@@ -375,7 +376,7 @@ pub(crate) async fn run_optimize_case(
         .optimize()
         .with_target_size(normalize_target_size(target_size)?.into())
         .await?;
-    let table_version = table.version().map(|v| v as u64);
+    let table_version = optional_table_version_to_u64(table.version())?;
     let result_hash = hash_json(&json!({
         "operation": "optimize",
         "target_size": target_size,
@@ -447,7 +448,7 @@ pub(crate) async fn run_vacuum_case(
         .with_retention_period(ChronoDuration::seconds(0))
         .with_enforce_retention_duration(false)
         .await?;
-    let table_version = table.version().map(|v| v as u64);
+    let table_version = optional_table_version_to_u64(table.version())?;
     let result_hash = hash_json(&json!({
         "operation": "vacuum",
         "dry_run": dry_run,

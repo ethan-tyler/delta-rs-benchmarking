@@ -11,8 +11,9 @@ use futures::TryStreamExt;
 use url::Url;
 
 use crate::data::fixtures::{metadata_long_history_table_path, metadata_long_history_table_url};
-use crate::error::{BenchError, BenchResult};
+use crate::error::BenchResult;
 use crate::storage::StorageConfig;
+use crate::version_compat::{optional_snapshot_version_arg, table_version_to_u64};
 
 #[doc(hidden)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,7 +50,7 @@ pub struct FilelessSnapshotInput {
 
 #[doc(hidden)]
 pub struct MaterializedFiles {
-    pub version: i64,
+    pub version: u64,
     pub files: Vec<RecordBatch>,
 }
 
@@ -143,7 +144,7 @@ pub async fn benchmark_snapshot_try_new(
     ctx: &MetadataLogCaseContext,
     version: Option<u64>,
 ) -> BenchResult<Snapshot> {
-    let version = version.map(version_to_i64).transpose()?;
+    let version = optional_snapshot_version_arg(version)?;
     Ok(Snapshot::try_new(ctx.log_store.as_ref(), Default::default(), version).await?)
 }
 
@@ -152,7 +153,7 @@ pub async fn benchmark_fileless_snapshot_input(
     ctx: &MetadataLogCaseContext,
     version: Option<u64>,
 ) -> BenchResult<FilelessSnapshotInput> {
-    let version = version.map(version_to_i64).transpose()?;
+    let version = optional_snapshot_version_arg(version)?;
     let snapshot_without_files = Snapshot::try_new(
         ctx.log_store.as_ref(),
         DeltaTableConfig {
@@ -189,13 +190,7 @@ pub async fn benchmark_materialize_files_from_input(
         .try_collect::<Vec<RecordBatch>>()
         .await?;
     Ok(MaterializedFiles {
-        version: input.snapshot_without_files.version(),
+        version: table_version_to_u64(input.snapshot_without_files.version())?,
         files,
-    })
-}
-
-fn version_to_i64(version: u64) -> BenchResult<i64> {
-    i64::try_from(version).map_err(|_| {
-        BenchError::InvalidArgument(format!("snapshot version {version} does not fit into i64"))
     })
 }

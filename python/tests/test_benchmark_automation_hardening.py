@@ -3437,6 +3437,139 @@ exit 99
         assert "git should not be invoked" not in result.stderr
 
 
+def test_sync_harness_to_delta_rs_waits_for_checkout_lock_before_mutating_checkout() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        sync_copy = scripts_dir / "sync_harness_to_delta_rs.sh"
+        copy_executable(
+            REPO_ROOT / "scripts" / "sync_harness_to_delta_rs.sh", sync_copy
+        )
+
+        src_crate = temp_root / "crates" / "delta-bench"
+        (src_crate / "src").mkdir(parents=True)
+        (src_crate / "benches").mkdir(parents=True)
+        (src_crate / "Cargo.toml").write_text(
+            '[package]\nname = "delta-bench"\nversion = "0.1.0"\n',
+            encoding="utf-8",
+        )
+        (src_crate / "Cargo.toml.delta-rs").write_text(
+            '[package]\nname = "delta-bench"\nversion = "0.1.0"\n',
+            encoding="utf-8",
+        )
+        (src_crate / "src" / "lib.rs").write_text("", encoding="utf-8")
+        (src_crate / "benches" / "metadata_log_bench.rs").write_text(
+            "fn main() {}\n", encoding="utf-8"
+        )
+
+        (temp_root / "bench" / "manifests").mkdir(parents=True)
+        (temp_root / "backends").mkdir(parents=True)
+        (temp_root / "python" / "delta_bench_interop").mkdir(parents=True)
+        (temp_root / "python" / "delta_bench_tpcds").mkdir(parents=True)
+
+        checkout_dir = temp_root / ".delta-rs-under-test"
+        (checkout_dir / ".git").mkdir(parents=True)
+        lock_file = temp_root / ".delta-rs-under-test.delta_bench_checkout.lock"
+        lock_ready = temp_root / "lock-ready"
+        release_lock = temp_root / "release-lock"
+
+        python_bin = shutil.which("python3")
+        assert python_bin is not None
+        flock_bin = shutil.which("flock")
+        if flock_bin is None:
+            lock_dir = Path(f"{lock_file}.dir")
+            holder = subprocess.Popen(
+                [
+                    python_bin,
+                    "-c",
+                    """
+import pathlib
+import sys
+import time
+
+lock_dir = pathlib.Path(sys.argv[1])
+ready_path = pathlib.Path(sys.argv[2])
+release_path = pathlib.Path(sys.argv[3])
+lock_dir.mkdir(parents=True)
+ready_path.write_text("locked\\n", encoding="utf-8")
+while not release_path.exists():
+    time.sleep(0.05)
+(lock_dir / "pid").unlink(missing_ok=True)
+lock_dir.rmdir()
+""",
+                    str(lock_dir),
+                    str(lock_ready),
+                    str(release_lock),
+                ],
+                cwd=temp_root,
+            )
+        else:
+            holder = subprocess.Popen(
+                [
+                    python_bin,
+                    "-c",
+                    """
+import fcntl
+import pathlib
+import sys
+import time
+
+lock_path = pathlib.Path(sys.argv[1])
+ready_path = pathlib.Path(sys.argv[2])
+release_path = pathlib.Path(sys.argv[3])
+lock_path.parent.mkdir(parents=True, exist_ok=True)
+with lock_path.open("w", encoding="utf-8") as handle:
+    fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    ready_path.write_text("locked\\n", encoding="utf-8")
+    while not release_path.exists():
+        time.sleep(0.05)
+""",
+                    str(lock_file),
+                    str(lock_ready),
+                    str(release_lock),
+                ],
+                cwd=temp_root,
+            )
+        try:
+            assert wait_for_condition(lock_ready.exists)
+
+            env = os.environ.copy()
+            env["DELTA_RS_DIR"] = str(checkout_dir)
+            env["DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS"] = "5"
+            sync = subprocess.Popen(
+                ["bash", str(sync_copy)],
+                cwd=temp_root,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                time.sleep(0.3)
+                assert sync.poll() is None
+                assert not (
+                    checkout_dir / "crates" / "delta-bench" / "Cargo.toml"
+                ).exists()
+            finally:
+                release_lock.write_text("ok\n", encoding="utf-8")
+
+            stdout, stderr = sync.communicate(timeout=10)
+            assert sync.returncode == 0, stderr or stdout
+            assert (checkout_dir / "crates" / "delta-bench" / "Cargo.toml").is_file()
+            assert (
+                checkout_dir
+                / "crates"
+                / "delta-bench"
+                / "benches"
+                / "metadata_log_bench.rs"
+            ).is_file()
+        finally:
+            holder.communicate(timeout=10)
+
+
 def test_gitignore_ignores_checkout_lock_artifacts() -> None:
     gitignore = GITIGNORE.read_text(encoding="utf-8")
     assert ".DS_Store" in gitignore

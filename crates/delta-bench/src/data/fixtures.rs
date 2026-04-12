@@ -533,6 +533,46 @@ pub async fn generate_fixtures(
     .await
 }
 
+pub async fn generate_file_selection_fixtures(
+    fixtures_dir: &Path,
+    scale: &str,
+    seed: u64,
+    force: bool,
+    storage: &StorageConfig,
+) -> BenchResult<()> {
+    let root = fixture_root(fixtures_dir, scale);
+    let dataset_dir = root.join("narrow_sales");
+    let data_path = dataset_dir.join("rows.jsonl");
+    let rows = scale_to_row_count(scale)?;
+    let data = generate_narrow_sales_rows(seed, rows);
+
+    if force && root.exists() {
+        fs::remove_dir_all(&root)?;
+    }
+    fs::create_dir_all(&dataset_dir)?;
+    write_rows_jsonl(&data_path, &data)?;
+
+    write_delta_table_partitioned_small_files_with_checkpoint_interval(
+        read_partitioned_table_url(fixtures_dir, scale, storage)?,
+        &data,
+        READ_PARTITION_CHUNK_SIZE,
+        &["region"],
+        Some(METADATA_CHECKPOINT_INTERVAL),
+        storage,
+    )
+    .await?;
+    write_delta_table_partitioned_small_files_with_checkpoint_interval(
+        delete_update_small_files_table_url(fixtures_dir, scale, storage)?,
+        &data,
+        DELETE_UPDATE_PARTITION_CHUNK_SIZE,
+        &["region"],
+        Some(METADATA_CHECKPOINT_INTERVAL),
+        storage,
+    )
+    .await?;
+    Ok(())
+}
+
 pub async fn generate_fixtures_with_profile(
     fixtures_dir: &Path,
     scale: &str,
@@ -651,11 +691,12 @@ pub async fn generate_fixtures_with_profile(
     )
     .await?;
 
-    write_delta_table_partitioned_small_files(
+    write_delta_table_partitioned_small_files_with_checkpoint_interval(
         delete_update_small_files_table_url(fixtures_dir, scale, storage)?,
         &data,
         DELETE_UPDATE_PARTITION_CHUNK_SIZE,
         &["region"],
+        Some(METADATA_CHECKPOINT_INTERVAL),
         storage,
     )
     .await?;
@@ -874,6 +915,25 @@ pub(crate) async fn write_delta_table_partitioned_small_files(
     partition_columns: &[&str],
     storage: &StorageConfig,
 ) -> BenchResult<()> {
+    write_delta_table_partitioned_small_files_with_checkpoint_interval(
+        table_url,
+        rows,
+        chunk_size,
+        partition_columns,
+        None,
+        storage,
+    )
+    .await
+}
+
+async fn write_delta_table_partitioned_small_files_with_checkpoint_interval(
+    table_url: Url,
+    rows: &[NarrowSaleRow],
+    chunk_size: usize,
+    partition_columns: &[&str],
+    checkpoint_interval: Option<&str>,
+    storage: &StorageConfig,
+) -> BenchResult<()> {
     prepare_local_table_dir(&table_url)?;
 
     let mut table = storage.try_from_url_for_write(table_url).await?;
@@ -883,11 +943,15 @@ pub(crate) async fn write_delta_table_partitioned_small_files(
         } else {
             SaveMode::Append
         };
-        table = table
+        let mut writer = table
             .write(vec![rows_to_batch(chunk)?])
             .with_save_mode(mode)
-            .with_partition_columns(partition_columns.iter().copied())
-            .await?;
+            .with_partition_columns(partition_columns.iter().copied());
+        if let Some(checkpoint_interval) = checkpoint_interval.filter(|_| idx == 0) {
+            writer = writer
+                .with_configuration([("delta.checkpointInterval", Some(checkpoint_interval))]);
+        }
+        table = writer.await?;
     }
 
     Ok(())
@@ -1360,4 +1424,73 @@ pub fn load_manifest(fixtures_dir: &Path, scale: &str) -> BenchResult<FixtureMan
     let path = fixture_root(fixtures_dir, scale).join("manifest.json");
     let manifest: FixtureManifest = serde_json::from_slice(&fs::read(path)?)?;
     Ok(manifest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn checkpoint_interval(
+        table_url: Url,
+        storage: &StorageConfig,
+    ) -> BenchResult<Option<String>> {
+        let table = storage.open_table(table_url).await?;
+        Ok(table
+            .snapshot()?
+            .metadata()
+            .configuration()
+            .get("delta.checkpointInterval")
+            .cloned())
+    }
+
+    #[tokio::test]
+    async fn partitioned_small_files_writer_keeps_shared_fixture_defaults() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let storage = StorageConfig::local();
+        let rows = generate_narrow_sales_rows(42, 128);
+        let table_url =
+            read_partitioned_table_url(temp.path(), "sf1", &storage).expect("read partitioned URL");
+
+        write_delta_table_partitioned_small_files(
+            table_url.clone(),
+            &rows,
+            16,
+            &["region"],
+            &storage,
+        )
+        .await
+        .expect("write partitioned small-files table");
+
+        assert_eq!(
+            checkpoint_interval(table_url, &storage)
+                .await
+                .expect("load checkpoint interval"),
+            None,
+            "shared partitioned fixture helper should not force a checkpoint interval"
+        );
+    }
+
+    #[tokio::test]
+    async fn file_selection_fixture_generation_scopes_high_checkpoint_interval_to_target_tables() {
+        let temp = tempfile::tempdir().expect("tempdir should be created");
+        let storage = StorageConfig::local();
+
+        generate_file_selection_fixtures(temp.path(), "sf1", 42, true, &storage)
+            .await
+            .expect("generate file-selection fixtures");
+
+        for table_url in [
+            read_partitioned_table_url(temp.path(), "sf1", &storage).expect("read partitioned URL"),
+            delete_update_small_files_table_url(temp.path(), "sf1", &storage)
+                .expect("delete/update URL"),
+        ] {
+            assert_eq!(
+                checkpoint_interval(table_url, &storage)
+                    .await
+                    .expect("load checkpoint interval"),
+                Some(METADATA_CHECKPOINT_INTERVAL.to_string()),
+                "file-selection fixture prep should retain the non-checkpointed log layout for its target tables"
+            );
+        }
+    }
 }

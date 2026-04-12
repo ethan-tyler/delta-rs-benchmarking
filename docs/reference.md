@@ -99,6 +99,7 @@ DML operations testing deletes and updates at varying selectivity and data layou
 | `update_all_rows_expr`          | Update all rows with an expression (full table rewrite)              | rows_processed, files_scanned, rewrite_time_ms |
 
 `delete_update` stays correctness-backed. If you need DML compare evidence, use the dedicated `delete_update_perf` suite instead of treating macro-lane runs of `delete_update` as authoritative.
+For shared delete/update file-selection internals, use `./scripts/run_profile.sh file-selection-criterion`. That Criterion family is diagnostic-only and stays separate from macro PR evidence.
 
 ### delete_update_perf (4 cases)
 
@@ -218,7 +219,7 @@ Use `./scripts/run_profile.sh <profile>` for committed Criterion entrypoints. Ex
 | `scan_phase` | Existing | `scan-phase-criterion` | `scan_phase_bench.rs` | Phase-isolated scan microbench for `scan_filter_flag`, `scan_projection_region`, and `scan_pruning_hit` |
 | `metadata_replay` | Existing | `metadata-replay-criterion` | `metadata_replay_bench.rs` | Snapshot/provider replay probes for the dedicated metadata replay bench |
 | `metadata_log` | Existing | `metadata-log-criterion` | `metadata_log_bench.rs` | Log parsing and snapshot materialization internals |
-| `file_selection` | Planned | `file-selection-criterion` (planned) | `file_selection_bench.rs` | Shared delete/update file-finding and predicate-selection internals |
+| `file_selection` | Existing | `file-selection-criterion` | `file_selection_bench.rs` | Shared delete/update file-finding and predicate-selection internals |
 | `merge_filter` | Planned | `merge-filter-criterion` (planned) | `merge_filter_bench.rs` | Merge early-filter and placeholder-expansion planning |
 | `optimize_plan` | Planned | `optimize-plan-criterion` (planned) | `optimize_plan_bench.rs` | Compaction planning and file-selection internals |
 | `object_store_control` | Optional later | `object-store-control-criterion` (planned) | `object_store_control_bench.rs` | Local object-store control-plane helpers only |
@@ -396,7 +397,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--dataset-id`               | —             | Dataset id forwarded to fixture generation and benchmark runs                                                                                                                       |
 | `--timing-phase`             | `execute`     | Timing phase forwarded to `bench.sh run`                                                                                                                                            |
 
-Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes, `./scripts/run_profile.sh metadata-replay-criterion` for replay/provider diagnostics, and `./scripts/run_profile.sh metadata-log-criterion`, which resolves to `metadata_log_bench`, for metadata/log internals. The older `timing_phase=plan` approximation stays investigation-grade only.
+Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes, `./scripts/run_profile.sh metadata-replay-criterion` for replay/provider diagnostics, `./scripts/run_profile.sh metadata-log-criterion`, which resolves to `metadata_log_bench`, for metadata/log internals, and `./scripts/run_profile.sh file-selection-criterion`, which resolves to `file_selection_bench`, for shared DML file-selection seams. The older `timing_phase=plan` approximation stays investigation-grade only.
 
 ### `run_profile.sh` — Invoke committed methodology profiles
 
@@ -415,6 +416,7 @@ Current committed Criterion profiles:
 - `scan-phase-criterion` -> `scan_phase_bench`
 - `metadata-replay-criterion` -> `metadata_replay_bench`
 - `metadata-log-criterion` -> `metadata_log_bench`
+- `file-selection-criterion` -> `file_selection_bench`
 
 Criterion profiles are diagnostic-only and intended for local or trusted self-hosted investigation. Pass extra Criterion arguments after `--` when you need a narrower filter or a saved baseline, for example `./scripts/run_profile.sh scan-phase-criterion -- scan_pruning_hit/phase/execute --save-baseline pr-base`.
 
@@ -426,7 +428,7 @@ Keep the entrypoints split:
 
 - Ready PR comment grammar: `run benchmark scan`, `run benchmark decision scan`, `run benchmark decision full`
 - Candidate/manual operator compares: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds`
-- Diagnostic Criterion probes: `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, `./scripts/run_profile.sh metadata-log-criterion`
+- Diagnostic Criterion probes: `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, `./scripts/run_profile.sh metadata-log-criterion`, `./scripts/run_profile.sh file-selection-criterion`
 
 Remote candidate/manual surfaces use the same registry/profile model. The currently declared S3 surface ids are `scan_s3`, `delete_update_perf_s3`, `merge_perf_s3`, `optimize_perf_s3`, and `metadata_perf_s3`; their backing methodology profiles pin `storage_backend=s3` and `backend_profile=s3_locking_vultr`, and the `s3-candidate-manual` pack batches those remote shards through the same compare flow. `write_perf_s3` is declared separately but remains gated until non-local write throughput evidence is complete.
 

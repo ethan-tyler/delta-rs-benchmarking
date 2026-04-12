@@ -230,6 +230,20 @@ def test_run_profile_dry_run_resolves_metadata_log_criterion_command() -> None:
     assert result.stdout.strip() == "cargo bench -p delta-bench --bench metadata_log_bench"
 
 
+def test_run_profile_dry_run_resolves_file_selection_criterion_command() -> None:
+    result = subprocess.run(
+        [str(RUN_PROFILE), "--dry-run", "file-selection-criterion"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == "cargo bench -p delta-bench --bench file_selection_bench"
+
+
 def test_run_profile_rejects_missing_required_run_metadata() -> None:
     for missing_field in ("RUNNER", "LANE", "MODE"):
         profile_name = f"test-run-profile-missing-{missing_field.lower()}"

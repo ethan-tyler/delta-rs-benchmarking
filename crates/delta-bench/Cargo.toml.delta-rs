@@ -11,6 +11,9 @@ rust-version.workspace = true
 description = "Macro benchmark runner for delta-rs"
 
 [dependencies]
+# The synced execution workspace intentionally resolves against local delta-rs core.
+# Keep `.delta-rs-under-test` on the same bench-support bridge revision as the root git pin,
+# or move both manifests to the same released crate version once it exists.
 deltalake-core = { path = "../core", features = ["datafusion", "cloud"] }
 
 bytes = "1"
@@ -50,4 +53,8 @@ harness = false
 
 [[bench]]
 name = "metadata_log_bench"
+harness = false
+
+[[bench]]
+name = "file_selection_bench"
 harness = false

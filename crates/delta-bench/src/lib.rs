@@ -2,6 +2,8 @@ pub mod assertions;
 pub mod cli;
 pub mod data;
 pub mod error;
+#[doc(hidden)]
+pub mod file_selection_bench_support;
 pub mod fingerprint;
 pub mod manifests;
 #[doc(hidden)]

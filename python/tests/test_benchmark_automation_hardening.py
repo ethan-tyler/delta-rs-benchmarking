@@ -144,6 +144,15 @@ def copy_executable(source: Path, dest: Path) -> None:
     dest.chmod(0o755)
 
 
+def write_overlay_manifest(exec_root: Path, entries: list[str]) -> None:
+    manifest = exec_root / "crates" / "delta-bench" / ".delta_bench_overlay_manifest"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        "".join(f"{entry}\n" for entry in entries),
+        encoding="utf-8",
+    )
+
+
 def copy_compare_manifest_helper(dest_pkg: Path) -> None:
     write_executable(
         dest_pkg / "manifest.py",
@@ -3566,6 +3575,18 @@ with lock_path.open("w", encoding="utf-8") as handle:
                 / "benches"
                 / "metadata_log_bench.rs"
             ).is_file()
+            manifest = (
+                checkout_dir
+                / "crates"
+                / "delta-bench"
+                / ".delta_bench_overlay_manifest"
+            )
+            assert manifest.is_file()
+            manifest_entries = manifest.read_text(encoding="utf-8").splitlines()
+            assert "crates/delta-bench/Cargo.toml" in manifest_entries
+            assert (
+                "crates/delta-bench/benches/metadata_log_bench.rs" in manifest_entries
+            )
         finally:
             holder.communicate(timeout=10)
 
@@ -4920,6 +4941,61 @@ def test_bench_wrapper_anchors_relative_fixture_and_result_paths_to_harness_root
             "[package]\nname = 'delta-bench'\nversion = '0.0.0'\n",
             encoding="utf-8",
         )
+        (exec_root / "crates" / "delta-bench" / "Cargo.toml.delta-rs").write_text(
+            "[package]\nname = 'delta-bench'\nversion = '0.0.0'\n",
+            encoding="utf-8",
+        )
+        (exec_root / "crates" / "delta-bench" / "benches").mkdir(parents=True)
+        (
+            exec_root / "crates" / "delta-bench" / "benches" / "metadata_log_bench.rs"
+        ).write_text(
+            "fn main() {}\n",
+            encoding="utf-8",
+        )
+        (exec_root / "crates" / "delta-bench" / "src").mkdir(parents=True)
+        (exec_root / "crates" / "delta-bench" / "src" / "validation.rs").write_text(
+            "pub fn validation_contract() {}\n",
+            encoding="utf-8",
+        )
+        (exec_root / "bench" / "manifests").mkdir(parents=True)
+        (exec_root / "bench" / "manifests" / "core_rust.yaml").write_text(
+            "runner: rust\n",
+            encoding="utf-8",
+        )
+        (exec_root / "bench" / "manifests" / "core_python.yaml").write_text(
+            "runner: python\n",
+            encoding="utf-8",
+        )
+        (exec_root / "backends").mkdir(parents=True)
+        (exec_root / "backends" / "s3_locking_vultr.env").write_text(
+            "PROFILE=s3_locking_vultr\n",
+            encoding="utf-8",
+        )
+        (exec_root / "python" / "delta_bench_interop").mkdir(parents=True)
+        (exec_root / "python" / "delta_bench_interop" / "run_case.py").write_text(
+            "print('interop')\n",
+            encoding="utf-8",
+        )
+        (exec_root / "python" / "delta_bench_tpcds").mkdir(parents=True)
+        (
+            exec_root / "python" / "delta_bench_tpcds" / "generate_store_sales_csv.py"
+        ).write_text(
+            "print('tpcds')\n",
+            encoding="utf-8",
+        )
+        write_overlay_manifest(
+            exec_root,
+            [
+                "crates/delta-bench/Cargo.toml",
+                "crates/delta-bench/benches/metadata_log_bench.rs",
+                "crates/delta-bench/src/validation.rs",
+                "bench/manifests/core_rust.yaml",
+                "bench/manifests/core_python.yaml",
+                "backends/s3_locking_vultr.env",
+                "python/delta_bench_interop/run_case.py",
+                "python/delta_bench_tpcds/generate_store_sales_csv.py",
+            ],
+        )
 
         cargo_log = temp_root / "cargo-log.jsonl"
         fake_bin = temp_root / "bin"
@@ -5141,6 +5217,461 @@ sys.exit(0)
         assert Path(absolute_entries[0]["cwd"]).resolve() == exec_root.resolve()
         assert absolute_entries[0]["results_dir"] == str(absolute_results_dir.resolve())
         assert absolute_entries[0]["env_exec_root"] == str(exec_root)
+
+
+def test_bench_wrapper_resyncs_when_overlay_manifest_references_missing_file_selection_bench() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        bench_copy = scripts_dir / "bench.sh"
+        copy_executable(BENCH_SH, bench_copy)
+
+        exec_root = temp_root / ".delta-rs-under-test"
+        crate_dir = exec_root / "crates" / "delta-bench"
+        (crate_dir / "benches").mkdir(parents=True)
+        (crate_dir / "src").mkdir(parents=True)
+        (crate_dir / "Cargo.toml").write_text(
+            "[package]\nname = 'delta-bench'\nversion = '0.0.0'\n",
+            encoding="utf-8",
+        )
+        (crate_dir / "Cargo.toml.delta-rs").write_text(
+            "[package]\nname = 'delta-bench'\nversion = '0.0.0'\n",
+            encoding="utf-8",
+        )
+        (crate_dir / "benches" / "metadata_log_bench.rs").write_text(
+            "fn main() {}\n",
+            encoding="utf-8",
+        )
+        (crate_dir / "src" / "validation.rs").write_text(
+            "pub fn validation_contract() {}\n",
+            encoding="utf-8",
+        )
+        (exec_root / "bench" / "manifests").mkdir(parents=True)
+        (exec_root / "bench" / "manifests" / "core_rust.yaml").write_text(
+            "runner: rust\n",
+            encoding="utf-8",
+        )
+        (exec_root / "bench" / "manifests" / "core_python.yaml").write_text(
+            "runner: python\n",
+            encoding="utf-8",
+        )
+        (exec_root / "backends").mkdir(parents=True)
+        (exec_root / "backends" / "s3_locking_vultr.env").write_text(
+            "PROFILE=s3_locking_vultr\n",
+            encoding="utf-8",
+        )
+        (exec_root / "python" / "delta_bench_interop").mkdir(parents=True)
+        (exec_root / "python" / "delta_bench_interop" / "run_case.py").write_text(
+            "print('interop')\n",
+            encoding="utf-8",
+        )
+        (exec_root / "python" / "delta_bench_tpcds").mkdir(parents=True)
+        (
+            exec_root / "python" / "delta_bench_tpcds" / "generate_store_sales_csv.py"
+        ).write_text(
+            "print('tpcds')\n",
+            encoding="utf-8",
+        )
+        manifest_entries = [
+            "crates/delta-bench/Cargo.toml",
+            "crates/delta-bench/benches/metadata_log_bench.rs",
+            "crates/delta-bench/benches/file_selection_bench.rs",
+            "crates/delta-bench/src/validation.rs",
+            "bench/manifests/core_rust.yaml",
+            "bench/manifests/core_python.yaml",
+            "backends/s3_locking_vultr.env",
+            "python/delta_bench_interop/run_case.py",
+            "python/delta_bench_tpcds/generate_store_sales_csv.py",
+        ]
+        manifest_text = "".join(f"{entry}\n" for entry in manifest_entries)
+        write_overlay_manifest(exec_root, manifest_entries)
+
+        sync_log = temp_root / "sync-log.jsonl"
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+crate_dir = checkout_dir / "crates" / "delta-bench"
+crate_dir.mkdir(parents=True, exist_ok=True)
+(crate_dir / "benches").mkdir(parents=True, exist_ok=True)
+(crate_dir / "benches" / "file_selection_bench.rs").write_text(
+    "fn main() {{}}\\n",
+    encoding="utf-8",
+)
+(crate_dir / ".delta_bench_overlay_manifest").write_text(
+    {manifest_text!r},
+    encoding="utf-8",
+)
+with open({str(sync_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps({{"checkout": str(checkout_dir)}}) + "\\n")
+""",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "cargo",
+            """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+
+crate_dir = Path.cwd() / "crates" / "delta-bench"
+required = [
+    crate_dir / "Cargo.toml",
+    crate_dir / "benches" / "metadata_log_bench.rs",
+    crate_dir / "benches" / "file_selection_bench.rs",
+]
+missing = [str(path) for path in required if not path.is_file()]
+if missing:
+    print("missing overlay files: " + ", ".join(missing), file=sys.stderr)
+    raise SystemExit(23)
+
+print("cargo ok")
+""",
+        )
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["DELTA_RS_DIR"] = str(exec_root)
+        env["DELTA_BENCH_EXEC_ROOT"] = str(exec_root)
+
+        result = subprocess.run(
+            ["bash", str(bench_copy), "doctor"],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr or result.stdout
+        sync_entries = [
+            json.loads(line)
+            for line in sync_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert sync_entries == [{"checkout": str(exec_root)}]
+        assert (crate_dir / "benches" / "file_selection_bench.rs").is_file()
+
+
+def test_bench_wrapper_resyncs_managed_checkout_after_compare_cleanup_removes_manifested_overlay_files() -> (
+    None
+):
+    with tempfile.TemporaryDirectory() as td:
+        temp_root = Path(td)
+        scripts_dir = temp_root / "scripts"
+        scripts_dir.mkdir(parents=True)
+        compare_copy = scripts_dir / "compare_branch.sh"
+        bench_copy = scripts_dir / "bench.sh"
+        copy_executable(COMPARE_BRANCH, compare_copy)
+        copy_executable(BENCH_SH, bench_copy)
+
+        managed_checkout = temp_root / ".delta-rs-under-test"
+        source_checkout = temp_root / ".delta-rs-source"
+        compare_checkout_root = temp_root / ".delta-bench-compare-checkouts"
+        base_sha = "de04240bfae85a86dd73519b41e05b9be7a5924f"
+        candidate_sha = "c12fd57876c5f07e5fc2c3ade1ce4408de45a2f9"
+
+        tracked_entries = [
+            "crates/delta-bench/Cargo.toml",
+            "crates/delta-bench/Cargo.toml.delta-rs",
+            "crates/delta-bench/benches/metadata_log_bench.rs",
+            "crates/delta-bench/src/validation.rs",
+            "bench/manifests/core_rust.yaml",
+            "bench/manifests/core_python.yaml",
+            "backends/s3_locking_vultr.env",
+            "python/delta_bench_interop/run_case.py",
+            "python/delta_bench_tpcds/generate_store_sales_csv.py",
+        ]
+        manifest_entries = tracked_entries + [
+            "crates/delta-bench/benches/file_selection_bench.rs",
+        ]
+        manifest_text = "".join(f"{entry}\n" for entry in manifest_entries)
+        for relative_path in tracked_entries:
+            path = managed_checkout / relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("tracked\n", encoding="utf-8")
+        (
+            managed_checkout
+            / "crates"
+            / "delta-bench"
+            / "benches"
+            / "file_selection_bench.rs"
+        ).write_text(
+            "untracked overlay\n",
+            encoding="utf-8",
+        )
+        (managed_checkout / ".git").mkdir(parents=True)
+        (managed_checkout / ".bench-current-sha").write_text(
+            f"{candidate_sha}\n",
+            encoding="utf-8",
+        )
+        write_overlay_manifest(managed_checkout, manifest_entries)
+
+        sync_log = temp_root / "sync-log.jsonl"
+        write_executable(
+            scripts_dir / "prepare_delta_rs.sh",
+            """#!/usr/bin/env python3
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+checkout_dir.mkdir(parents=True, exist_ok=True)
+(checkout_dir / ".git").mkdir(exist_ok=True)
+ref = os.environ.get("DELTA_RS_REF") or os.environ.get("DELTA_RS_BRANCH") or ""
+(checkout_dir / ".bench-current-sha").write_text((ref or "0" * 40) + "\\n", encoding="utf-8")
+print(f"delta-rs checkout ready: {checkout_dir}")
+""",
+        )
+        write_executable(
+            scripts_dir / "sync_harness_to_delta_rs.sh",
+            f"""#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+
+checkout_dir = Path(os.environ["DELTA_RS_DIR"])
+entries = {manifest_entries!r}
+for relative_path in entries:
+    path = checkout_dir / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("synced\\n", encoding="utf-8")
+(checkout_dir / "crates" / "delta-bench" / ".delta_bench_overlay_manifest").write_text(
+    {manifest_text!r},
+    encoding="utf-8",
+)
+with open({str(sync_log)!r}, "a", encoding="utf-8") as handle:
+    handle.write(json.dumps({{"checkout": str(checkout_dir)}}) + "\\n")
+""",
+        )
+        write_executable(
+            scripts_dir / "security_check.sh",
+            "#!/usr/bin/env bash\nset -euo pipefail\nexit 0\n",
+        )
+
+        fake_bin = temp_root / "bin"
+        fake_bin.mkdir()
+        write_executable(
+            fake_bin / "git",
+            f"""#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${{1:-}}" == "-C" ]]; then
+  repo="$2"
+  shift 2
+  case "${{1:-}}" in
+    clean)
+      shift
+      target="${{@: -1}}"
+      if [[ "$repo" == {str(managed_checkout)!r} && "$target" == "crates/delta-bench" ]]; then
+        rm -f "$repo/crates/delta-bench/.delta_bench_overlay_manifest"
+        rm -f "$repo/crates/delta-bench/benches/file_selection_bench.rs"
+      fi
+      exit 0
+      ;;
+    fetch|checkout|pull)
+      exit 0
+      ;;
+    show-ref)
+      exit 1
+      ;;
+    rev-parse)
+      if [[ "$*" == *"HEAD"* ]]; then
+        cat "$repo/.bench-current-sha"
+        exit 0
+      fi
+      ;;
+  esac
+fi
+
+printf "unexpected git invocation:" >&2
+printf " %q" "$@" >&2
+printf "\\n" >&2
+exit 99
+""",
+        )
+        write_executable(
+            fake_bin / "cargo",
+            """#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def value(args, flag, default=None):
+    if flag not in args:
+        return default
+    idx = args.index(flag)
+    return args[idx + 1]
+
+
+args = sys.argv[1:]
+cli_args = args[args.index("--") + 1 :] if "--" in args else args
+cwd = Path.cwd()
+command = "doctor"
+for candidate in ("data", "run", "list", "doctor"):
+    if candidate in cli_args:
+        command = candidate
+        break
+
+required = cwd / "crates" / "delta-bench" / "benches" / "file_selection_bench.rs"
+if not required.is_file():
+    print(f"missing overlay file: {required}", file=sys.stderr)
+    raise SystemExit(23)
+
+if command == "data":
+    fixtures_dir = Path(value(cli_args, "--fixtures-dir", "fixtures"))
+    if not fixtures_dir.is_absolute():
+        fixtures_dir = cwd / fixtures_dir
+    fixtures_dir.mkdir(parents=True, exist_ok=True)
+    raise SystemExit(0)
+
+if command == "run":
+    results_dir = Path(value(cli_args, "--results-dir", "results"))
+    if not results_dir.is_absolute():
+        results_dir = cwd / results_dir
+    label = value(cli_args, "--label", "local")
+    target = value(cli_args, "--target", "scan")
+    out_dir = results_dir / label
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / f"{target}.json").write_text(
+        json.dumps({"label": label, "suite": target}),
+        encoding="utf-8",
+    )
+    raise SystemExit(0)
+
+raise SystemExit(0)
+""",
+        )
+
+        python_pkg = temp_root / "python" / "delta_bench_compare"
+        python_pkg.mkdir(parents=True)
+        (python_pkg / "__init__.py").write_text("", encoding="utf-8")
+        copy_compare_manifest_helper(python_pkg)
+        write_executable(
+            python_pkg / "aggregate.py",
+            """#!/usr/bin/env python3
+import argparse
+import json
+from pathlib import Path
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--output", required=True)
+parser.add_argument("--label", required=True)
+parser.add_argument("--mode", default="decision")
+parser.add_argument("inputs", nargs="+")
+args = parser.parse_args()
+
+payloads = [json.loads(Path(path).read_text(encoding="utf-8")) for path in args.inputs]
+output_path = Path(args.output)
+output_path.parent.mkdir(parents=True, exist_ok=True)
+output_path.write_text(
+    json.dumps({"label": args.label, "payloads": payloads}),
+    encoding="utf-8",
+)
+""",
+        )
+        write_executable(
+            python_pkg / "compare.py",
+            """#!/usr/bin/env python3
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("base_json")
+parser.add_argument("cand_json")
+parser.parse_known_args()
+print("compare ok")
+""",
+        )
+        write_executable(
+            python_pkg / "hash_policy.py",
+            """#!/usr/bin/env python3
+print("hash policy ok")
+""",
+        )
+
+        env = os.environ.copy()
+        env["PATH"] = f"{fake_bin}:{env['PATH']}"
+        env["DELTA_RS_DIR"] = str(managed_checkout)
+        env["DELTA_RS_SOURCE_DIR"] = str(source_checkout)
+        env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(compare_checkout_root)
+        env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+        env["BENCH_RETRY_ATTEMPTS"] = "1"
+        env["BENCH_PREWARM_ITERS"] = "0"
+        env["BENCH_COMPARE_RUNS"] = "1"
+        env["BENCH_WARMUP"] = "1"
+        env["BENCH_ITERS"] = "1"
+        env["DELTA_BENCH_MIN_FREE_GB"] = "1"
+
+        compare_result = subprocess.run(
+            [
+                "bash",
+                str(compare_copy),
+                "--base-sha",
+                base_sha,
+                "--candidate-sha",
+                candidate_sha,
+                "scan",
+            ],
+            cwd=temp_root,
+            env=env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert compare_result.returncode == 0, (
+            compare_result.stderr or compare_result.stdout
+        )
+        assert not (
+            managed_checkout
+            / "crates"
+            / "delta-bench"
+            / ".delta_bench_overlay_manifest"
+        ).exists()
+        assert not (
+            managed_checkout
+            / "crates"
+            / "delta-bench"
+            / "benches"
+            / "file_selection_bench.rs"
+        ).exists()
+
+        doctor_env = env.copy()
+        doctor_env["DELTA_BENCH_EXEC_ROOT"] = str(managed_checkout)
+        doctor_result = subprocess.run(
+            ["bash", str(bench_copy), "doctor"],
+            cwd=temp_root,
+            env=doctor_env,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert doctor_result.returncode == 0, (
+            doctor_result.stderr or doctor_result.stdout
+        )
+        sync_entries = [
+            json.loads(line)
+            for line in sync_log.read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        assert sync_entries[-1] == {"checkout": str(managed_checkout)}
+        assert (
+            managed_checkout
+            / "crates"
+            / "delta-bench"
+            / "benches"
+            / "file_selection_bench.rs"
+        ).is_file()
 
 
 def test_compare_branch_remote_runner_keeps_relative_results_under_remote_root_and_owns_bench_env() -> (

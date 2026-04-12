@@ -34,12 +34,29 @@ run_delta_bench() {
 	)
 }
 
+harness_overlay_is_complete() {
+	local manifest_path="${DELTA_BENCH_EXEC_ROOT}/crates/delta-bench/.delta_bench_overlay_manifest"
+	if [[ ! -f "${manifest_path}" ]]; then
+		return 1
+	fi
+
+	local relative_path
+	while IFS= read -r relative_path; do
+		if [[ -z "${relative_path}" ]]; then
+			continue
+		fi
+		if [[ ! -f "${DELTA_BENCH_EXEC_ROOT}/${relative_path}" ]]; then
+			return 1
+		fi
+	done <"${manifest_path}"
+}
+
 ensure_harness_available() {
 	if [[ "${DELTA_BENCH_EXEC_ROOT}" == "${ROOT_DIR}" ]]; then
 		return
 	fi
 
-	if [[ ! -f "${DELTA_BENCH_EXEC_ROOT}/crates/delta-bench/Cargo.toml" ]]; then
+	if ! harness_overlay_is_complete; then
 		"${SCRIPT_DIR}/sync_harness_to_delta_rs.sh"
 	fi
 }

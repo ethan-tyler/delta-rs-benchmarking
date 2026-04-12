@@ -14,6 +14,7 @@ SRC_INTEROP_PY="${ROOT_DIR}/python/delta_bench_interop"
 DEST_INTEROP_PY="${DELTA_RS_DIR}/python/delta_bench_interop"
 SRC_TPCDS_PY="${ROOT_DIR}/python/delta_bench_tpcds"
 DEST_TPCDS_PY="${DELTA_RS_DIR}/python/delta_bench_tpcds"
+OVERLAY_MANIFEST_PATH="${DEST_CRATE}/.delta_bench_overlay_manifest"
 DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS="${DELTA_BENCH_CHECKOUT_LOCK_TIMEOUT_SECONDS:-300}"
 CHECKOUT_LOCK_FD=""
 CHECKOUT_LOCK_DIR=""
@@ -111,5 +112,32 @@ rsync -a --delete "${SRC_INTEROP_PY}/" "${DEST_INTEROP_PY}/"
 
 mkdir -p "${DEST_TPCDS_PY}"
 rsync -a --delete "${SRC_TPCDS_PY}/" "${DEST_TPCDS_PY}/"
+
+{
+	while IFS= read -r source_path; do
+		relative_path="${source_path#${SRC_CRATE}/}"
+		printf 'crates/delta-bench/%s\n' "${relative_path}"
+	done < <(find "${SRC_CRATE}" -type f ! -path "${SRC_CRATE}/target/*" ! -name 'Cargo.toml.delta-rs' | LC_ALL=C sort)
+
+	while IFS= read -r source_path; do
+		relative_path="${source_path#${ROOT_DIR}/}"
+		printf '%s\n' "${relative_path}"
+	done < <(find "${SRC_BENCH_MANIFESTS}" -type f | LC_ALL=C sort)
+
+	while IFS= read -r source_path; do
+		relative_path="${source_path#${ROOT_DIR}/}"
+		printf '%s\n' "${relative_path}"
+	done < <(find "${SRC_BACKEND_PROFILES}" -type f | LC_ALL=C sort)
+
+	while IFS= read -r source_path; do
+		relative_path="${source_path#${ROOT_DIR}/}"
+		printf '%s\n' "${relative_path}"
+	done < <(find "${SRC_INTEROP_PY}" -type f | LC_ALL=C sort)
+
+	while IFS= read -r source_path; do
+		relative_path="${source_path#${ROOT_DIR}/}"
+		printf '%s\n' "${relative_path}"
+	done < <(find "${SRC_TPCDS_PY}" -type f | LC_ALL=C sort)
+} >"${OVERLAY_MANIFEST_PATH}"
 
 echo "synced harness to ${DEST_CRATE}"

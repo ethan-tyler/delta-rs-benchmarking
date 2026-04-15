@@ -1,7 +1,10 @@
-use delta_bench::cli::{BenchmarkLane, TimingPhase};
+use delta_bench::cli::{BenchmarkLane, RunnerMode, TimingPhase};
 use delta_bench::data::fixtures::generate_fixtures;
+use delta_bench::manifests::DatasetId;
 use delta_bench::storage::StorageConfig;
-use delta_bench::suites::run_target;
+use delta_bench::suites::{
+    apply_dataset_assertion_policy, plan_run_cases, run_planned_cases, run_target,
+};
 
 #[tokio::test]
 async fn delete_update_perf_smoke_runs_the_perf_owned_case_set() {
@@ -43,6 +46,42 @@ async fn delete_update_perf_smoke_runs_the_perf_owned_case_set() {
         cases
             .iter()
             .map(|case| (&case.case, &case.failure))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn delete_update_perf_planned_run_passes_manifest_assertions() {
+    let temp = tempfile::tempdir().expect("tempdir should be created");
+    let storage = StorageConfig::local();
+
+    generate_fixtures(temp.path(), "sf1", 42, true, &storage)
+        .await
+        .expect("fixtures should be generated");
+
+    let mut planned = plan_run_cases("delete_update_perf", RunnerMode::Rust, None)
+        .expect("delete_update_perf planning should work");
+    apply_dataset_assertion_policy(&mut planned, Some(DatasetId::TinySmoke));
+
+    let cases = run_planned_cases(
+        temp.path(),
+        &planned,
+        "sf1",
+        BenchmarkLane::Macro,
+        TimingPhase::Execute,
+        0,
+        1,
+        &storage,
+    )
+    .await
+    .expect("delete_update_perf planned run should complete");
+
+    assert!(
+        cases.iter().all(|case| case.success),
+        "delete_update_perf manifest assertion failures: {:?}",
+        cases
+            .iter()
+            .map(|case| (&case.case, &case.failure_kind, &case.failure))
             .collect::<Vec<_>>()
     );
 }

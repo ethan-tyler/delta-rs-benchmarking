@@ -1359,6 +1359,97 @@ run_benchmark_suite_for_checkout() {
 	run_step_no_retry env DELTA_RS_DIR="${checkout_dir}" DELTA_BENCH_EXEC_ROOT="${checkout_dir}" DELTA_BENCH_RESULTS="${RUNNER_RESULTS_DIR}" DELTA_BENCH_LABEL="${label}" "${run_cmd[@]}"
 }
 
+suite_result_summary() {
+	local result_path="$1"
+	local summary_script='import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+cases = payload.get("cases", [])
+trusted = 0
+invalid = 0
+validation_only = 0
+failed = 0
+details = []
+
+for case in cases:
+    perf_status = str(case.get("perf_status", ""))
+    if perf_status == "trusted":
+        trusted += 1
+    elif perf_status == "invalid":
+        invalid += 1
+    elif perf_status == "validation_only":
+        validation_only += 1
+    if not bool(case.get("success")):
+        failed += 1
+    if perf_status != "trusted":
+        details.append(
+            ":".join(
+                [
+                    str(case.get("case", "<unknown>")),
+                    perf_status or "unknown",
+                    str(case.get("failure_kind") or "none"),
+                ]
+            )
+        )
+
+print(
+    "\t".join(
+        [
+            str(len(cases)),
+            str(trusted),
+            str(invalid),
+            str(validation_only),
+            str(failed),
+            ",".join(details),
+        ]
+    )
+)'
+	exec_on_runner python3 -c "${summary_script}" "${result_path}"
+}
+
+abort_if_decision_round_has_no_trusted_cases() {
+	local phase_label="$1"
+	local base_round_label="$2"
+	local cand_round_label="$3"
+	if [[ "${COMPARE_MODE}" != "decision" ]]; then
+		return
+	fi
+
+	local base_summary=""
+	local cand_summary=""
+	base_summary="$(suite_result_summary "${RUNNER_RESULTS_DIR}/${base_round_label}/${suite}.json")"
+	cand_summary="$(suite_result_summary "${RUNNER_RESULTS_DIR}/${cand_round_label}/${suite}.json")"
+
+	local base_total="" base_trusted="" base_invalid="" base_validation_only="" base_failed="" base_details=""
+	local cand_total="" cand_trusted="" cand_invalid="" cand_validation_only="" cand_failed="" cand_details=""
+	IFS=$'\t' read -r base_total base_trusted base_invalid base_validation_only base_failed base_details <<<"${base_summary}"
+	IFS=$'\t' read -r cand_total cand_trusted cand_invalid cand_validation_only cand_failed cand_details <<<"${cand_summary}"
+
+	local missing_side_desc=""
+	if ((base_trusted == 0 && cand_trusted == 0)); then
+		missing_side_desc="base and candidate"
+	elif ((base_trusted == 0)); then
+		missing_side_desc="base"
+	elif ((cand_trusted == 0)); then
+		missing_side_desc="candidate"
+	fi
+
+	if [[ -n "${missing_side_desc}" ]]; then
+		echo "decision compare abort: suite '${suite}' produced no trusted cases on ${missing_side_desc} in ${phase_label}" >&2
+		echo "base ${base_round_label}: failed=${base_failed}/${base_total}, invalid=${base_invalid}, validation_only=${base_validation_only}" >&2
+		if [[ -n "${base_details}" ]]; then
+			echo "base invalid cases: ${base_details}" >&2
+		fi
+		echo "candidate ${cand_round_label}: failed=${cand_failed}/${cand_total}, invalid=${cand_invalid}, validation_only=${cand_validation_only}" >&2
+		if [[ -n "${cand_details}" ]]; then
+			echo "candidate invalid cases: ${cand_details}" >&2
+		fi
+		exit 1
+	fi
+}
+
 run_order_for_iteration() {
 	local idx="$1"
 	case "${BENCH_MEASURE_ORDER}" in
@@ -1448,8 +1539,11 @@ run_step_no_retry env DELTA_RS_DIR="${base_checkout_dir}" DELTA_BENCH_EXEC_ROOT=
 if ((BENCH_PREWARM_ITERS > 0)); then
 	phase "${current_phase}" "${total_phases}" "Prewarm runs (${BENCH_PREWARM_ITERS} iterations, results discarded)"
 	current_phase=$((current_phase + 1))
-	run_benchmark_suite_for_checkout "${base_checkout_dir}" "${base_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
-	run_benchmark_suite_for_checkout "${candidate_checkout_dir}" "${cand_label}-prewarm" 0 "${BENCH_PREWARM_ITERS}" 1
+	base_prewarm_label="${base_label}-prewarm"
+	cand_prewarm_label="${cand_label}-prewarm"
+	run_benchmark_suite_for_checkout "${base_checkout_dir}" "${base_prewarm_label}" 0 "${BENCH_PREWARM_ITERS}" 1
+	run_benchmark_suite_for_checkout "${candidate_checkout_dir}" "${cand_prewarm_label}" 0 "${BENCH_PREWARM_ITERS}" 1
+	abort_if_decision_round_has_no_trusted_cases "prewarm runs" "${base_prewarm_label}" "${cand_prewarm_label}"
 fi
 
 base_run_labels=()
@@ -1472,6 +1566,7 @@ while ((run_idx <= BENCH_COMPARE_RUNS)); do
 			cand_run_labels+=("${run_label}")
 		fi
 	done
+	abort_if_decision_round_has_no_trusted_cases "measured run ${run_idx}/${BENCH_COMPARE_RUNS}" "${base_label}-r${run_idx}" "${cand_label}-r${run_idx}"
 	run_idx=$((run_idx + 1))
 done
 

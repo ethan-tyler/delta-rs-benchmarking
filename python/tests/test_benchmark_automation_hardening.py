@@ -377,9 +377,9 @@ def test_benchmark_workflow_defines_job_timeout() -> None:
 
 def test_actionlint_entrypoint_exists_and_bootstraps_pinned_release() -> None:
     assert ACTIONLINT_SCRIPT.exists(), "missing scripts/run_actionlint.sh"
-    assert ACTIONLINT_SCRIPT.stat().st_mode & 0o111, (
-        "scripts/run_actionlint.sh must be executable"
-    )
+    assert (
+        ACTIONLINT_SCRIPT.stat().st_mode & 0o111
+    ), "scripts/run_actionlint.sh must be executable"
     script = ACTIONLINT_SCRIPT.read_text(encoding="utf-8")
     assert "ACTIONLINT_VERSION=" in script
     assert "rhysd/actionlint" in script
@@ -856,16 +856,16 @@ def test_bench_run_requires_correctness_lane_for_assert_mode() -> None:
 
 def test_perf_validation_workflow_entrypoint_exists_and_is_executable() -> None:
     assert VALIDATION_SCRIPT.exists(), "missing scripts/validate_perf_harness.sh"
-    assert VALIDATION_SCRIPT.stat().st_mode & 0o111, (
-        "scripts/validate_perf_harness.sh must be executable"
-    )
+    assert (
+        VALIDATION_SCRIPT.stat().st_mode & 0o111
+    ), "scripts/validate_perf_harness.sh must be executable"
 
 
 def test_publish_contract_entrypoint_exists_and_is_executable() -> None:
     assert PUBLISH_CONTRACT_SCRIPT.exists(), "missing scripts/publish_contract.sh"
-    assert PUBLISH_CONTRACT_SCRIPT.stat().st_mode & 0o111, (
-        "scripts/publish_contract.sh must be executable"
-    )
+    assert (
+        PUBLISH_CONTRACT_SCRIPT.stat().st_mode & 0o111
+    ), "scripts/publish_contract.sh must be executable"
 
 
 def test_publish_contract_captures_current_operator_docs_and_entrypoints(
@@ -3184,6 +3184,7 @@ exit 99
         env["DELTA_RS_SOURCE_DIR"] = str(source_checkout)
         env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(compare_checkout_root)
         env["DELTA_BENCH_RESULTS"] = str(results_dir)
+        env["DELTA_BENCH_MIN_FREE_GB"] = "1"
 
         result = subprocess.run(
             [

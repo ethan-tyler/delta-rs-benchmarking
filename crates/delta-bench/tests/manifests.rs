@@ -477,6 +477,131 @@ fn merge_perf_manifest_uses_perf_metric_hash_contract() {
 }
 
 #[test]
+fn optimize_perf_manifest_uses_perf_metric_hash_contract() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let optimize_schema_hash = hash_json(&json!([
+        "operation:string",
+        "target_size:u64",
+        "files_considered:u64",
+        "files_skipped:u64",
+        "files_added:u64",
+        "files_removed:u64",
+        "table_version:u64",
+    ]))
+    .expect("optimize_perf optimize schema hash");
+    let vacuum_schema_hash = hash_json(&json!([
+        "operation:string",
+        "dry_run:bool",
+        "files_deleted:u64",
+        "table_version:u64",
+    ]))
+    .expect("optimize_perf vacuum schema hash");
+    let optimize_cases = [
+        (
+            "optimize_perf_compact_small_files",
+            40_u64,
+            0_u64,
+            1_u64,
+            40_u64,
+            40_u64,
+        ),
+        (
+            "optimize_perf_noop_already_compact",
+            1_u64,
+            1_u64,
+            0_u64,
+            0_u64,
+            0_u64,
+        ),
+    ];
+
+    for (case_id, files_considered, files_skipped, files_added, files_removed, table_version) in
+        optimize_cases
+    {
+        let manifest_case = manifest
+            .cases
+            .iter()
+            .find(|case| case.id == case_id)
+            .unwrap_or_else(|| panic!("missing optimize_perf manifest case '{case_id}'"));
+        let exact_result_hash = manifest_case
+            .assertions
+            .iter()
+            .find_map(|assertion| match assertion {
+                ManifestAssertion::ExactResultHash { value } => Some(value.as_str()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing exact_result_hash assertion for '{case_id}'"));
+        let schema_hash = manifest_case
+            .assertions
+            .iter()
+            .find_map(|assertion| match assertion {
+                ManifestAssertion::SchemaHash { value } => Some(value.as_str()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing schema_hash assertion for '{case_id}'"));
+        let expected_result_hash = hash_json(&json!({
+            "operation": "optimize",
+            "target_size": 1_000_000_u64,
+            "files_considered": files_considered,
+            "files_skipped": files_skipped,
+            "files_added": files_added,
+            "files_removed": files_removed,
+            "table_version": table_version,
+        }))
+        .expect("optimize_perf optimize result hash");
+
+        assert_eq!(
+            exact_result_hash, expected_result_hash,
+            "optimize_perf case '{case_id}' should pin the macro result-hash contract"
+        );
+        assert_eq!(
+            schema_hash, optimize_schema_hash,
+            "optimize_perf case '{case_id}' should pin the optimize macro schema-hash contract"
+        );
+    }
+
+    let vacuum_case_id = "vacuum_perf_execute_lite";
+    let vacuum_case = manifest
+        .cases
+        .iter()
+        .find(|case| case.id == vacuum_case_id)
+        .unwrap_or_else(|| panic!("missing optimize_perf manifest case '{vacuum_case_id}'"));
+    let vacuum_result_hash = vacuum_case
+        .assertions
+        .iter()
+        .find_map(|assertion| match assertion {
+            ManifestAssertion::ExactResultHash { value } => Some(value.as_str()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("missing exact_result_hash assertion for '{vacuum_case_id}'"));
+    let vacuum_case_schema_hash = vacuum_case
+        .assertions
+        .iter()
+        .find_map(|assertion| match assertion {
+            ManifestAssertion::SchemaHash { value } => Some(value.as_str()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("missing schema_hash assertion for '{vacuum_case_id}'"));
+    let expected_vacuum_result_hash = hash_json(&json!({
+        "operation": "vacuum",
+        "dry_run": false,
+        "files_deleted": 1_u64,
+        "table_version": 3_u64,
+    }))
+    .expect("optimize_perf vacuum result hash");
+
+    assert_eq!(
+        vacuum_result_hash, expected_vacuum_result_hash,
+        "optimize_perf case '{vacuum_case_id}' should pin the vacuum macro result-hash contract"
+    );
+    assert_eq!(
+        vacuum_case_schema_hash, vacuum_schema_hash,
+        "optimize_perf case '{vacuum_case_id}' should pin the vacuum macro schema-hash contract"
+    );
+}
+
+#[test]
 fn p0_rust_manifest_case_ids_match_suite_case_lists() {
     let manifest_path = rust_manifest_path();
     let manifest = load_manifest(&manifest_path).expect("manifest should load");

@@ -514,9 +514,9 @@ cases:
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:260230f77e26b1a88cdb0f49939988a61b79826c10086460e7efedff50622602
+    value: sha256:9afad141fe7fc19d9264eaccf6b3fece87dc512423a67001843c22c50295e14e
   - type: schema_hash
-    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+    value: sha256:69afe56a3a3e50d8a0d6729c49b5bf1a0c12e9a0322de72a899902673ee6fc3a
 - id: optimize_perf_noop_already_compact
   target: optimize_perf
   runner: rust
@@ -527,9 +527,9 @@ cases:
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:260230f77e26b1a88cdb0f49939988a61b79826c10086460e7efedff50622602
+    value: sha256:526fd932c035872a157127f9e4f0aa08100efd98df4e1b2f3cc8a9a90c259d09
   - type: schema_hash
-    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+    value: sha256:69afe56a3a3e50d8a0d6729c49b5bf1a0c12e9a0322de72a899902673ee6fc3a
 - id: vacuum_perf_execute_lite
   target: optimize_perf
   runner: rust
@@ -540,9 +540,9 @@ cases:
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:84ac0ae3ed44c38581dffc6aa8d4bb56190cd5aa2174213c4bb0f8c0297c99ef
+    value: sha256:946812dd6467af6e16ef037a0740a69a9918a6bf24a26f72e8f63170efbc2550
   - type: schema_hash
-    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+    value: sha256:c8b115babb97a1443d08ee890507c9c69a25fd88a3f03b88e810aaa79fcb17cc
 - id: concurrent_table_create
   target: concurrency
   runner: rust

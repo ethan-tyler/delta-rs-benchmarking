@@ -1,8 +1,10 @@
 use std::path::{Path, PathBuf};
 
+use delta_bench::fingerprint::hash_json;
 use delta_bench::manifests::{load_manifest, DatasetId, ManifestAssertion};
 use delta_bench::suites::list_cases_for_target;
 use delta_bench::suites::tpcds::catalog::phase1_query_catalog;
+use serde_json::json;
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -413,6 +415,65 @@ fn scan_pruning_hit_manifest_uses_requalified_exact_result_hash() {
         exact_result_hash,
         "sha256:b333362484714c71fa268b017d1c773a466e417959ec16336a749be670961eea"
     );
+}
+
+#[test]
+fn merge_perf_manifest_uses_perf_metric_hash_contract() {
+    let manifest_path = rust_manifest_path();
+    let manifest = load_manifest(&manifest_path).expect("manifest should load");
+    let expected_schema_hash = hash_json(&json!([
+        "source_rows:u64",
+        "table_version:u64",
+        "target_files_scanned:u64",
+        "target_files_pruned:u64",
+    ]))
+    .expect("merge_perf schema hash");
+    let expected_cases = [
+        ("merge_perf_upsert_10pct", 1100_u64, 1_u64, 1_u64, 0_u64),
+        ("merge_perf_upsert_50pct", 5500_u64, 1_u64, 1_u64, 0_u64),
+        ("merge_perf_localized_1pct", 18_u64, 40_u64, 39_u64, 199_u64),
+        ("merge_perf_delete_5pct", 500_u64, 1_u64, 1_u64, 0_u64),
+    ];
+
+    for (case_id, source_rows, table_version, files_scanned, files_pruned) in expected_cases {
+        let manifest_case = manifest
+            .cases
+            .iter()
+            .find(|case| case.id == case_id)
+            .unwrap_or_else(|| panic!("missing merge_perf manifest case '{case_id}'"));
+        let exact_result_hash = manifest_case
+            .assertions
+            .iter()
+            .find_map(|assertion| match assertion {
+                ManifestAssertion::ExactResultHash { value } => Some(value.as_str()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing exact_result_hash assertion for '{case_id}'"));
+        let schema_hash = manifest_case
+            .assertions
+            .iter()
+            .find_map(|assertion| match assertion {
+                ManifestAssertion::SchemaHash { value } => Some(value.as_str()),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("missing schema_hash assertion for '{case_id}'"));
+        let expected_result_hash = hash_json(&json!({
+            "source_rows": source_rows,
+            "table_version": table_version,
+            "target_files_scanned": files_scanned,
+            "target_files_pruned": files_pruned,
+        }))
+        .expect("merge_perf result hash");
+
+        assert_eq!(
+            exact_result_hash, expected_result_hash,
+            "merge_perf case '{case_id}' should pin the macro result-hash contract"
+        );
+        assert_eq!(
+            schema_hash, expected_schema_hash,
+            "merge_perf case '{case_id}' should pin the macro schema-hash contract"
+        );
+    }
 }
 
 #[test]

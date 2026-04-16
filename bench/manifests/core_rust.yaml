@@ -340,9 +340,9 @@ cases:
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:1776b06eba2713744a47d2b1f189764938c377eddd7aa61d40f0cdee102a4411
+    value: sha256:ea5d06e222953f0348c849d3f29aac3cc6bd9618b1536d4f0c0b7346cff18533
   - type: schema_hash
-    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+    value: sha256:9db6bc96e82cfd6574a4081ea206b1c35aba785735a8e955d275d088a415c03c
 - id: merge_perf_upsert_50pct
   target: merge_perf
   runner: rust
@@ -353,9 +353,9 @@ cases:
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:b7b0724bf6695faa97f306f7423c9a582128ca40a634ffc7e3cce1c676b04062
+    value: sha256:23c083a743c8151b321c2af51012f3e757f8b335b0125f64308125f59002a9c0
   - type: schema_hash
-    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+    value: sha256:9db6bc96e82cfd6574a4081ea206b1c35aba785735a8e955d275d088a415c03c
 - id: merge_perf_localized_1pct
   target: merge_perf
   runner: rust
@@ -366,9 +366,9 @@ cases:
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:e4e6d95fdf5c772bf63e244495811342189b0444a822297be20ae06cb881e0b7
+    value: sha256:cd36715b244b127b56222bdce2d5401b5732ffb4f351c198949d8dffc516b47e
   - type: schema_hash
-    value: sha256:2088dd04243dec707b2161c31e76ae1ade66907ff8e914bd043722873009353e
+    value: sha256:9db6bc96e82cfd6574a4081ea206b1c35aba785735a8e955d275d088a415c03c
 - id: merge_perf_delete_5pct
   target: merge_perf
   runner: rust
@@ -379,9 +379,9 @@ cases:
   decision_metric: median
   assertions:
   - type: exact_result_hash
-    value: sha256:b6efeee27e797b2080cbbce73368e64452ea8e07515fcba6d741ffb67e105ed0
+    value: sha256:357646e8c35069a8e7734073e654b0e1c753d7d1590dcdbd0d67aa0b333e2784
   - type: schema_hash
-    value: sha256:740a4fcc44db32082fda7166a0f85d68607913d2446ae629622e49eea115eb02
+    value: sha256:9db6bc96e82cfd6574a4081ea206b1c35aba785735a8e955d275d088a415c03c
 - id: metadata_load
   target: metadata
   runner: rust

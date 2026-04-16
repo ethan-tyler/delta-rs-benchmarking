@@ -87,6 +87,30 @@ fn pr_delete_update_perf_profile_uses_compare_contract() {
         &repo_root().join("bench/methodologies/pr-delete-update-perf.env"),
         &[
             ("METHODOLOGY_PROFILE", "pr-delete-update-perf"),
+            ("METHODOLOGY_VERSION", "2"),
+            ("PROFILE_KIND", "compare"),
+            ("TARGET", "delete_update_perf"),
+            ("DATASET_ID", "medium_selective"),
+            ("COMPARE_MODE", "decision"),
+            ("WARMUP", "1"),
+            ("ITERS", "2"),
+            ("PREWARM_ITERS", "0"),
+            ("COMPARE_RUNS", "5"),
+            ("MEASURE_ORDER", "alternate"),
+            ("TIMING_PHASE", "execute"),
+            ("AGGREGATION", "median"),
+            ("DATASET_POLICY", "shared_run_scope"),
+            ("SPREAD_METRIC", "iqr_ms"),
+        ],
+    );
+}
+
+#[test]
+fn delete_update_perf_high_confidence_profile_preserves_longer_compare_contract() {
+    assert_env_eq(
+        &repo_root().join("bench/methodologies/delete-update-perf-high-confidence.env"),
+        &[
+            ("METHODOLOGY_PROFILE", "delete-update-perf-high-confidence"),
             ("METHODOLOGY_VERSION", "1"),
             ("PROFILE_KIND", "compare"),
             ("TARGET", "delete_update_perf"),

@@ -141,7 +141,7 @@ packs:
         profile: pr-write-perf
         timeout_minutes: 120
       - suite: delete_update_perf
-        profile: pr-delete-update-perf
+        profile: delete-update-perf-high-confidence
         timeout_minutes: 120
       - suite: merge_perf
         profile: pr-merge-perf

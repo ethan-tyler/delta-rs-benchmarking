@@ -251,6 +251,14 @@ def test_actual_registry_keeps_current_ready_and_candidate_scopes_explicit() -> 
         "metadata_perf",
         "tpcds",
     ]
+    candidate_profiles = {
+        entry["suite"]: entry["profile"]
+        for entry in pack_suite_definitions(registry, candidate_pack)
+    }
+    assert (
+        candidate_profiles["delete_update_perf"]
+        == "delete-update-perf-high-confidence"
+    )
 
 
 def test_pack_plan_keeps_full_pack_ready_when_gated_suites_are_excluded(

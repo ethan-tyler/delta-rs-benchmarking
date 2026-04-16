@@ -162,6 +162,10 @@ def copy_compare_manifest_helper(dest_pkg: Path) -> None:
     )
 
 
+def relax_local_compare_disk_headroom(env: dict[str, str]) -> None:
+    env["DELTA_BENCH_MIN_FREE_GB"] = "1"
+
+
 def configure_git_identity(repo: Path) -> None:
     subprocess.run(
         ["git", "-C", str(repo), "config", "user.email", "bench@example.com"],
@@ -735,6 +739,36 @@ def test_delete_update_perf_merge_perf_optimize_perf_profiles_use_medium_selecti
         assert profile["AGGREGATION"] == "median"
         assert profile["DATASET_POLICY"] == "shared_run_scope"
         assert profile["SPREAD_METRIC"] == "iqr_ms"
+
+    delete_update_profile = read_env_file(PR_DELETE_UPDATE_PERF_PROFILE)
+    assert delete_update_profile["METHODOLOGY_VERSION"] == "2"
+    assert delete_update_profile["WARMUP"] == "1"
+    assert delete_update_profile["ITERS"] == "2"
+    assert delete_update_profile["PREWARM_ITERS"] == "0"
+
+
+def test_delete_update_perf_high_confidence_profile_preserves_longer_contract() -> None:
+    profile = read_env_file(
+        REPO_ROOT
+        / "bench"
+        / "methodologies"
+        / "delete-update-perf-high-confidence.env"
+    )
+
+    assert profile["METHODOLOGY_PROFILE"] == "delete-update-perf-high-confidence"
+    assert profile["TARGET"] == "delete_update_perf"
+    assert profile["PROFILE_KIND"] == "compare"
+    assert profile["DATASET_ID"] == "medium_selective"
+    assert profile["COMPARE_MODE"] == "decision"
+    assert profile["WARMUP"] == "1"
+    assert profile["ITERS"] == "5"
+    assert profile["PREWARM_ITERS"] == "1"
+    assert profile["COMPARE_RUNS"] == "5"
+    assert profile["MEASURE_ORDER"] == "alternate"
+    assert profile["TIMING_PHASE"] == "execute"
+    assert profile["AGGREGATION"] == "median"
+    assert profile["DATASET_POLICY"] == "shared_run_scope"
+    assert profile["SPREAD_METRIC"] == "iqr_ms"
 
 
 def test_metadata_perf_profile_uses_many_versions_compare_contract() -> None:
@@ -1310,12 +1344,14 @@ def test_evidence_registry_lists_delete_update_perf_merge_perf_and_optimize_perf
 
     candidate_pack = registry["packs"].get("pr-candidate-manual")
     assert isinstance(candidate_pack, dict)
-    candidate_suites = [
-        entry["suite"] for entry in pack_suite_definitions(registry, candidate_pack)
-    ]
-    assert "delete_update_perf" in candidate_suites
-    assert "merge_perf" in candidate_suites
-    assert "optimize_perf" in candidate_suites
+    candidate_entries = {
+        entry["suite"]: entry for entry in pack_suite_definitions(registry, candidate_pack)
+    }
+    assert candidate_entries["delete_update_perf"]["profile"] == (
+        "delete-update-perf-high-confidence"
+    )
+    assert "merge_perf" in candidate_entries
+    assert "optimize_perf" in candidate_entries
 
 
 def test_evidence_registry_lists_metadata_perf_as_candidate_manual() -> None:
@@ -2030,6 +2066,7 @@ print("hash policy ok")
         env["BENCH_ITERS"] = "1"
         env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
         env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             [
@@ -2144,10 +2181,54 @@ if command == "data":
 if command == "run":
     target_dir = results_dir / label
     target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / f"{suite}.json").write_text(
-        json.dumps({"label": label, "suite": suite}),
-        encoding="utf-8",
-    )
+    trusted_ms = 100.0 if label.startswith("base-") else 90.0
+    payload = {
+        "schema_version": 5,
+        "context": {
+            "schema_version": 5,
+            "label": label,
+            "suite": suite,
+            "benchmark_mode": "perf",
+            "timing_phase": "execute",
+            "dataset_id": "tiny_smoke",
+            "dataset_fingerprint": "sha256:fixture",
+            "runner": "rust",
+            "scale": "sf1",
+            "storage_backend": "local",
+            "backend_profile": "local",
+            "lane": "macro",
+            "measurement_kind": "phase_breakdown",
+            "validation_level": "operational",
+            "harness_revision": "harness-rev",
+            "fixture_recipe_hash": "sha256:recipe",
+            "fidelity_fingerprint": "sha256:fidelity",
+        },
+        "cases": [
+            {
+                "case": "scan_full_narrow",
+                "success": True,
+                "validation_passed": True,
+                "perf_status": "trusted",
+                "classification": "supported",
+                "samples": [
+                    {"elapsed_ms": trusted_ms, "metrics": {"files_scanned": 10}}
+                ],
+                "run_summary": {
+                    "sample_count": 1,
+                    "invalid_sample_count": 0,
+                    "median_ms": trusted_ms,
+                    "host_label": "bench-host",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "compatibility_key": "sha256:good",
+                "supports_decision": True,
+                "required_runs": 5,
+                "decision_threshold_pct": 5.0,
+                "decision_metric": "median",
+            }
+        ],
+    }
+    (target_dir / f"{suite}.json").write_text(json.dumps(payload), encoding="utf-8")
     sys.exit(0)
 
 raise SystemExit(0)
@@ -2243,6 +2324,7 @@ print("hash policy ok")
         env["DELTA_RS_DIR"] = str(managed_checkout)
         env["DELTA_RS_SOURCE_DIR"] = str(managed_checkout)
         env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             [
@@ -2353,10 +2435,54 @@ if command == "data":
 if command == "run":
     target_dir = results_dir / label
     target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / f"{suite}.json").write_text(
-        json.dumps({"label": label, "suite": suite}),
-        encoding="utf-8",
-    )
+    trusted_ms = 100.0 if label.startswith("base-") else 90.0
+    payload = {
+        "schema_version": 5,
+        "context": {
+            "schema_version": 5,
+            "label": label,
+            "suite": suite,
+            "benchmark_mode": "perf",
+            "timing_phase": "execute",
+            "dataset_id": "tiny_smoke",
+            "dataset_fingerprint": "sha256:fixture",
+            "runner": "rust",
+            "scale": "sf1",
+            "storage_backend": "local",
+            "backend_profile": "local",
+            "lane": "macro",
+            "measurement_kind": "phase_breakdown",
+            "validation_level": "operational",
+            "harness_revision": "harness-rev",
+            "fixture_recipe_hash": "sha256:recipe",
+            "fidelity_fingerprint": "sha256:fidelity",
+        },
+        "cases": [
+            {
+                "case": "scan_full_narrow",
+                "success": True,
+                "validation_passed": True,
+                "perf_status": "trusted",
+                "classification": "supported",
+                "samples": [
+                    {"elapsed_ms": trusted_ms, "metrics": {"files_scanned": 10}}
+                ],
+                "run_summary": {
+                    "sample_count": 1,
+                    "invalid_sample_count": 0,
+                    "median_ms": trusted_ms,
+                    "host_label": "bench-host",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "compatibility_key": "sha256:good",
+                "supports_decision": True,
+                "required_runs": 5,
+                "decision_threshold_pct": 5.0,
+                "decision_metric": "median",
+            }
+        ],
+    }
+    (target_dir / f"{suite}.json").write_text(json.dumps(payload), encoding="utf-8")
     sys.exit(0)
 
 raise SystemExit(0)
@@ -2565,8 +2691,53 @@ if command == "data":
 if command == "run":
     target_dir = results_dir / label
     target_dir.mkdir(parents=True, exist_ok=True)
+    trusted_ms = 100.0 if label.startswith("base-") else 90.0
+    payload = {
+        "schema_version": 5,
+        "context": {
+            "schema_version": 5,
+            "label": label,
+            "suite": suite,
+            "benchmark_mode": "perf",
+            "timing_phase": "execute",
+            "dataset_id": "tiny_smoke",
+            "dataset_fingerprint": "sha256:fixture",
+            "runner": "rust",
+            "scale": "sf1",
+            "storage_backend": "local",
+            "backend_profile": "local",
+            "lane": "macro",
+            "measurement_kind": "phase_breakdown",
+            "validation_level": "operational",
+            "harness_revision": "harness-rev",
+            "fixture_recipe_hash": "sha256:recipe",
+            "fidelity_fingerprint": "sha256:fidelity",
+        },
+        "cases": [
+            {
+                "case": "scan_full_narrow",
+                "success": True,
+                "validation_passed": True,
+                "perf_status": "trusted",
+                "classification": "supported",
+                "samples": [{"elapsed_ms": trusted_ms, "metrics": {"files_scanned": 10}}],
+                "run_summary": {
+                    "sample_count": 1,
+                    "invalid_sample_count": 0,
+                    "median_ms": trusted_ms,
+                    "host_label": "bench-host",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "compatibility_key": "sha256:good",
+                "supports_decision": True,
+                "required_runs": 5,
+                "decision_threshold_pct": 5.0,
+                "decision_metric": "median",
+            }
+        ],
+    }
     (target_dir / f"{suite}.json").write_text(
-        json.dumps({"label": label, "suite": suite}),
+        json.dumps(payload),
         encoding="utf-8",
     )
     sys.exit(0)
@@ -2810,8 +2981,53 @@ if command == "data":
 if command == "run":
     target_dir = results_dir / label
     target_dir.mkdir(parents=True, exist_ok=True)
+    trusted_ms = 100.0 if label.startswith("base-") else 90.0
+    payload = {
+        "schema_version": 5,
+        "context": {
+            "schema_version": 5,
+            "label": label,
+            "suite": suite,
+            "benchmark_mode": "perf",
+            "timing_phase": "execute",
+            "dataset_id": "tiny_smoke",
+            "dataset_fingerprint": "sha256:fixture",
+            "runner": "rust",
+            "scale": "sf1",
+            "storage_backend": "local",
+            "backend_profile": "local",
+            "lane": "macro",
+            "measurement_kind": "phase_breakdown",
+            "validation_level": "operational",
+            "harness_revision": "harness-rev",
+            "fixture_recipe_hash": "sha256:recipe",
+            "fidelity_fingerprint": "sha256:fidelity",
+        },
+        "cases": [
+            {
+                "case": "scan_full_narrow",
+                "success": True,
+                "validation_passed": True,
+                "perf_status": "trusted",
+                "classification": "supported",
+                "samples": [{"elapsed_ms": trusted_ms, "metrics": {"files_scanned": 10}}],
+                "run_summary": {
+                    "sample_count": 1,
+                    "invalid_sample_count": 0,
+                    "median_ms": trusted_ms,
+                    "host_label": "bench-host",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "compatibility_key": "sha256:good",
+                "supports_decision": True,
+                "required_runs": 5,
+                "decision_threshold_pct": 5.0,
+                "decision_metric": "median",
+            }
+        ],
+    }
     (target_dir / f"{suite}.json").write_text(
-        json.dumps({"label": label, "suite": suite}),
+        json.dumps(payload),
         encoding="utf-8",
     )
     sys.exit(0)
@@ -2910,6 +3126,7 @@ print("hash policy ok")
         env["DELTA_RS_SOURCE_DIR"] = str(source_checkout)
         env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(compare_checkout_root)
         env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             [
@@ -3678,6 +3895,7 @@ exit 99
         env["BENCH_COMPARE_RUNS"] = "1"
         env["BENCH_WARMUP"] = "1"
         env["BENCH_ITERS"] = "1"
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             ["bash", str(compare_copy), "main", "candidate", "scan"],
@@ -3910,6 +4128,7 @@ print("hash policy ok")
         env["BENCH_ITERS"] = "1"
         env["DELTA_RS_DIR"] = str(checkout_dir)
         env["DELTA_BENCH_RESULTS"] = str(results_rel)
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             [
@@ -4000,8 +4219,53 @@ if command == "data":
 if command == "run":
     target_dir = results_dir / label
     target_dir.mkdir(parents=True, exist_ok=True)
+    trusted_ms = 100.0 if label.startswith("base-") else 90.0
+    payload = {
+        "schema_version": 5,
+        "context": {
+            "schema_version": 5,
+            "label": label,
+            "suite": suite,
+            "benchmark_mode": "perf",
+            "timing_phase": "execute",
+            "dataset_id": "tiny_smoke",
+            "dataset_fingerprint": "sha256:fixture",
+            "runner": "rust",
+            "scale": "sf1",
+            "storage_backend": "local",
+            "backend_profile": "local",
+            "lane": "macro",
+            "measurement_kind": "phase_breakdown",
+            "validation_level": "operational",
+            "harness_revision": "harness-rev",
+            "fixture_recipe_hash": "sha256:recipe",
+            "fidelity_fingerprint": "sha256:fidelity",
+        },
+        "cases": [
+            {
+                "case": "scan_full_narrow",
+                "success": True,
+                "validation_passed": True,
+                "perf_status": "trusted",
+                "classification": "supported",
+                "samples": [{"elapsed_ms": trusted_ms, "metrics": {"files_scanned": 10}}],
+                "run_summary": {
+                    "sample_count": 1,
+                    "invalid_sample_count": 0,
+                    "median_ms": trusted_ms,
+                    "host_label": "bench-host",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "compatibility_key": "sha256:good",
+                "supports_decision": True,
+                "required_runs": 5,
+                "decision_threshold_pct": 5.0,
+                "decision_metric": "median",
+            }
+        ],
+    }
     (target_dir / f"{suite}.json").write_text(
-        json.dumps({"label": label, "suite": suite}),
+        json.dumps(payload),
         encoding="utf-8",
     )
     sys.exit(0)
@@ -4157,6 +4421,7 @@ print("hash policy ok")
         env["BENCH_ITERS"] = "1"
         env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
         env["DELTA_BENCH_RESULTS"] = str(results_dir)
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             [
@@ -4264,10 +4529,52 @@ if command == "data":
 if command == "run":
     target_dir = results_dir / label
     target_dir.mkdir(parents=True, exist_ok=True)
-    (target_dir / f"{suite}.json").write_text(
-        json.dumps({"label": label, "suite": suite}),
-        encoding="utf-8",
-    )
+    trusted_ms = 100.0 if label.startswith("base-") else 90.0
+    payload = {
+        "schema_version": 5,
+        "context": {
+            "schema_version": 5,
+            "label": label,
+            "suite": suite,
+            "benchmark_mode": "perf",
+            "timing_phase": "execute",
+            "dataset_id": "tiny_smoke",
+            "dataset_fingerprint": "sha256:fixture",
+            "runner": "rust",
+            "scale": "sf1",
+            "storage_backend": "local",
+            "backend_profile": "local",
+            "lane": "macro",
+            "measurement_kind": "phase_breakdown",
+            "validation_level": "operational",
+            "harness_revision": "harness-rev",
+            "fixture_recipe_hash": "sha256:recipe",
+            "fidelity_fingerprint": "sha256:fidelity",
+        },
+        "cases": [
+            {
+                "case": "scan_full_narrow",
+                "success": True,
+                "validation_passed": True,
+                "perf_status": "trusted",
+                "classification": "supported",
+                "samples": [{"elapsed_ms": trusted_ms, "metrics": {"files_scanned": 10}}],
+                "run_summary": {
+                    "sample_count": 1,
+                    "invalid_sample_count": 0,
+                    "median_ms": trusted_ms,
+                    "host_label": "bench-host",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "compatibility_key": "sha256:good",
+                "supports_decision": True,
+                "required_runs": 5,
+                "decision_threshold_pct": 5.0,
+                "decision_metric": "median",
+            }
+        ],
+    }
+    (target_dir / f"{suite}.json").write_text(json.dumps(payload), encoding="utf-8")
     sys.exit(0)
 
 raise SystemExit(0)
@@ -4423,6 +4730,7 @@ print("hash policy ok")
         env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
         env["DELTA_BENCH_RESULTS"] = str(results_dir)
         env["COMPARE_ARG_LOG"] = str(compare_arg_log)
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             [
@@ -4662,6 +4970,7 @@ print("hash policy ok")
         env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
         env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
         env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(checkout_root)
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             [
@@ -4894,6 +5203,7 @@ print("hash policy ok")
         env["DELTA_RS_DIR"] = str(temp_root / ".delta-rs-under-test")
         env["DELTA_BENCH_RESULTS"] = str(temp_root / "results")
         env["DELTA_BENCH_COMPARE_CHECKOUT_ROOT"] = str(checkout_root)
+        relax_local_compare_disk_headroom(env)
 
         result = subprocess.run(
             [

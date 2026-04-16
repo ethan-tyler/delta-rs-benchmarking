@@ -103,7 +103,7 @@ For shared delete/update file-selection internals, use `./scripts/run_profile.sh
 
 ### delete_update_perf (4 cases)
 
-Perf-owned DML candidate/manual suite. The compare profile is `pr-delete-update-perf`, which fixes `dataset_id=medium_selective` and keeps the suite gated in `bench/evidence/registry.yaml` until same-SHA stability, delayed-canary validation, runtime signoff, and one stable case-list refresh cycle are complete.
+Perf-owned DML suite with split compare profiles. `pr-delete-update-perf` is the lighter blocking PR gate for `delete_update_perf`; `delete-update-perf-high-confidence` preserves the longer manual or nightly evidence contract. Both fix `dataset_id=medium_selective`, and the suite stays gated in `bench/evidence/registry.yaml` until same-SHA stability, delayed-canary validation, runtime signoff, and one stable case-list refresh cycle are complete.
 
 | Case                                   | Description                                                           | Key metrics                                    |
 | -------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------- |
@@ -126,6 +126,7 @@ Merge (upsert/delete) operations at varying match ratios and target configuratio
 | `merge_localized_1pct`            | Partition-aware upsert matching 1% with partition predicate | files_scanned, files_pruned, scan_time_ms, rewrite_time_ms |
 
 `merge` stays correctness-backed. For candidate/manual merge perf evidence, use `merge_perf`.
+For merge planning internals, use `./scripts/run_profile.sh merge-filter-criterion`. That Criterion family is diagnostic-only, planning-only, and stays separate from `merge_perf`.
 
 ### merge_perf (4 cases)
 
@@ -220,7 +221,7 @@ Use `./scripts/run_profile.sh <profile>` for committed Criterion entrypoints. Ex
 | `metadata_replay` | Existing | `metadata-replay-criterion` | `metadata_replay_bench.rs` | Snapshot/provider replay probes for the dedicated metadata replay bench |
 | `metadata_log` | Existing | `metadata-log-criterion` | `metadata_log_bench.rs` | Log parsing and snapshot materialization internals |
 | `file_selection` | Existing | `file-selection-criterion` | `file_selection_bench.rs` | Shared delete/update file-finding and predicate-selection internals |
-| `merge_filter` | Planned | `merge-filter-criterion` (planned) | `merge_filter_bench.rs` | Merge early-filter and placeholder-expansion planning |
+| `merge_filter` | Existing | `merge-filter-criterion` | `merge_filter_bench.rs` | Merge early-filter and placeholder-expansion planning |
 | `optimize_plan` | Planned | `optimize-plan-criterion` (planned) | `optimize_plan_bench.rs` | Compaction planning and file-selection internals |
 | `object_store_control` | Optional later | `object-store-control-criterion` (planned) | `object_store_control_bench.rs` | Local object-store control-plane helpers only |
 
@@ -376,7 +377,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--base-fetch-url`           | —             | Alternate remote URL used when the base SHA is not reachable from `origin`; prefer the full 40-character SHA or set `DELTA_RS_FETCH_REF` when using abbreviated SHAs             |
 | `--candidate-fetch-url`      | —             | Alternate remote URL used when the candidate SHA is not reachable from `origin`; prefer the full 40-character SHA or set `DELTA_RS_FETCH_REF` when using abbreviated SHAs        |
 | `--current-vs-main`          | —             | Compare current checkout against upstream main                                                                                                                                      |
-| `--methodology-profile`      | —             | Load a harness-owned methodology profile from `bench/methodologies/<name>.env`. `pr-macro` is the self-hosted PR decision contract; `pr-write-perf`, `pr-delete-update-perf`, `pr-merge-perf`, `pr-optimize-perf`, and `pr-tpcds` are dedicated operator compare contracts; explicit CLI flags still override profile defaults. |
+| `--methodology-profile`      | —             | Load a harness-owned methodology profile from `bench/methodologies/<name>.env`. `pr-macro` is the self-hosted PR decision contract; `pr-write-perf`, `pr-delete-update-perf`, `delete-update-perf-high-confidence`, `pr-merge-perf`, `pr-optimize-perf`, and `pr-tpcds` are the main perf compare contracts; explicit CLI flags still override profile defaults. |
 | `--warmup`                   | `2`           | Warmup iterations per case                                                                                                                                                          |
 | `--iters`                    | `9`           | Measured iterations per case per run                                                                                                                                                |
 | `--prewarm-iters`            | `1`           | Unreported warmup iterations per ref                                                                                                                                                |
@@ -397,7 +398,7 @@ Checks: delta-rs checkout exists, harness is synced, Cargo can resolve the bench
 | `--dataset-id`               | —             | Dataset id forwarded to fixture generation and benchmark runs                                                                                                                       |
 | `--timing-phase`             | `execute`     | Timing phase forwarded to `bench.sh run`                                                                                                                                            |
 
-Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes, `./scripts/run_profile.sh metadata-replay-criterion` for replay/provider diagnostics, `./scripts/run_profile.sh metadata-log-criterion`, which resolves to `metadata_log_bench`, for metadata/log internals, and `./scripts/run_profile.sh file-selection-criterion`, which resolves to `file_selection_bench`, for shared DML file-selection seams. The older `timing_phase=plan` approximation stays investigation-grade only.
+Self-hosted PR automation uses `--methodology-profile pr-macro` instead of restating raw decision knobs in workflow YAML. The profile currently resolves to `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=7`, `aggregation=median`, `spread_metric=iqr_ms`, and `sub_ms_policy=micro_only`. Narrow diagnostic work stays outside the public methodology-profile contract and instead uses `./scripts/run_profile.sh scan-phase-criterion` for phase-isolated scan probes, `./scripts/run_profile.sh metadata-replay-criterion` for replay/provider diagnostics, `./scripts/run_profile.sh metadata-log-criterion`, which resolves to `metadata_log_bench`, for metadata/log internals, `./scripts/run_profile.sh file-selection-criterion`, which resolves to `file_selection_bench`, for shared DML file-selection seams, and `./scripts/run_profile.sh merge-filter-criterion`, which resolves to `merge_filter_bench`, for planning-only merge filter seams. The older `timing_phase=plan` approximation stays investigation-grade only.
 
 ### `run_profile.sh` — Invoke committed methodology profiles
 
@@ -417,18 +418,20 @@ Current committed Criterion profiles:
 - `metadata-replay-criterion` -> `metadata_replay_bench`
 - `metadata-log-criterion` -> `metadata_log_bench`
 - `file-selection-criterion` -> `file_selection_bench`
+- `merge-filter-criterion` -> `merge_filter_bench`
 
 Criterion profiles are diagnostic-only and intended for local or trusted self-hosted investigation. Pass extra Criterion arguments after `--` when you need a narrower filter or a saved baseline, for example `./scripts/run_profile.sh scan-phase-criterion -- scan_pruning_hit/phase/execute --save-baseline pr-base`.
 
 PR pack automation reads `bench/evidence/registry.yaml`. The currently defined pack alias is `full`, which resolves to `pr-full-decision`. `run benchmark decision full` is therefore a pack request, not a suite request, and full does not mean --suite all.
 
-`pr-full-decision` contains only `readiness=ready` suites. In plain terms, it contains only readiness=ready suites. Gated perf-owned suites move to `pr-candidate-manual` so operators can refresh manual/candidate evidence without widening PR comment automation. `pr-candidate-manual` currently carries `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`; `tpcds` remains candidate/manual in that pack until its gates are fully closed.
+`pr-full-decision` contains only `readiness=ready` suites. In plain terms, it contains only readiness=ready suites. Gated perf-owned suites move to `pr-candidate-manual` so operators can refresh manual/candidate evidence without widening PR comment automation. `pr-candidate-manual` currently carries `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`; `delete_update_perf` uses `delete-update-perf-high-confidence` inside that pack so manual or nightly evidence keeps the longer compare shape, and `tpcds` remains candidate/manual in that pack until its gates are fully closed.
 
 Keep the entrypoints split:
 
 - Ready PR comment grammar: `run benchmark scan`, `run benchmark decision scan`, `run benchmark decision full`
-- Candidate/manual operator compares: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds`
-- Diagnostic Criterion probes: `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, `./scripts/run_profile.sh metadata-log-criterion`, `./scripts/run_profile.sh file-selection-criterion`
+- Blocking PR DML gate: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf`
+- Candidate/manual operator compares: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile delete-update-perf-high-confidence delete_update_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds`
+- Diagnostic Criterion probes: `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, `./scripts/run_profile.sh metadata-log-criterion`, `./scripts/run_profile.sh file-selection-criterion`, `./scripts/run_profile.sh merge-filter-criterion`
 
 Remote candidate/manual surfaces use the same registry/profile model. The currently declared S3 surface ids are `scan_s3`, `delete_update_perf_s3`, `merge_perf_s3`, `optimize_perf_s3`, and `metadata_perf_s3`; their backing methodology profiles pin `storage_backend=s3` and `backend_profile=s3_locking_vultr`, and the `s3-candidate-manual` pack batches those remote shards through the same compare flow. `write_perf_s3` is declared separately but remains gated until non-local write throughput evidence is complete.
 
@@ -475,7 +478,7 @@ If `--sha <commit>` points at an immutable ref that `origin` does not advertise,
 The same validator covers the candidate/manual perf-owned DML and maintenance suites too. Their operator compare entrypoints are:
 
 ```bash
-./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf
+./scripts/compare_branch.sh --current-vs-main --methodology-profile delete-update-perf-high-confidence delete_update_perf
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf

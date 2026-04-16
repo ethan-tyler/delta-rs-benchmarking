@@ -32,6 +32,11 @@ Options:
 Common compare profiles:
   pr-macro
   pr-write-perf
+  pr-delete-update-perf
+  delete-update-perf-high-confidence
+  pr-merge-perf
+  pr-optimize-perf
+  pr-metadata-perf
   pr-tpcds
   scan-s3-candidate
   delete-update-perf-s3-candidate
@@ -50,6 +55,9 @@ Declared remote surfaces in bench/evidence/registry.yaml:
 Common diagnostic Criterion profiles:
   scan-phase-criterion
   metadata-replay-criterion
+  metadata-log-criterion
+  file-selection-criterion
+  merge-filter-criterion
 EOF
 }
 

@@ -415,6 +415,23 @@ def test_compare_docs_define_new_perf_owned_methodology_profile_contracts() -> N
         )
 
 
+def test_docs_define_delete_update_perf_high_confidence_manual_profile() -> None:
+    combined = "\n".join(
+        (
+            (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "reference.md").read_text(encoding="utf-8"),
+            (DOCS_DIR / "validation.md").read_text(encoding="utf-8"),
+        )
+    )
+
+    assert "delete-update-perf-high-confidence" in combined
+    assert "higher-confidence" in combined or "high-confidence" in combined
+    assert (
+        "./scripts/compare_branch.sh --current-vs-main --methodology-profile "
+        "delete-update-perf-high-confidence delete_update_perf"
+    ) in combined
+
+
 def test_reference_docs_include_methodology_metadata_fields() -> None:
     reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
 
@@ -476,6 +493,9 @@ def test_docs_publish_criterion_family_map_and_diagnostic_policy() -> None:
     for profile_name, bench_name in (
         ("scan-phase-criterion", "scan_phase_bench"),
         ("metadata-replay-criterion", "metadata_replay_bench"),
+        ("metadata-log-criterion", "metadata_log_bench"),
+        ("file-selection-criterion", "file_selection_bench"),
+        ("merge-filter-criterion", "merge_filter_bench"),
     ):
         assert profile_name in combined
         assert bench_name in combined
@@ -483,6 +503,15 @@ def test_docs_publish_criterion_family_map_and_diagnostic_policy() -> None:
     assert "diagnostic-only" in combined
     assert "never authoritative PR evidence" in combined
     assert "local or trusted self-hosted" in combined
+
+
+def test_docs_enumerate_committed_merge_filter_criterion_entrypoint() -> None:
+    architecture = (DOCS_DIR / "architecture.md").read_text(encoding="utf-8")
+    compare_doc = (DOCS_DIR / "comparing-branches.md").read_text(encoding="utf-8")
+
+    assert "merge-filter-criterion" in architecture
+    assert "merge-filter-criterion" in compare_doc
+    assert "merge_filter_bench" in compare_doc
 
 
 def test_validation_docs_use_replay_bench_instead_of_scan_planning_compare() -> None:

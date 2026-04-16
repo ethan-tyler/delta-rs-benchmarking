@@ -51,10 +51,21 @@ For write-path investigation on the current self-hosted operator contract, use:
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf
 ```
 
-For DML and maintenance investigation on the new perf-owned candidate/manual surfaces, use:
+For the blocking PR-grade delete/update gate, use:
 
 ```bash
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf
+```
+
+For higher-confidence manual or nightly delete/update evidence, use:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile delete-update-perf-high-confidence delete_update_perf
+```
+
+For merge and maintenance investigation on the perf-owned candidate/manual surfaces, use:
+
+```bash
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf
 ```
@@ -69,11 +80,15 @@ The compare pipeline runs the macro lane in `--mode perf`. By default `compare_b
 
 `--methodology-profile pr-write-perf` resolves the write-path contract: `compare_mode=decision`, `dataset_id=null`, `dataset_policy=intrinsic_case_workload`, `warmup=1`, `iters=7`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. That profile is the operator path for `write_perf`, but the registry still keeps `write_perf` gated until same-SHA stability, delayed-canary validation, and runtime signoff are complete.
 
-`--methodology-profile pr-delete-update-perf`, `pr-merge-perf`, and `pr-optimize-perf` resolve the initial perf-owned DML and maintenance contracts. All three fix `dataset_id=medium_selective`, record `dataset_policy=shared_run_scope`, and use decision-mode compare defaults with five measured runs per side. They are candidate/manual surfaces first: the legacy `delete_update`, `merge`, and `optimize_vacuum` suites remain correctness-only, while the dedicated perf-owned counterparts stay gated until same-SHA stability, delayed-canary validation, runtime signoff, and one stable case-list refresh cycle are all complete.
+`--methodology-profile pr-delete-update-perf` resolves the lighter blocking PR delete/update contract: `dataset_id=medium_selective`, `compare_mode=decision`, `warmup=1`, `iters=2`, `prewarm_iters=0`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. It keeps the dedicated `delete_update_perf` suite in the blocking PR evidence path without reusing the longer operator soak shape.
+
+`--methodology-profile delete-update-perf-high-confidence` preserves the heavier delete/update evidence contract for manual or nightly reruns: `dataset_id=medium_selective`, `compare_mode=decision`, `warmup=1`, `iters=5`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`.
+
+`--methodology-profile pr-merge-perf` and `pr-optimize-perf` resolve the initial perf-owned merge and maintenance operator contracts. They fix `dataset_id=medium_selective`, record `dataset_policy=shared_run_scope`, and use decision-mode compare defaults with five measured runs per side. These suites remain candidate/manual surfaces first: the legacy `merge` and `optimize_vacuum` suites stay correctness-only, while the dedicated perf-owned counterparts remain gated until same-SHA stability, delayed-canary validation, runtime signoff, and one stable case-list refresh cycle are all complete.
 
 `--methodology-profile pr-tpcds` resolves the TPC-DS contract: `dataset_id=tpcds_duckdb`, `compare_mode=decision`, `warmup=1`, `iters=5`, `prewarm_iters=1`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. Use it only on trusted self-hosted runners with the DuckDB-backed fixture tree provisioned ahead of time. `tpcds_q72` remains outside the PR decision surface, and the suite stays gated in `bench/evidence/registry.yaml` until fixture provisioning plus validation signoff evidence exists. Refresh the dedicated gate with `./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate`.
 
-Criterion profiles live in the same `bench/methodologies/` directory, but `compare_branch.sh` intentionally rejects `PROFILE_KIND=criterion`. Invoke them through `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, or `./scripts/run_profile.sh metadata-log-criterion` instead. `metadata-replay-criterion` resolves to `metadata_replay_bench`, `metadata-log-criterion` resolves to `metadata_log_bench`, and all committed Criterion profiles stay diagnostic-only rather than authoritative PR evidence.
+Criterion profiles live in the same `bench/methodologies/` directory, but `compare_branch.sh` intentionally rejects `PROFILE_KIND=criterion`. Invoke them through `./scripts/run_profile.sh scan-phase-criterion`, `metadata-replay-criterion`, `metadata-log-criterion`, `file-selection-criterion`, or `merge-filter-criterion` instead. These resolve to `scan_phase_bench`, `metadata_replay_bench`, `metadata_log_bench`, `file_selection_bench`, and `merge_filter_bench`, and all committed Criterion profiles stay diagnostic-only rather than authoritative PR evidence.
 
 Before treating a machine or workflow as trustworthy for perf claims, rerun `./scripts/validate_perf_harness.sh` and review [Validation](validation.md).
 
@@ -84,9 +99,10 @@ Before treating a machine or workflow as trustworthy for perf claims, rerun `./s
 Keep the entrypoints split by evidence class:
 
 - Ready PR automation: `run benchmark scan`, `run benchmark decision scan`, `run benchmark decision full`
-- Candidate/manual operator compares: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds`
+- Blocking PR DML gate: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-delete-update-perf delete_update_perf`
+- Candidate/manual operator compares: `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile delete-update-perf-high-confidence delete_update_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-merge-perf merge_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-optimize-perf optimize_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf`, `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-tpcds tpcds`
 - Candidate/manual multi-suite packs: `pr-candidate-manual` and `s3-candidate-manual` via the pack tooling, never via `run benchmark decision full`
-- Diagnostic Criterion probes: `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, `./scripts/run_profile.sh metadata-log-criterion`
+- Diagnostic Criterion probes: `./scripts/run_profile.sh scan-phase-criterion`, `./scripts/run_profile.sh metadata-replay-criterion`, `./scripts/run_profile.sh metadata-log-criterion`, `./scripts/run_profile.sh file-selection-criterion`, `./scripts/run_profile.sh merge-filter-criterion`
 
 ## Replay-State Probes
 
@@ -129,7 +145,15 @@ Use `--methodology-profile <name>` to load harness-owned compare defaults from `
 
 `pr-write-perf` is the write-path operator profile. It keeps `dataset_id` intentionally unset because the workload lives in the case ids themselves, and records `dataset_policy=intrinsic_case_workload` so the compare manifest makes that contract explicit. Use it for trusted self-hosted `write_perf` evidence and rerun `./scripts/validate_perf_harness.sh --artifact-dir results/validation/write-perf-gate` before enabling bot-default decision runs.
 
-`pr-delete-update-perf`, `pr-merge-perf`, and `pr-optimize-perf` are the perf-owned DML and maintenance operator profiles. They all fix `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. Use them for candidate/manual evidence refreshes on `delete_update_perf`, `merge_perf`, and `optimize_perf`; the underlying correctness suites remain correctness-only and are not perf evidence.
+`pr-delete-update-perf` is the lighter blocking PR delete/update profile. It keeps `dataset_id=medium_selective` and `compare_runs=5`, but trims the per-run work to `iters=2` and `prewarm_iters=0` so `delete_update_perf` can stay in the PR evidence path without consuming the old soak budget.
+
+`delete-update-perf-high-confidence` preserves the heavier delete/update contract for higher-confidence manual or nightly evidence. Use it when you want the original longer `delete_update_perf` compare shape:
+
+```bash
+./scripts/compare_branch.sh --current-vs-main --methodology-profile delete-update-perf-high-confidence delete_update_perf
+```
+
+`pr-merge-perf` and `pr-optimize-perf` are the perf-owned merge and maintenance operator profiles. They fix `dataset_id=medium_selective`, `compare_mode=decision`, `compare_runs=5`, `measure_order=alternate`, `timing_phase=execute`, `aggregation=median`, and `spread_metric=iqr_ms`. Use them for candidate/manual evidence refreshes on `merge_perf` and `optimize_perf`; the underlying correctness suites remain correctness-only and are not perf evidence.
 
 `pr-metadata-perf` is the metadata/replay macro operator profile. It fixes `dataset_id=many_versions`, uses decision-mode compare defaults, and stays candidate/manual until same-SHA stability, delayed-canary validation, runtime signoff, and checkpoint-vs-uncheckpointed coverage signoff are all closed. Use it with:
 
@@ -139,7 +163,7 @@ Use `--methodology-profile <name>` to load harness-owned compare defaults from `
 
 `pr-tpcds` is the TPC-DS operator profile. It fixes `dataset_id=tpcds_duckdb`, expects the fixture root to exist on trusted self-hosted runners before the compare begins, and keeps `tpcds_q72` outside the PR decision surface. Use it for dedicated TPC-DS evidence and rerun `./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate` before treating the output as promotion evidence. In plain terms, tpcds remains candidate/manual until its trusted-runner promotion gate closes.
 
-The PR pack registry lives in `bench/evidence/registry.yaml`. `pr-full-decision` maps the `full` alias to the ready PR decision surface only and contains only `readiness=ready` suites. `pr-candidate-manual` collects gated perf-owned suites for operator-run evidence refreshes: `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`. `tpcds` remains candidate/manual there and stays out of PR comment automation until its gates are closed.
+The PR pack registry lives in `bench/evidence/registry.yaml`. `pr-full-decision` maps the `full` alias to the ready PR decision surface only and contains only `readiness=ready` suites. `pr-candidate-manual` collects gated perf-owned suites for operator-run evidence refreshes: `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`. Inside that pack, `delete_update_perf` resolves through `delete-update-perf-high-confidence` so manual or nightly evidence keeps the longer DML compare shape. `tpcds` remains candidate/manual there and stays out of PR comment automation until its gates are closed.
 
 Remote candidate/manual surfaces use the same compare path instead of a second harness. Profiles such as `scan-s3-candidate`, `write-perf-s3-candidate`, and `metadata-perf-s3-candidate` carry `storage_backend=s3` and `backend_profile=s3_locking_vultr` directly in `bench/methodologies/`. The matching `s3-candidate-manual` pack batches those remote shards without widening the authoritative PR bot contract.
 
@@ -197,7 +221,7 @@ This means compare no longer requires `.delta-rs-under-test/` to stay clean betw
 
 ### Criterion microbench compare
 
-Use the Criterion lane for tiny or highly cache-sensitive scan cases and focused metadata/log diagnostics that should not drive the normal PR macro verdict. Today that means `scan_pruning_hit` for scan microbench work and `metadata-log-criterion` for log parsing plus snapshot materialization internals. Run these profiles on the same local or trusted self-hosted host, treat them as diagnostic-only, and report them separately from any authoritative PR evidence.
+Use the Criterion lane for tiny or highly cache-sensitive scan cases and focused metadata/log, file-selection, or merge-planning diagnostics that should not drive the normal PR macro verdict. Today that means `scan_pruning_hit` for scan microbench work, `metadata-log-criterion` for log parsing plus snapshot materialization internals, `file-selection-criterion` for shared DML file-finding seams, and `merge-filter-criterion` for planning-only merge filter construction. Run these profiles on the same local or trusted self-hosted host, treat them as diagnostic-only, and report them separately from any authoritative PR evidence.
 
 The committed Criterion entrypoints are:
 
@@ -205,6 +229,8 @@ The committed Criterion entrypoints are:
 ./scripts/run_profile.sh scan-phase-criterion
 ./scripts/run_profile.sh metadata-replay-criterion
 ./scripts/run_profile.sh metadata-log-criterion
+./scripts/run_profile.sh file-selection-criterion
+./scripts/run_profile.sh merge-filter-criterion
 ```
 
 Run the first command on the pinned base checkout, then run the second command on the pinned candidate checkout:

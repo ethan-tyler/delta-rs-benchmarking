@@ -7,6 +7,8 @@ pub mod file_selection_bench_support;
 pub mod fingerprint;
 pub mod manifests;
 #[doc(hidden)]
+pub mod merge_bench_support;
+#[doc(hidden)]
 pub mod metadata_bench_support;
 pub(crate) mod replay_snapshot;
 pub mod results;

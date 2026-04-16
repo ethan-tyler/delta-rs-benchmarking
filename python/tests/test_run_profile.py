@@ -162,6 +162,30 @@ def test_run_profile_dry_run_resolves_scan_s3_candidate_compare_command() -> Non
     )
 
 
+def test_run_profile_dry_run_resolves_delete_update_perf_high_confidence_compare_command() -> (
+    None
+):
+    result = subprocess.run(
+        [
+            str(RUN_PROFILE),
+            "--dry-run",
+            "--current-vs-main",
+            "delete-update-perf-high-confidence",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == (
+        "./scripts/compare_branch.sh --current-vs-main "
+        "--methodology-profile delete-update-perf-high-confidence delete_update_perf"
+    )
+
+
 def test_run_profile_dry_run_preserves_explicit_storage_contract_overrides() -> None:
     result = subprocess.run(
         [
@@ -242,6 +266,33 @@ def test_run_profile_dry_run_resolves_file_selection_criterion_command() -> None
     assert result.returncode == 0
     assert result.stderr == ""
     assert result.stdout.strip() == "cargo bench -p delta-bench --bench file_selection_bench"
+
+
+def test_run_profile_dry_run_resolves_merge_filter_criterion_command() -> None:
+    result = subprocess.run(
+        [str(RUN_PROFILE), "--dry-run", "merge-filter-criterion"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == "cargo bench -p delta-bench --bench merge_filter_bench"
+
+
+def test_run_profile_help_lists_committed_merge_filter_criterion_profile() -> None:
+    result = subprocess.run(
+        [str(RUN_PROFILE), "--help"],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert "merge-filter-criterion" in result.stdout
 
 
 def test_run_profile_rejects_missing_required_run_metadata() -> None:

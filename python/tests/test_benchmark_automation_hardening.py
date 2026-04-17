@@ -1360,6 +1360,104 @@ def test_validation_script_regression_canary_delay_helper_scales_slow_baselines(
     assert float(delay_line.removeprefix("delay=")) == pytest.approx(320.0)
 
 
+def test_validation_script_regression_canary_delay_helper_emits_env_safe_integer_delay(
+    tmp_path: Path,
+) -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    delay_function_block = shell_function_block(
+        script, "compute_regression_canary_delay_ms"
+    )
+    baseline_json = tmp_path / "baseline.json"
+    baseline_json.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "context": {
+                    "schema_version": 5,
+                    "label": "baseline",
+                    "suite": "scan",
+                    "benchmark_mode": "perf",
+                    "timing_phase": "execute",
+                    "dataset_id": "medium_selective",
+                    "dataset_fingerprint": "sha256:fixture",
+                    "runner": "rust",
+                    "scale": "sf1",
+                    "storage_backend": "local",
+                    "backend_profile": "local",
+                    "lane": "macro",
+                    "measurement_kind": "phase_breakdown",
+                    "validation_level": "operational",
+                    "harness_revision": "harness-rev",
+                    "fixture_recipe_hash": "sha256:recipe",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "cases": [
+                    {
+                        "case": "scan_filter_flag",
+                        "success": True,
+                        "validation_passed": True,
+                        "perf_status": "trusted",
+                        "classification": "supported",
+                        "samples": [{"elapsed_ms": 80.0, "metrics": {}}],
+                        "run_summary": {
+                            "sample_count": 1,
+                            "invalid_sample_count": 0,
+                            "median_ms": 80.0,
+                            "host_label": "bench-host",
+                            "fidelity_fingerprint": "sha256:fidelity",
+                        },
+                        "run_summaries": [
+                            {
+                                "sample_count": 1,
+                                "invalid_sample_count": 0,
+                                "median_ms": value,
+                                "host_label": "bench-host",
+                                "fidelity_fingerprint": "sha256:fidelity",
+                            }
+                            for value in [78.0, 79.0, 80.0, 81.0, 82.0]
+                        ],
+                        "compatibility_key": "sha256:good",
+                        "supports_decision": True,
+                        "required_runs": 5,
+                        "decision_threshold_pct": 5.0,
+                        "decision_metric": "median",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                "set -euo pipefail\n"
+                f'PYTHONPATH_DIR="{REPO_ROOT / "python"}"\n'
+                f"{delay_function_block}\n"
+                'delay="$(compute_regression_canary_delay_ms "$1" "$2" "$3")"\n'
+                'printf "delay=%s\\n" "$delay"\n'
+            ),
+            "compute_regression_canary_delay_ms_integer_test",
+            str(baseline_json),
+            "scan_filter_flag",
+            "150",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    delay_line = next(
+        line for line in result.stdout.splitlines() if line.startswith("delay=")
+    )
+    delay = delay_line.removeprefix("delay=")
+    assert delay == "150"
+    assert delay.isdigit()
+
+
 def test_validation_script_keeps_scan_and_perf_owned_gates_on_their_contract_dataset() -> (
     None
 ):

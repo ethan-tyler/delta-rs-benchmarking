@@ -451,6 +451,7 @@ compute_regression_canary_delay_ms() {
 		"${configured_delay_ms}" <<'PY'
 import statistics
 import sys
+import math
 from pathlib import Path
 
 from delta_bench_compare.schema import load_benchmark_payload
@@ -486,7 +487,7 @@ for case in baseline.get("cases", []):
     threshold_pct = float(case.get("decision_threshold_pct") or 5.0)
     relative_target = max(0.10, (threshold_pct / 100.0) * 2.0)
     effective_delay_ms = max(configured_delay_ms, baseline_metric_ms * relative_target)
-    print(f"{effective_delay_ms:.3f}")
+    print(str(int(math.ceil(effective_delay_ms))))
     raise SystemExit(0)
 
 raise SystemExit(f"missing case '{case_name}' in regression canary baseline payload")

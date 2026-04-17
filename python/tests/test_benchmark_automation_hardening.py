@@ -1117,6 +1117,7 @@ def test_validation_script_embedded_python_helpers_compile() -> None:
         "assert_same_sha_compare_is_fail_closed",
         "assert_payload_contains_cases",
         "assert_phase_canary",
+        "compute_regression_canary_delay_ms",
         "assert_regression_canary_detected",
     ):
         source = embedded_python_from_shell_function(script, function_name)
@@ -1223,6 +1224,140 @@ def test_validation_script_regression_canary_helper_executes_successfully(
 
     assert result.returncode == 0, result.stderr
     assert f"Regression canary: {case_name} classified as regression" in result.stdout
+
+
+def test_validation_script_regression_canary_delay_helper_scales_slow_baselines(
+    tmp_path: Path,
+) -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    delay_function_block = shell_function_block(
+        script, "compute_regression_canary_delay_ms"
+    )
+    assert_function_block = shell_function_block(script, "assert_regression_canary_detected")
+    case_name = "scan_filter_flag"
+
+    def write_payload(path: Path, *, label: str, run_medians_ms: list[float]) -> None:
+        median_ms = run_medians_ms[len(run_medians_ms) // 2]
+        payload = {
+            "schema_version": 5,
+            "context": {
+                "schema_version": 5,
+                "label": label,
+                "suite": "scan",
+                "benchmark_mode": "perf",
+                "timing_phase": "execute",
+                "dataset_id": "medium_selective",
+                "dataset_fingerprint": "sha256:fixture",
+                "runner": "rust",
+                "scale": "sf1",
+                "storage_backend": "local",
+                "backend_profile": "local",
+                "lane": "macro",
+                "measurement_kind": "phase_breakdown",
+                "validation_level": "operational",
+                "harness_revision": "harness-rev",
+                "fixture_recipe_hash": "sha256:recipe",
+                "fidelity_fingerprint": "sha256:fidelity",
+            },
+            "cases": [
+                {
+                    "case": case_name,
+                    "success": True,
+                    "validation_passed": True,
+                    "perf_status": "trusted",
+                    "classification": "supported",
+                    "samples": [{"elapsed_ms": median_ms, "metrics": {}}],
+                    "run_summary": {
+                        "sample_count": 1,
+                        "invalid_sample_count": 0,
+                        "median_ms": median_ms,
+                        "host_label": "bench-host",
+                        "fidelity_fingerprint": "sha256:fidelity",
+                    },
+                    "run_summaries": [
+                        {
+                            "sample_count": 1,
+                            "invalid_sample_count": 0,
+                            "median_ms": value,
+                            "host_label": "bench-host",
+                            "fidelity_fingerprint": "sha256:fidelity",
+                        }
+                        for value in run_medians_ms
+                    ],
+                    "compatibility_key": "sha256:good",
+                    "supports_decision": True,
+                    "required_runs": 5,
+                    "decision_threshold_pct": 5.0,
+                    "decision_metric": "median",
+                }
+            ],
+        }
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+    baseline_json = tmp_path / "baseline.json"
+    candidate_json = tmp_path / "candidate.json"
+    write_payload(
+        baseline_json,
+        label="baseline",
+        run_medians_ms=[3180.0, 3190.0, 3200.0, 3210.0, 3220.0],
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                "set -euo pipefail\n"
+                f'PYTHONPATH_DIR="{REPO_ROOT / "python"}"\n'
+                f"{delay_function_block}\n"
+                f"{assert_function_block}\n"
+                'delay="$(compute_regression_canary_delay_ms "$1" "$2" "$3")"\n'
+                'python3 - "$1" "$2" "$delay" "$4" <<\'PY\'\n'
+                "import json\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "\n"
+                "baseline = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\n"
+                "case_name = sys.argv[2]\n"
+                "delay_ms = float(sys.argv[3])\n"
+                "candidate_path = Path(sys.argv[4])\n"
+                "candidate = json.loads(json.dumps(baseline))\n"
+                "candidate['context']['label'] = 'candidate'\n"
+                "case = candidate['cases'][0]\n"
+                "case['run_summaries'] = [\n"
+                "    {\n"
+                "        **summary,\n"
+                "        'median_ms': float(summary['median_ms']) + delay_ms,\n"
+                "    }\n"
+                "    for summary in case['run_summaries']\n"
+                "]\n"
+                "candidate_medians = [\n"
+                "    float(summary['median_ms']) for summary in case['run_summaries']\n"
+                "]\n"
+                "case['run_summary']['median_ms'] = candidate_medians[len(candidate_medians) // 2]\n"
+                "case['samples'] = [{'elapsed_ms': value, 'metrics': {}} for value in candidate_medians]\n"
+                "candidate_path.write_text(json.dumps(candidate), encoding='utf-8')\n"
+                "PY\n"
+                'assert_regression_canary_detected "$1" "$4" "$2"\n'
+                'printf "delay=%s\\n" "$delay"\n'
+            ),
+            "compute_regression_canary_delay_ms_test",
+            str(baseline_json),
+            case_name,
+            "150",
+            str(candidate_json),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"Regression canary: {case_name} classified as regression" in result.stdout
+    delay_line = next(
+        line for line in result.stdout.splitlines() if line.startswith("delay=")
+    )
+    assert float(delay_line.removeprefix("delay=")) == pytest.approx(320.0)
 
 
 def test_validation_script_keeps_scan_and_perf_owned_gates_on_their_contract_dataset() -> (

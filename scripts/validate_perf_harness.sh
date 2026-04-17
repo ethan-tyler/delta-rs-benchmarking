@@ -441,6 +441,58 @@ print(
 PY
 }
 
+compute_regression_canary_delay_ms() {
+	local baseline_json="$1"
+	local case_name="$2"
+	local configured_delay_ms="$3"
+	env PYTHONPATH="${PYTHONPATH_DIR}" python3 - \
+		"${baseline_json}" \
+		"${case_name}" \
+		"${configured_delay_ms}" <<'PY'
+import statistics
+import sys
+from pathlib import Path
+
+from delta_bench_compare.schema import load_benchmark_payload
+
+baseline = load_benchmark_payload(Path(sys.argv[1]))
+case_name = sys.argv[2]
+configured_delay_ms = float(sys.argv[3])
+
+for case in baseline.get("cases", []):
+    if case.get("case") != case_name:
+        continue
+
+    run_summaries = [
+        summary
+        for summary in (case.get("run_summaries") or [])
+        if isinstance(summary, dict) and summary.get("median_ms") is not None
+    ]
+    if run_summaries:
+        baseline_medians = [float(summary["median_ms"]) for summary in run_summaries]
+        baseline_metric_ms = statistics.median(baseline_medians)
+    else:
+        run_summary = case.get("run_summary") or {}
+        median_ms = run_summary.get("median_ms")
+        if median_ms is None:
+            elapsed_stats = case.get("elapsed_stats") or {}
+            median_ms = elapsed_stats.get("median_ms")
+        if median_ms is None:
+            raise SystemExit(
+                f"missing median timing for case '{case_name}' in {sys.argv[1]}"
+            )
+        baseline_metric_ms = float(median_ms)
+
+    threshold_pct = float(case.get("decision_threshold_pct") or 5.0)
+    relative_target = max(0.10, (threshold_pct / 100.0) * 2.0)
+    effective_delay_ms = max(configured_delay_ms, baseline_metric_ms * relative_target)
+    print(f"{effective_delay_ms:.3f}")
+    raise SystemExit(0)
+
+raise SystemExit(f"missing case '{case_name}' in regression canary baseline payload")
+PY
+}
+
 assert_regression_canary_detected() {
 	local baseline_json="$1"
 	local candidate_json="$2"
@@ -607,6 +659,11 @@ note "${execute_canary_status}"
 
 note ""
 note "Running regression-detection canary..."
+scan_regression_delay_ms="$(compute_regression_canary_delay_ms \
+	"$(json_path_for_label "base-${VALIDATION_SHA}" "scan")" \
+	"${VALIDATION_CASE}" \
+	"${VALIDATION_DELAY_MS}")"
+note "- Scan regression canary delay: ${scan_regression_delay_ms} ms"
 
 base_run_labels=()
 cand_run_labels=()
@@ -615,7 +672,7 @@ while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
 	base_label="regression-base-r${run_idx}"
 	cand_label="regression-cand-r${run_idx}"
 	run_scan_case "${base_label}" "execute"
-	run_scan_case "${cand_label}" "execute" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_EXECUTE_MS=${VALIDATION_DELAY_MS}"
+	run_scan_case "${cand_label}" "execute" "DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY=1" "DELTA_BENCH_SCAN_DELAY_EXECUTE_MS=${scan_regression_delay_ms}"
 	base_run_labels+=("${base_label}")
 	cand_run_labels+=("${cand_label}")
 	run_idx=$((run_idx + 1))
@@ -654,6 +711,11 @@ note "${write_perf_case_presence_status}"
 
 note ""
 note "Running write_perf regression-detection canary..."
+write_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
+	"$(json_path_for_label "${write_perf_base_label}" "write_perf")" \
+	"${WRITE_PERF_CANARY_CASE}" \
+	"${VALIDATION_WRITE_PERF_DELAY_MS}")"
+note "- Write perf regression canary delay: ${write_perf_regression_delay_ms} ms"
 
 write_perf_base_run_labels=()
 write_perf_cand_run_labels=()
@@ -664,7 +726,7 @@ while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
 	run_write_perf_case "${base_label}"
 	run_write_perf_case "${cand_label}" \
 		"DELTA_BENCH_ALLOW_WRITE_PERF_DELAY=1" \
-		"DELTA_BENCH_WRITE_PERF_DELAY_MS=${VALIDATION_WRITE_PERF_DELAY_MS}"
+		"DELTA_BENCH_WRITE_PERF_DELAY_MS=${write_perf_regression_delay_ms}"
 	write_perf_base_run_labels+=("${base_label}")
 	write_perf_cand_run_labels+=("${cand_label}")
 	run_idx=$((run_idx + 1))
@@ -703,6 +765,11 @@ note "${delete_update_perf_case_presence_status}"
 
 note ""
 note "Running delete_update_perf regression-detection canary..."
+delete_update_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
+	"$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" \
+	"${DELETE_UPDATE_PERF_CANARY_CASE}" \
+	"${VALIDATION_DELETE_UPDATE_PERF_DELAY_MS}")"
+note "- Delete/update perf regression canary delay: ${delete_update_perf_regression_delay_ms} ms"
 
 delete_update_perf_base_run_labels=()
 delete_update_perf_cand_run_labels=()
@@ -713,7 +780,7 @@ while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
 	run_delete_update_perf_case "${base_label}"
 	run_delete_update_perf_case "${cand_label}" \
 		"DELTA_BENCH_ALLOW_DELETE_UPDATE_PERF_DELAY=1" \
-		"DELTA_BENCH_DELETE_UPDATE_PERF_DELAY_MS=${VALIDATION_DELETE_UPDATE_PERF_DELAY_MS}"
+		"DELTA_BENCH_DELETE_UPDATE_PERF_DELAY_MS=${delete_update_perf_regression_delay_ms}"
 	delete_update_perf_base_run_labels+=("${base_label}")
 	delete_update_perf_cand_run_labels+=("${cand_label}")
 	run_idx=$((run_idx + 1))
@@ -752,6 +819,11 @@ note "${merge_perf_case_presence_status}"
 
 note ""
 note "Running merge_perf regression-detection canary..."
+merge_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
+	"$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" \
+	"${MERGE_PERF_CANARY_CASE}" \
+	"${VALIDATION_MERGE_PERF_DELAY_MS}")"
+note "- Merge perf regression canary delay: ${merge_perf_regression_delay_ms} ms"
 
 merge_perf_base_run_labels=()
 merge_perf_cand_run_labels=()
@@ -762,7 +834,7 @@ while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
 	run_merge_perf_case "${base_label}"
 	run_merge_perf_case "${cand_label}" \
 		"DELTA_BENCH_ALLOW_MERGE_PERF_DELAY=1" \
-		"DELTA_BENCH_MERGE_PERF_DELAY_MS=${VALIDATION_MERGE_PERF_DELAY_MS}"
+		"DELTA_BENCH_MERGE_PERF_DELAY_MS=${merge_perf_regression_delay_ms}"
 	merge_perf_base_run_labels+=("${base_label}")
 	merge_perf_cand_run_labels+=("${cand_label}")
 	run_idx=$((run_idx + 1))
@@ -800,6 +872,11 @@ note "${optimize_perf_case_presence_status}"
 
 note ""
 note "Running optimize_perf regression-detection canary..."
+optimize_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
+	"$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" \
+	"${OPTIMIZE_PERF_CANARY_CASE}" \
+	"${VALIDATION_OPTIMIZE_PERF_DELAY_MS}")"
+note "- Optimize perf regression canary delay: ${optimize_perf_regression_delay_ms} ms"
 
 optimize_perf_base_run_labels=()
 optimize_perf_cand_run_labels=()
@@ -810,7 +887,7 @@ while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
 	run_optimize_perf_case "${base_label}"
 	run_optimize_perf_case "${cand_label}" \
 		"DELTA_BENCH_ALLOW_OPTIMIZE_PERF_DELAY=1" \
-		"DELTA_BENCH_OPTIMIZE_PERF_DELAY_MS=${VALIDATION_OPTIMIZE_PERF_DELAY_MS}"
+		"DELTA_BENCH_OPTIMIZE_PERF_DELAY_MS=${optimize_perf_regression_delay_ms}"
 	optimize_perf_base_run_labels+=("${base_label}")
 	optimize_perf_cand_run_labels+=("${cand_label}")
 	run_idx=$((run_idx + 1))
@@ -849,6 +926,11 @@ note "${metadata_perf_case_presence_status}"
 
 note ""
 note "Running metadata_perf regression-detection canary..."
+metadata_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
+	"$(json_path_for_label "${metadata_perf_base_label}" "metadata_perf")" \
+	"${METADATA_PERF_CANARY_CASE}" \
+	"${VALIDATION_METADATA_PERF_DELAY_MS}")"
+note "- Metadata perf regression canary delay: ${metadata_perf_regression_delay_ms} ms"
 
 metadata_perf_base_run_labels=()
 metadata_perf_cand_run_labels=()
@@ -859,7 +941,7 @@ while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
 	run_metadata_perf_case "${base_label}"
 	run_metadata_perf_case "${cand_label}" \
 		"DELTA_BENCH_ALLOW_METADATA_PERF_DELAY=1" \
-		"DELTA_BENCH_METADATA_PERF_DELAY_MS=${VALIDATION_METADATA_PERF_DELAY_MS}"
+		"DELTA_BENCH_METADATA_PERF_DELAY_MS=${metadata_perf_regression_delay_ms}"
 	metadata_perf_base_run_labels+=("${base_label}")
 	metadata_perf_cand_run_labels+=("${cand_label}")
 	run_idx=$((run_idx + 1))
@@ -898,6 +980,11 @@ if tpcds_validation_enabled; then
 
 	note ""
 	note "Running tpcds regression-detection canary..."
+	tpcds_regression_delay_ms="$(compute_regression_canary_delay_ms \
+		"$(json_path_for_label "${tpcds_base_label}" "tpcds")" \
+		"${VALIDATION_TPCDS_CASE}" \
+		"${VALIDATION_TPCDS_DELAY_MS}")"
+	note "- TPC-DS regression canary delay: ${tpcds_regression_delay_ms} ms"
 
 	tpcds_base_run_labels=()
 	tpcds_cand_run_labels=()
@@ -908,7 +995,7 @@ if tpcds_validation_enabled; then
 		run_tpcds_case "${base_label}"
 		run_tpcds_case "${cand_label}" \
 			"DELTA_BENCH_ALLOW_TPCDS_DELAY=1" \
-			"DELTA_BENCH_TPCDS_DELAY_MS=${VALIDATION_TPCDS_DELAY_MS}"
+			"DELTA_BENCH_TPCDS_DELAY_MS=${tpcds_regression_delay_ms}"
 		tpcds_base_run_labels+=("${base_label}")
 		tpcds_cand_run_labels+=("${cand_label}")
 		run_idx=$((run_idx + 1))

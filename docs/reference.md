@@ -471,11 +471,11 @@ Decision compare accepts only schema v5 aggregated inputs and fails closed when 
 
 Copies the current README, key docs, manifests, and wrapper entrypoints into `results/contracts/` (or a caller-selected output directory) and writes a machine-readable `manifest.json` that records the published contract bundle and result schema version.
 
-Runs the focused trust-contract suites used to justify trustworthy PR perf claims. By default the script writes a timestamped artifact tree under `results/validation/` and stores the Markdown summary at `summary.md` inside that directory. Use `--artifact-dir` to choose a stable directory such as `results/validation/latest`.
+Runs the focused trust-contract suites used to justify trustworthy PR perf claims. The validator always reruns the scan trust contract first, then uses the stable artifact-dir basename to decide which follow-on gate family to run: `write-perf-ready` / `write-perf-gate` add only `write_perf`, `dml-maintenance-gate` adds only `delete_update_perf`, `merge_perf`, and `optimize_perf`, `metadata-perf-gate` adds only `metadata_perf`, and `tpcds-gate` adds only `tpcds` when `--dataset-id tpcds_duckdb` is present. Timestamped or otherwise unrecognized artifact dirs keep the full chain. By default the script writes a timestamped artifact tree under `results/validation/` and stores the Markdown summary at `summary.md` inside that directory. Use `--artifact-dir` to choose a stable directory such as `results/validation/latest`.
 
 If `--sha <commit>` points at an immutable ref that `origin` does not advertise, pass `--fetch-url <trusted-clone-url>` and optionally `--fetch-ref <ref>` (or set `VALIDATION_FETCH_URL` / `VALIDATION_FETCH_REF`). The validator prepares `.delta-rs-under-test` at that SHA first, then seeds same-SHA compare pinning into `.delta-rs-source` from the prepared execution checkout.
 
-The same validator covers the candidate/manual perf-owned DML and maintenance suites too. Their operator compare entrypoints are:
+The same validator covers the candidate/manual perf-owned DML and maintenance suites too when you target `results/validation/dml-maintenance-gate`. Their operator compare entrypoints are:
 
 ```bash
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile delete-update-perf-high-confidence delete_update_perf
@@ -484,7 +484,7 @@ The same validator covers the candidate/manual perf-owned DML and maintenance su
 ./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-metadata-perf metadata_perf
 ```
 
-Passing `--dataset-id tpcds_duckdb` enables the dedicated TPC-DS promotion gate in the same script. The primary scan and DML/maintenance validation blocks remain pinned to their own contract datasets; the flag only turns on the extra TPC-DS surface. The operator-facing invocation is:
+Passing `--dataset-id tpcds_duckdb` enables the dedicated TPC-DS promotion gate in the same script when the artifact dir resolves to the `tpcds` scope (for example `results/validation/tpcds-gate`). The primary scan and non-TPC-DS validation blocks remain pinned to their own contract datasets. The operator-facing invocation is:
 
 ```bash
 ./scripts/validate_perf_harness.sh --dataset-id tpcds_duckdb --artifact-dir results/validation/tpcds-gate

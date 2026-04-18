@@ -16,7 +16,7 @@ The trust contract is split deliberately:
 - `pr-full-decision` contains only `readiness=ready` suites. Gated perf-owned suites move to `pr-candidate-manual` for manual/candidate reruns so the authoritative PR comment path does not widen ahead of evidence.
 - Replay-state investigation uses the dedicated `metadata-replay-criterion` profile, which resolves to `metadata_replay_bench`. That surface is intentionally investigation-grade and must not replace the macro `scan` PR decision contract.
 - The committed Criterion profiles `scan-phase-criterion`, `metadata-replay-criterion`, `metadata-log-criterion`, `file-selection-criterion`, and `merge-filter-criterion` are local or trusted self-hosted diagnostics only. They are diagnostic-only, never authoritative PR evidence, never widen PR verdict scope, and never route through `bench/evidence/registry.yaml` packs, `compare_branch.sh`, PR comment automation, or longitudinal ingest.
-- `./scripts/validate_perf_harness.sh` reruns the scan trust contract, the `write_perf` promotion gate, the perf-owned DML/maintenance candidate gates, the `metadata_perf` candidate gate, and the dedicated `tpcds` promotion gate when invoked with `--dataset-id tpcds_duckdb`. It writes a rerunnable Markdown summary under `results/validation/<timestamp>/summary.md` by default. When the validation SHA is an immutable ref that `origin` does not advertise, pass `--sha <commit> --fetch-url <trusted-clone-url>` and optionally `--fetch-ref <ref>` (or set `VALIDATION_FETCH_URL` / `VALIDATION_FETCH_REF`) so the validator can prepare `.delta-rs-under-test` at that SHA first, then seed same-SHA compare pinning into `.delta-rs-source` from the prepared execution checkout.
+- `./scripts/validate_perf_harness.sh` always reruns the scan trust contract first, then adds focused follow-on gates based on the stable artifact-dir name. `write-perf-ready` / `write-perf-gate` run only the `write_perf` promotion gate, `dml-maintenance-gate` runs only the perf-owned DML/maintenance candidate gates, `metadata-perf-gate` runs only the `metadata_perf` candidate gate, and `tpcds-gate` runs only the dedicated `tpcds` promotion gate when invoked with `--dataset-id tpcds_duckdb`. Unrecognized or timestamped artifact dirs keep the full chain. The validator writes a rerunnable Markdown summary under `results/validation/<timestamp>/summary.md` by default. When the validation SHA is an immutable ref that `origin` does not advertise, pass `--sha <commit> --fetch-url <trusted-clone-url>` and optionally `--fetch-ref <ref>` (or set `VALIDATION_FETCH_URL` / `VALIDATION_FETCH_REF`) so the validator can prepare `.delta-rs-under-test` at that SHA first, then seed same-SHA compare pinning into `.delta-rs-source` from the prepared execution checkout.
 
 Use this page as the stable operator guide, and use the generated artifact under `results/validation/` as the latest machine-local evidence.
 
@@ -99,6 +99,8 @@ Refresh the evidence on the current machine with:
   - execute selected `+152.444 ms`, plan control `+0.819 ms`
 
 The committed source of truth is still the protocol plus the executable entrypoint. Fresh evidence is intentionally generated locally because it depends on the machine, Python environment, and runner class used for the rerun.
+
+Stable gate artifact dirs intentionally select focused follow-on validation so staging and operator reruns stay inside their runtime budget. `results/validation/latest` and timestamped dirs remain the full trust rerun surface.
 
 To refresh the evidence on the current machine, execute:
 

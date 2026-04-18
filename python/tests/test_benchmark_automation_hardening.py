@@ -951,6 +951,118 @@ def test_validation_script_exposes_artifact_dir_contract() -> None:
     assert "summary.md" in script
 
 
+def test_validation_script_plans_focused_gate_suite_sets_from_artifact_dir() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    resolve_scope_block = shell_function_block(script, "resolve_validation_scope")
+    planned_labels_block = shell_function_block(
+        script, "planned_validation_gate_labels"
+    )
+
+    cases = [
+        (
+            "results/validation/write-perf-ready",
+            "medium_selective",
+            "write_perf",
+            "scan write_perf",
+        ),
+        (
+            "results/validation/write-perf-gate",
+            "medium_selective",
+            "write_perf",
+            "scan write_perf",
+        ),
+        (
+            "results/validation/dml-maintenance-gate",
+            "medium_selective",
+            "dml_maintenance",
+            "scan delete_update_perf merge_perf optimize_perf",
+        ),
+        (
+            "results/validation/metadata-perf-gate",
+            "medium_selective",
+            "metadata_perf",
+            "scan metadata_perf",
+        ),
+        (
+            "results/validation/tpcds-gate",
+            "tpcds_duckdb",
+            "tpcds",
+            "scan tpcds",
+        ),
+        (
+            "results/validation/latest",
+            "medium_selective",
+            "full",
+            "scan write_perf delete_update_perf merge_perf optimize_perf metadata_perf",
+        ),
+        (
+            "results/validation/latest",
+            "tpcds_duckdb",
+            "full",
+            "scan write_perf delete_update_perf merge_perf optimize_perf metadata_perf tpcds",
+        ),
+    ]
+
+    for artifact_dir, dataset_id, expected_scope, expected_labels in cases:
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                (
+                    "set -euo pipefail\n"
+                    'TPCDS_VALIDATION_DATASET_ID="tpcds_duckdb"\n'
+                    f"{resolve_scope_block}\n"
+                    f"{planned_labels_block}\n"
+                    'scope="$(resolve_validation_scope "$1")"\n'
+                    'labels="$(planned_validation_gate_labels "$scope" "$2")"\n'
+                    'printf "scope=%s\\n" "$scope"\n'
+                    'printf "labels=%s\\n" "$labels"\n'
+                ),
+                "validation_scope_test",
+                artifact_dir,
+                dataset_id,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert f"scope={expected_scope}" in result.stdout
+        assert f"labels={expected_labels}" in result.stdout
+
+
+def test_validation_script_uses_planned_gate_labels_to_skip_follow_on_validators() -> (
+    None
+):
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'VALIDATION_SCOPE="$(resolve_validation_scope "${VALIDATION_ARTIFACT_DIR}")"' in script
+    assert (
+        'VALIDATION_GATE_LABELS="$(planned_validation_gate_labels "${VALIDATION_SCOPE}" "${VALIDATION_DATASET_ID}")"'
+        in script
+    )
+    assert (
+        'if validation_plan_includes "${VALIDATION_GATE_LABELS}" "write_perf"; then'
+        in script
+    )
+    assert (
+        'if validation_plan_includes "${VALIDATION_GATE_LABELS}" "delete_update_perf"; then'
+        in script
+    )
+    assert (
+        'if validation_plan_includes "${VALIDATION_GATE_LABELS}" "metadata_perf"; then'
+        in script
+    )
+    assert (
+        'if validation_plan_includes "${VALIDATION_GATE_LABELS}" "tpcds"; then'
+        in script
+    )
+    assert "Skipping DML/maintenance gates because validation scope is" in script
+    assert "Skipping metadata_perf gate because validation scope is" in script
+    assert "Skipping tpcds promotion gate because validation scope is" in script
+
+
 def test_validation_script_seeds_same_sha_compare_from_prepared_execution_checkout() -> (
     None
 ):

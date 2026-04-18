@@ -263,11 +263,29 @@ def test_validation_docs_include_metadata_perf_in_validator_scope_summary() -> N
     validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
 
     for line in validation.splitlines():
-        if "`./scripts/validate_perf_harness.sh` reruns" in line:
+        if "`./scripts/validate_perf_harness.sh`" in line and "metadata_perf" in line:
             assert "metadata_perf" in line
+            assert "artifact-dir" in line or "full chain" in line
             break
     else:
         raise AssertionError("missing validator scope summary line")
+
+
+def test_validation_docs_describe_focused_gate_artifact_scopes() -> None:
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+    reference = (DOCS_DIR / "reference.md").read_text(encoding="utf-8")
+
+    combined = "\n".join((validation, reference))
+    for token in (
+        "write-perf-ready",
+        "write-perf-gate",
+        "dml-maintenance-gate",
+        "metadata-perf-gate",
+        "tpcds-gate",
+        "scan trust contract first",
+        "full chain",
+    ):
+        assert token in combined
 
 
 def test_cloud_runner_docs_cover_enforced_workflows_and_required_env() -> None:

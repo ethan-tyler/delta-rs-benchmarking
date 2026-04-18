@@ -494,6 +494,37 @@ raise SystemExit(f"missing case '{case_name}' in regression canary baseline payl
 PY
 }
 
+compute_regression_canary_compare_runs() {
+	local baseline_json="$1"
+	local case_name="$2"
+	local configured_compare_runs="$3"
+	env PYTHONPATH="${PYTHONPATH_DIR}" python3 - \
+		"${baseline_json}" \
+		"${case_name}" \
+		"${configured_compare_runs}" <<'PY'
+import sys
+from pathlib import Path
+
+from delta_bench_compare.schema import load_benchmark_payload
+
+baseline = load_benchmark_payload(Path(sys.argv[1]))
+case_name = sys.argv[2]
+configured_compare_runs = int(sys.argv[3])
+
+if configured_compare_runs < 1:
+    raise SystemExit("configured compare runs must be >= 1")
+
+for case in baseline.get("cases", []):
+    if case.get("case") != case_name:
+        continue
+    required_runs = int(case.get("required_runs") or configured_compare_runs)
+    print(str(max(configured_compare_runs, required_runs)))
+    raise SystemExit(0)
+
+raise SystemExit(f"missing case '{case_name}' in regression canary baseline payload")
+PY
+}
+
 assert_regression_canary_detected() {
 	local baseline_json="$1"
 	local candidate_json="$2"
@@ -664,12 +695,17 @@ scan_regression_delay_ms="$(compute_regression_canary_delay_ms \
 	"$(json_path_for_label "base-${VALIDATION_SHA}" "scan")" \
 	"${VALIDATION_CASE}" \
 	"${VALIDATION_DELAY_MS}")"
+scan_regression_compare_runs="$(compute_regression_canary_compare_runs \
+	"$(json_path_for_label "base-${VALIDATION_SHA}" "scan")" \
+	"${VALIDATION_CASE}" \
+	"${VALIDATION_COMPARE_RUNS}")"
 note "- Scan regression canary delay: ${scan_regression_delay_ms} ms"
+note "- Scan regression canary compare runs: ${scan_regression_compare_runs}"
 
 base_run_labels=()
 cand_run_labels=()
 run_idx=1
-while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
+while ((run_idx <= scan_regression_compare_runs)); do
 	base_label="regression-base-r${run_idx}"
 	cand_label="regression-cand-r${run_idx}"
 	run_scan_case "${base_label}" "execute"
@@ -716,12 +752,17 @@ write_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
 	"$(json_path_for_label "${write_perf_base_label}" "write_perf")" \
 	"${WRITE_PERF_CANARY_CASE}" \
 	"${VALIDATION_WRITE_PERF_DELAY_MS}")"
+write_perf_regression_compare_runs="$(compute_regression_canary_compare_runs \
+	"$(json_path_for_label "${write_perf_base_label}" "write_perf")" \
+	"${WRITE_PERF_CANARY_CASE}" \
+	"${VALIDATION_COMPARE_RUNS}")"
 note "- Write perf regression canary delay: ${write_perf_regression_delay_ms} ms"
+note "- Write perf regression canary compare runs: ${write_perf_regression_compare_runs}"
 
 write_perf_base_run_labels=()
 write_perf_cand_run_labels=()
 run_idx=1
-while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
+while ((run_idx <= write_perf_regression_compare_runs)); do
 	base_label="write-perf-regression-base-r${run_idx}"
 	cand_label="write-perf-regression-cand-r${run_idx}"
 	run_write_perf_case "${base_label}"
@@ -770,12 +811,17 @@ delete_update_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
 	"$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" \
 	"${DELETE_UPDATE_PERF_CANARY_CASE}" \
 	"${VALIDATION_DELETE_UPDATE_PERF_DELAY_MS}")"
+delete_update_perf_regression_compare_runs="$(compute_regression_canary_compare_runs \
+	"$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" \
+	"${DELETE_UPDATE_PERF_CANARY_CASE}" \
+	"${VALIDATION_COMPARE_RUNS}")"
 note "- Delete/update perf regression canary delay: ${delete_update_perf_regression_delay_ms} ms"
+note "- Delete/update perf regression canary compare runs: ${delete_update_perf_regression_compare_runs}"
 
 delete_update_perf_base_run_labels=()
 delete_update_perf_cand_run_labels=()
 run_idx=1
-while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
+while ((run_idx <= delete_update_perf_regression_compare_runs)); do
 	base_label="delete-update-perf-regression-base-r${run_idx}"
 	cand_label="delete-update-perf-regression-cand-r${run_idx}"
 	run_delete_update_perf_case "${base_label}"
@@ -824,12 +870,17 @@ merge_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
 	"$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" \
 	"${MERGE_PERF_CANARY_CASE}" \
 	"${VALIDATION_MERGE_PERF_DELAY_MS}")"
+merge_perf_regression_compare_runs="$(compute_regression_canary_compare_runs \
+	"$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" \
+	"${MERGE_PERF_CANARY_CASE}" \
+	"${VALIDATION_COMPARE_RUNS}")"
 note "- Merge perf regression canary delay: ${merge_perf_regression_delay_ms} ms"
+note "- Merge perf regression canary compare runs: ${merge_perf_regression_compare_runs}"
 
 merge_perf_base_run_labels=()
 merge_perf_cand_run_labels=()
 run_idx=1
-while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
+while ((run_idx <= merge_perf_regression_compare_runs)); do
 	base_label="merge-perf-regression-base-r${run_idx}"
 	cand_label="merge-perf-regression-cand-r${run_idx}"
 	run_merge_perf_case "${base_label}"
@@ -877,12 +928,17 @@ optimize_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
 	"$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" \
 	"${OPTIMIZE_PERF_CANARY_CASE}" \
 	"${VALIDATION_OPTIMIZE_PERF_DELAY_MS}")"
+optimize_perf_regression_compare_runs="$(compute_regression_canary_compare_runs \
+	"$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" \
+	"${OPTIMIZE_PERF_CANARY_CASE}" \
+	"${VALIDATION_COMPARE_RUNS}")"
 note "- Optimize perf regression canary delay: ${optimize_perf_regression_delay_ms} ms"
+note "- Optimize perf regression canary compare runs: ${optimize_perf_regression_compare_runs}"
 
 optimize_perf_base_run_labels=()
 optimize_perf_cand_run_labels=()
 run_idx=1
-while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
+while ((run_idx <= optimize_perf_regression_compare_runs)); do
 	base_label="optimize-perf-regression-base-r${run_idx}"
 	cand_label="optimize-perf-regression-cand-r${run_idx}"
 	run_optimize_perf_case "${base_label}"
@@ -931,12 +987,17 @@ metadata_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
 	"$(json_path_for_label "${metadata_perf_base_label}" "metadata_perf")" \
 	"${METADATA_PERF_CANARY_CASE}" \
 	"${VALIDATION_METADATA_PERF_DELAY_MS}")"
+metadata_perf_regression_compare_runs="$(compute_regression_canary_compare_runs \
+	"$(json_path_for_label "${metadata_perf_base_label}" "metadata_perf")" \
+	"${METADATA_PERF_CANARY_CASE}" \
+	"${VALIDATION_COMPARE_RUNS}")"
 note "- Metadata perf regression canary delay: ${metadata_perf_regression_delay_ms} ms"
+note "- Metadata perf regression canary compare runs: ${metadata_perf_regression_compare_runs}"
 
 metadata_perf_base_run_labels=()
 metadata_perf_cand_run_labels=()
 run_idx=1
-while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
+while ((run_idx <= metadata_perf_regression_compare_runs)); do
 	base_label="metadata-perf-regression-base-r${run_idx}"
 	cand_label="metadata-perf-regression-cand-r${run_idx}"
 	run_metadata_perf_case "${base_label}"
@@ -985,12 +1046,17 @@ if tpcds_validation_enabled; then
 		"$(json_path_for_label "${tpcds_base_label}" "tpcds")" \
 		"${VALIDATION_TPCDS_CASE}" \
 		"${VALIDATION_TPCDS_DELAY_MS}")"
+	tpcds_regression_compare_runs="$(compute_regression_canary_compare_runs \
+		"$(json_path_for_label "${tpcds_base_label}" "tpcds")" \
+		"${VALIDATION_TPCDS_CASE}" \
+		"${VALIDATION_COMPARE_RUNS}")"
 	note "- TPC-DS regression canary delay: ${tpcds_regression_delay_ms} ms"
+	note "- TPC-DS regression canary compare runs: ${tpcds_regression_compare_runs}"
 
 	tpcds_base_run_labels=()
 	tpcds_cand_run_labels=()
 	run_idx=1
-	while ((run_idx <= VALIDATION_COMPARE_RUNS)); do
+	while ((run_idx <= tpcds_regression_compare_runs)); do
 		base_label="tpcds-regression-base-r${run_idx}"
 		cand_label="tpcds-regression-cand-r${run_idx}"
 		run_tpcds_case "${base_label}"

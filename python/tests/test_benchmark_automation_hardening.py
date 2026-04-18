@@ -1360,6 +1360,163 @@ def test_validation_script_regression_canary_delay_helper_scales_slow_baselines(
     assert float(delay_line.removeprefix("delay=")) == pytest.approx(320.0)
 
 
+def test_validation_script_regression_canary_adapts_to_case_required_runs(
+    tmp_path: Path,
+) -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    assert 'scan_regression_compare_runs="$(compute_regression_canary_compare_runs' in script
+    assert "while ((run_idx <= scan_regression_compare_runs)); do" in script
+    compare_runs_function_block = shell_function_block(
+        script, "compute_regression_canary_compare_runs"
+    )
+    delay_function_block = shell_function_block(
+        script, "compute_regression_canary_delay_ms"
+    )
+    assert_function_block = shell_function_block(script, "assert_regression_canary_detected")
+    case_name = "scan_filter_flag"
+
+    baseline_template_json = tmp_path / "baseline-template.json"
+    baseline_selected_json = tmp_path / "baseline-selected.json"
+    candidate_selected_json = tmp_path / "candidate-selected.json"
+    baseline_template_json.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "context": {
+                    "schema_version": 5,
+                    "label": "baseline",
+                    "suite": "scan",
+                    "benchmark_mode": "perf",
+                    "timing_phase": "execute",
+                    "dataset_id": "medium_selective",
+                    "dataset_fingerprint": "sha256:fixture",
+                    "runner": "rust",
+                    "scale": "sf1",
+                    "storage_backend": "local",
+                    "backend_profile": "local",
+                    "lane": "macro",
+                    "measurement_kind": "phase_breakdown",
+                    "validation_level": "operational",
+                    "harness_revision": "harness-rev",
+                    "fixture_recipe_hash": "sha256:recipe",
+                    "fidelity_fingerprint": "sha256:fidelity",
+                },
+                "cases": [
+                    {
+                        "case": case_name,
+                        "success": True,
+                        "validation_passed": True,
+                        "perf_status": "trusted",
+                        "classification": "supported",
+                        "samples": [{"elapsed_ms": 84.0, "metrics": {}}],
+                        "run_summary": {
+                            "sample_count": 1,
+                            "invalid_sample_count": 0,
+                            "median_ms": 84.0,
+                            "host_label": "bench-host",
+                            "fidelity_fingerprint": "sha256:fidelity",
+                        },
+                        "run_summaries": [
+                            {
+                                "sample_count": 1,
+                                "invalid_sample_count": 0,
+                                "median_ms": value,
+                                "host_label": "bench-host",
+                                "fidelity_fingerprint": "sha256:fidelity",
+                            }
+                            for value in [82.0, 83.0, 84.0, 85.0, 86.0, 87.0, 88.0]
+                        ],
+                        "compatibility_key": "sha256:good",
+                        "supports_decision": True,
+                        "required_runs": 7,
+                        "decision_threshold_pct": 5.0,
+                        "decision_metric": "median",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                "set -euo pipefail\n"
+                f'PYTHONPATH_DIR="{REPO_ROOT / "python"}"\n'
+                f"{compare_runs_function_block}\n"
+                f"{delay_function_block}\n"
+                f"{assert_function_block}\n"
+                'runs="$(compute_regression_canary_compare_runs "$1" "$2" "$3")"\n'
+                'delay="$(compute_regression_canary_delay_ms "$1" "$2" "$4")"\n'
+                'python3 - "$1" "$2" "$runs" "$delay" "$5" "$6" <<\'PY\'\n'
+                "import json\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "\n"
+                "template = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\n"
+                "case_name = sys.argv[2]\n"
+                "run_count = int(sys.argv[3])\n"
+                "delay_ms = float(sys.argv[4])\n"
+                "baseline_out = Path(sys.argv[5])\n"
+                "candidate_out = Path(sys.argv[6])\n"
+                "\n"
+                "baseline = json.loads(json.dumps(template))\n"
+                "candidate = json.loads(json.dumps(template))\n"
+                "baseline_case = baseline['cases'][0]\n"
+                "candidate_case = candidate['cases'][0]\n"
+                "assert baseline_case['case'] == case_name\n"
+                "baseline_case['run_summaries'] = baseline_case['run_summaries'][:run_count]\n"
+                "baseline_medians = [\n"
+                "    float(summary['median_ms']) for summary in baseline_case['run_summaries']\n"
+                "]\n"
+                "baseline_case['run_summary']['median_ms'] = baseline_medians[len(baseline_medians) // 2]\n"
+                "baseline_case['samples'] = [\n"
+                "    {'elapsed_ms': value, 'metrics': {}} for value in baseline_medians\n"
+                "]\n"
+                "candidate['context']['label'] = 'candidate'\n"
+                "candidate_case['run_summaries'] = [\n"
+                "    {\n"
+                "        **summary,\n"
+                "        'median_ms': float(summary['median_ms']) + delay_ms,\n"
+                "    }\n"
+                "    for summary in candidate_case['run_summaries'][:run_count]\n"
+                "]\n"
+                "candidate_medians = [\n"
+                "    float(summary['median_ms']) for summary in candidate_case['run_summaries']\n"
+                "]\n"
+                "candidate_case['run_summary']['median_ms'] = candidate_medians[len(candidate_medians) // 2]\n"
+                "candidate_case['samples'] = [\n"
+                "    {'elapsed_ms': value, 'metrics': {}} for value in candidate_medians\n"
+                "]\n"
+                "baseline_out.write_text(json.dumps(baseline), encoding='utf-8')\n"
+                "candidate_out.write_text(json.dumps(candidate), encoding='utf-8')\n"
+                "PY\n"
+                'assert_regression_canary_detected "$5" "$6" "$2"\n'
+                'printf "runs=%s\\n" "$runs"\n'
+            ),
+            "compute_regression_canary_compare_runs_test",
+            str(baseline_template_json),
+            case_name,
+            "5",
+            "150",
+            str(baseline_selected_json),
+            str(candidate_selected_json),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"Regression canary: {case_name} classified as regression" in result.stdout
+    runs_line = next(
+        line for line in result.stdout.splitlines() if line.startswith("runs=")
+    )
+    assert int(runs_line.removeprefix("runs=")) == 7
+
+
 def test_validation_script_regression_canary_delay_helper_emits_env_safe_integer_delay(
     tmp_path: Path,
 ) -> None:

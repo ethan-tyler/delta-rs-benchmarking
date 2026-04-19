@@ -1063,6 +1063,118 @@ def test_validation_script_uses_planned_gate_labels_to_skip_follow_on_validators
     assert "Skipping tpcds promotion gate because validation scope is" in script
 
 
+def test_validation_script_uses_canary_only_same_sha_mode_for_dml_maintenance_scope() -> (
+    None
+):
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    function_block = shell_function_block(script, "validation_same_sha_mode_for_suite")
+
+    cases = [
+        ("dml_maintenance", "delete_update_perf", "canary_only"),
+        ("dml_maintenance", "merge_perf", "canary_only"),
+        ("dml_maintenance", "optimize_perf", "canary_only"),
+        ("full", "delete_update_perf", "full_suite"),
+        ("full", "merge_perf", "full_suite"),
+        ("full", "optimize_perf", "full_suite"),
+        ("write_perf", "write_perf", "full_suite"),
+    ]
+
+    for scope, suite, expected in cases:
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                (
+                    "set -euo pipefail\n"
+                    f"{function_block}\n"
+                    'mode="$(validation_same_sha_mode_for_suite "$1" "$2")"\n'
+                    'printf "mode=%s\\n" "$mode"\n'
+                ),
+                "validation_same_sha_mode_for_suite_test",
+                scope,
+                suite,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == f"mode={expected}"
+
+
+def test_validation_script_uses_reduced_dml_canary_iterations_for_dml_scope() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    function_block = shell_function_block(script, "validation_canary_iterations_for_suite")
+
+    cases = [
+        ("dml_maintenance", "delete_update_perf", "1"),
+        ("dml_maintenance", "merge_perf", "1"),
+        ("dml_maintenance", "optimize_perf", "1"),
+        ("full", "delete_update_perf", "3"),
+        ("full", "merge_perf", "3"),
+        ("full", "optimize_perf", "3"),
+        ("write_perf", "write_perf", "3"),
+        ("metadata_perf", "metadata_perf", "3"),
+    ]
+
+    for scope, suite, expected in cases:
+        result = subprocess.run(
+            [
+                "bash",
+                "-c",
+                (
+                    "set -euo pipefail\n"
+                    'VALIDATION_CANARY_ITERS="3"\n'
+                    'VALIDATION_DML_CANARY_ITERS="1"\n'
+                    f"{function_block}\n"
+                    'iters="$(validation_canary_iterations_for_suite "$1" "$2")"\n'
+                    'printf "iters=%s\\n" "$iters"\n'
+                ),
+                "validation_canary_iterations_for_suite_test",
+                scope,
+                suite,
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == f"iters={expected}"
+
+
+def test_validation_script_uses_budgeted_presence_probe_fast_path_for_dml_scope() -> (
+    None
+):
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    assert "run_primary_suite_presence_probe" in script
+    for suite, presence_label, same_sha_banner in (
+        (
+            "delete_update_perf",
+            'delete_update_perf_presence_label="delete-update-perf-presence"',
+            "Running delete_update_perf same-SHA canary compare...",
+        ),
+        (
+            "merge_perf",
+            'merge_perf_presence_label="merge-perf-presence"',
+            "Running merge_perf same-SHA canary compare...",
+        ),
+        (
+            "optimize_perf",
+            'optimize_perf_presence_label="optimize-perf-presence"',
+            "Running optimize_perf same-SHA canary compare...",
+        ),
+    ):
+        assert (
+            f'validation_same_sha_mode_for_suite "${{VALIDATION_SCOPE}}" "{suite}"'
+            in script
+        )
+        assert presence_label in script
+        assert same_sha_banner in script
+
+
 def test_validation_script_seeds_same_sha_compare_from_prepared_execution_checkout() -> (
     None
 ):

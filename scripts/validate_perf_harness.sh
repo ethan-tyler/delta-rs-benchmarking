@@ -19,6 +19,7 @@ VALIDATION_WARMUP="${VALIDATION_WARMUP:-1}"
 VALIDATION_ITERS="${VALIDATION_ITERS:-5}"
 VALIDATION_PREWARM_ITERS="${VALIDATION_PREWARM_ITERS:-1}"
 VALIDATION_CANARY_ITERS="${VALIDATION_CANARY_ITERS:-3}"
+VALIDATION_DML_CANARY_ITERS="${VALIDATION_DML_CANARY_ITERS:-1}"
 VALIDATION_DELAY_MS="${VALIDATION_DELAY_MS:-150}"
 VALIDATION_WRITE_PERF_DELAY_MS="${VALIDATION_WRITE_PERF_DELAY_MS:-${VALIDATION_DELAY_MS}}"
 WRITE_PERF_CANARY_CASE="write_perf_unpartitioned_1m"
@@ -52,7 +53,7 @@ Options:
 Advanced tuning is available through environment variables:
   VALIDATION_COMPARE_RUNS, VALIDATION_WARMUP, VALIDATION_ITERS,
   VALIDATION_PREWARM_ITERS, VALIDATION_CANARY_ITERS, VALIDATION_DELAY_MS,
-  VALIDATION_CASE, VALIDATION_WRITE_PERF_DELAY_MS,
+  VALIDATION_DML_CANARY_ITERS, VALIDATION_CASE, VALIDATION_WRITE_PERF_DELAY_MS,
   VALIDATION_DELETE_UPDATE_PERF_DELAY_MS, VALIDATION_MERGE_PERF_DELAY_MS,
   VALIDATION_OPTIMIZE_PERF_DELAY_MS, VALIDATION_METADATA_PERF_DELAY_MS,
   VALIDATION_TPCDS_CASE, VALIDATION_TPCDS_DELAY_MS, VALIDATION_FETCH_URL,
@@ -134,6 +135,34 @@ validation_plan_includes() {
 	case " ${planned_labels} " in
 	*" ${suite} "*) return 0 ;;
 	*) return 1 ;;
+	esac
+}
+
+validation_same_sha_mode_for_suite() {
+	local scope="$1"
+	local suite="$2"
+
+	case "${scope}:${suite}" in
+	dml_maintenance:delete_update_perf | dml_maintenance:merge_perf | dml_maintenance:optimize_perf)
+		printf 'canary_only\n'
+		;;
+	*)
+		printf 'full_suite\n'
+		;;
+	esac
+}
+
+validation_canary_iterations_for_suite() {
+	local scope="$1"
+	local suite="$2"
+
+	case "${scope}:${suite}" in
+	dml_maintenance:delete_update_perf | dml_maintenance:merge_perf | dml_maintenance:optimize_perf)
+		printf '%s\n' "${VALIDATION_DML_CANARY_ITERS}"
+		;;
+	*)
+		printf '%s\n' "${VALIDATION_CANARY_ITERS}"
+		;;
 	esac
 }
 
@@ -285,7 +314,7 @@ run_delete_update_perf_case() {
 		--dataset-id "${PRIMARY_VALIDATION_DATASET_ID}" \
 		--timing-phase execute \
 		--warmup 0 \
-		--iters "${VALIDATION_CANARY_ITERS}" \
+		--iters "$(validation_canary_iterations_for_suite "${VALIDATION_SCOPE}" "delete_update_perf")" \
 		--label "${label}" \
 		--no-summary-table >/dev/null
 }
@@ -309,7 +338,7 @@ run_merge_perf_case() {
 		--dataset-id "${PRIMARY_VALIDATION_DATASET_ID}" \
 		--timing-phase execute \
 		--warmup 0 \
-		--iters "${VALIDATION_CANARY_ITERS}" \
+		--iters "$(validation_canary_iterations_for_suite "${VALIDATION_SCOPE}" "merge_perf")" \
 		--label "${label}" \
 		--no-summary-table >/dev/null
 }
@@ -333,7 +362,29 @@ run_optimize_perf_case() {
 		--dataset-id "${PRIMARY_VALIDATION_DATASET_ID}" \
 		--timing-phase execute \
 		--warmup 0 \
-		--iters "${VALIDATION_CANARY_ITERS}" \
+		--iters "$(validation_canary_iterations_for_suite "${VALIDATION_SCOPE}" "optimize_perf")" \
+		--label "${label}" \
+		--no-summary-table >/dev/null
+}
+
+run_primary_suite_presence_probe() {
+	local suite="$1"
+	local label="$2"
+
+	env \
+		DELTA_RS_DIR="${DELTA_RS_DIR}" \
+		DELTA_BENCH_EXEC_ROOT="${DELTA_RS_DIR}" \
+		DELTA_BENCH_FIXTURES="${PRIMARY_FIXTURES_DIR}" \
+		DELTA_BENCH_RESULTS="${RESULTS_DIR}" \
+		"${SCRIPT_DIR}/bench.sh" run \
+		--suite "${suite}" \
+		--runner rust \
+		--lane macro \
+		--mode perf \
+		--dataset-id "${PRIMARY_VALIDATION_DATASET_ID}" \
+		--timing-phase execute \
+		--warmup 0 \
+		--iters 1 \
 		--label "${label}" \
 		--no-summary-table >/dev/null
 }
@@ -401,6 +452,56 @@ aggregate_suite_labels() {
 		--output "$(json_path_for_label "${output_label}" "${suite}")" \
 		--label "${output_label}" \
 		"${input_paths[@]}" >/dev/null
+}
+
+run_same_sha_canary_compare() {
+	local suite="$1"
+	local run_func="$2"
+	local compare_runs="$3"
+	local base_aggregate_label="$4"
+	local cand_aggregate_label="$5"
+	local base_run_labels=()
+	local cand_run_labels=()
+	local run_idx=1
+
+	while ((run_idx <= compare_runs)); do
+		local base_label="${base_aggregate_label}-r${run_idx}"
+		local cand_label="${cand_aggregate_label}-r${run_idx}"
+		"${run_func}" "${base_label}"
+		"${run_func}" "${cand_label}"
+		base_run_labels+=("${base_label}")
+		cand_run_labels+=("${cand_label}")
+		run_idx=$((run_idx + 1))
+	done
+
+	aggregate_suite_labels "${suite}" "${base_aggregate_label}" "${base_run_labels[@]}"
+	aggregate_suite_labels "${suite}" "${cand_aggregate_label}" "${cand_run_labels[@]}"
+}
+
+run_delayed_canary_compare() {
+	local suite="$1"
+	local run_func="$2"
+	local compare_runs="$3"
+	local base_aggregate_label="$4"
+	local cand_aggregate_label="$5"
+	shift 5
+	local delayed_env=("$@")
+	local base_run_labels=()
+	local cand_run_labels=()
+	local run_idx=1
+
+	while ((run_idx <= compare_runs)); do
+		local base_label="${base_aggregate_label}-r${run_idx}"
+		local cand_label="${cand_aggregate_label}-r${run_idx}"
+		"${run_func}" "${base_label}"
+		"${run_func}" "${cand_label}" "${delayed_env[@]}"
+		base_run_labels+=("${base_label}")
+		cand_run_labels+=("${cand_label}")
+		run_idx=$((run_idx + 1))
+	done
+
+	aggregate_suite_labels "${suite}" "${base_aggregate_label}" "${base_run_labels[@]}"
+	aggregate_suite_labels "${suite}" "${cand_aggregate_label}" "${cand_run_labels[@]}"
 }
 
 assert_same_sha_compare_is_fail_closed() {
@@ -862,58 +963,84 @@ fi
 
 if validation_plan_includes "${VALIDATION_GATE_LABELS}" "delete_update_perf"; then
 	note ""
-	note "Running delete_update_perf same-SHA branch compare..."
-	delete_update_perf_same_sha_log="${LOG_DIR}/delete_update_perf_same_sha_compare.log"
-	delete_update_perf_base_label="base-${VALIDATION_SHA}"
-	delete_update_perf_cand_label="cand-${VALIDATION_SHA}"
-	env \
-		DELTA_BENCH_FIXTURES="${PRIMARY_FIXTURES_DIR}" \
-		DELTA_BENCH_RESULTS="${RESULTS_DIR}" \
-		"${SCRIPT_DIR}/compare_branch.sh" \
-		"${same_sha_compare_args[@]}" \
-		--methodology-profile pr-delete-update-perf \
-		delete_update_perf | tee "${delete_update_perf_same_sha_log}"
+	delete_update_perf_same_sha_mode="$(validation_same_sha_mode_for_suite "${VALIDATION_SCOPE}" "delete_update_perf")"
+	delete_update_perf_regression_baseline_json=""
+	if [[ "${delete_update_perf_same_sha_mode}" == "canary_only" ]]; then
+		delete_update_perf_presence_label="delete-update-perf-presence"
+		note "Running delete_update_perf suite coverage probe..."
+		run_primary_suite_presence_probe "delete_update_perf" "${delete_update_perf_presence_label}"
+		delete_update_perf_case_presence_status="$(assert_payload_contains_cases \
+			"$(json_path_for_label "${delete_update_perf_presence_label}" "delete_update_perf")" \
+			"delete_perf_localized_1pct" \
+			"${DELETE_UPDATE_PERF_CANARY_CASE}" \
+			"update_perf_literal_5pct_scattered" \
+			"update_perf_all_rows_expr")"
+		note "${delete_update_perf_case_presence_status}"
 
-	delete_update_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed "$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" "$(json_path_for_label "${delete_update_perf_cand_label}" "delete_update_perf")")"
-	note "${delete_update_perf_same_sha_status}"
-	delete_update_perf_case_presence_status="$(assert_payload_contains_cases \
-		"$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" \
-		"delete_perf_localized_1pct" \
-		"${DELETE_UPDATE_PERF_CANARY_CASE}" \
-		"update_perf_literal_5pct_scattered" \
-		"update_perf_all_rows_expr")"
-	note "${delete_update_perf_case_presence_status}"
+		delete_update_perf_same_sha_compare_runs="$(compute_regression_canary_compare_runs \
+			"$(json_path_for_label "${delete_update_perf_presence_label}" "delete_update_perf")" \
+			"${DELETE_UPDATE_PERF_CANARY_CASE}" \
+			"${VALIDATION_COMPARE_RUNS}")"
+		note ""
+		note "Running delete_update_perf same-SHA canary compare..."
+		note "- Delete/update perf same-SHA canary compare runs: ${delete_update_perf_same_sha_compare_runs}"
+		run_same_sha_canary_compare \
+			"delete_update_perf" \
+			"run_delete_update_perf_case" \
+			"${delete_update_perf_same_sha_compare_runs}" \
+			"delete-update-perf-same-sha-base" \
+			"delete-update-perf-same-sha-cand"
+		delete_update_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed \
+			"$(json_path_for_label "delete-update-perf-same-sha-base" "delete_update_perf")" \
+			"$(json_path_for_label "delete-update-perf-same-sha-cand" "delete_update_perf")")"
+		note "${delete_update_perf_same_sha_status}"
+		delete_update_perf_regression_baseline_json="$(json_path_for_label "delete-update-perf-same-sha-base" "delete_update_perf")"
+	else
+		note "Running delete_update_perf same-SHA branch compare..."
+		delete_update_perf_same_sha_log="${LOG_DIR}/delete_update_perf_same_sha_compare.log"
+		delete_update_perf_base_label="base-${VALIDATION_SHA}"
+		delete_update_perf_cand_label="cand-${VALIDATION_SHA}"
+		env \
+			DELTA_BENCH_FIXTURES="${PRIMARY_FIXTURES_DIR}" \
+			DELTA_BENCH_RESULTS="${RESULTS_DIR}" \
+			"${SCRIPT_DIR}/compare_branch.sh" \
+			"${same_sha_compare_args[@]}" \
+			--methodology-profile pr-delete-update-perf \
+			delete_update_perf | tee "${delete_update_perf_same_sha_log}"
+
+		delete_update_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed "$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" "$(json_path_for_label "${delete_update_perf_cand_label}" "delete_update_perf")")"
+		note "${delete_update_perf_same_sha_status}"
+		delete_update_perf_case_presence_status="$(assert_payload_contains_cases \
+			"$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" \
+			"delete_perf_localized_1pct" \
+			"${DELETE_UPDATE_PERF_CANARY_CASE}" \
+			"update_perf_literal_5pct_scattered" \
+			"update_perf_all_rows_expr")"
+		note "${delete_update_perf_case_presence_status}"
+		delete_update_perf_regression_baseline_json="$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")"
+	fi
 
 	note ""
 	note "Running delete_update_perf regression-detection canary..."
 	delete_update_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
-		"$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" \
+		"${delete_update_perf_regression_baseline_json}" \
 		"${DELETE_UPDATE_PERF_CANARY_CASE}" \
 		"${VALIDATION_DELETE_UPDATE_PERF_DELAY_MS}")"
 	delete_update_perf_regression_compare_runs="$(compute_regression_canary_compare_runs \
-		"$(json_path_for_label "${delete_update_perf_base_label}" "delete_update_perf")" \
+		"${delete_update_perf_regression_baseline_json}" \
 		"${DELETE_UPDATE_PERF_CANARY_CASE}" \
 		"${VALIDATION_COMPARE_RUNS}")"
 	note "- Delete/update perf regression canary delay: ${delete_update_perf_regression_delay_ms} ms"
 	note "- Delete/update perf regression canary compare runs: ${delete_update_perf_regression_compare_runs}"
 
-	delete_update_perf_base_run_labels=()
-	delete_update_perf_cand_run_labels=()
-	run_idx=1
-	while ((run_idx <= delete_update_perf_regression_compare_runs)); do
-		base_label="delete-update-perf-regression-base-r${run_idx}"
-		cand_label="delete-update-perf-regression-cand-r${run_idx}"
-		run_delete_update_perf_case "${base_label}"
-		run_delete_update_perf_case "${cand_label}" \
-			"DELTA_BENCH_ALLOW_DELETE_UPDATE_PERF_DELAY=1" \
-			"DELTA_BENCH_DELETE_UPDATE_PERF_DELAY_MS=${delete_update_perf_regression_delay_ms}"
-		delete_update_perf_base_run_labels+=("${base_label}")
-		delete_update_perf_cand_run_labels+=("${cand_label}")
-		run_idx=$((run_idx + 1))
-	done
-
-	aggregate_suite_labels "delete_update_perf" "delete-update-perf-regression-base" "${delete_update_perf_base_run_labels[@]}"
-	aggregate_suite_labels "delete_update_perf" "delete-update-perf-regression-cand" "${delete_update_perf_cand_run_labels[@]}"
+	run_delayed_canary_compare \
+		"delete_update_perf" \
+		"run_delete_update_perf_case" \
+		"${delete_update_perf_regression_compare_runs}" \
+		"delete-update-perf-regression-base" \
+		"delete-update-perf-regression-cand" \
+		"DELTA_BENCH_ALLOW_DELETE_UPDATE_PERF_DELAY=1" \
+		"DELTA_BENCH_DELETE_UPDATE_PERF_DELAY_MS=${delete_update_perf_regression_delay_ms}"
 	delete_update_perf_regression_status="$(assert_regression_canary_detected \
 		"$(json_path_for_label "delete-update-perf-regression-base" "delete_update_perf")" \
 		"$(json_path_for_label "delete-update-perf-regression-cand" "delete_update_perf")" \
@@ -921,58 +1048,84 @@ if validation_plan_includes "${VALIDATION_GATE_LABELS}" "delete_update_perf"; th
 	note "${delete_update_perf_regression_status}"
 
 	note ""
-	note "Running merge_perf same-SHA branch compare..."
-	merge_perf_same_sha_log="${LOG_DIR}/merge_perf_same_sha_compare.log"
-	merge_perf_base_label="base-${VALIDATION_SHA}"
-	merge_perf_cand_label="cand-${VALIDATION_SHA}"
-	env \
-		DELTA_BENCH_FIXTURES="${PRIMARY_FIXTURES_DIR}" \
-		DELTA_BENCH_RESULTS="${RESULTS_DIR}" \
-		"${SCRIPT_DIR}/compare_branch.sh" \
-		"${same_sha_compare_args[@]}" \
-		--methodology-profile pr-merge-perf \
-		merge_perf | tee "${merge_perf_same_sha_log}"
+	merge_perf_same_sha_mode="$(validation_same_sha_mode_for_suite "${VALIDATION_SCOPE}" "merge_perf")"
+	merge_perf_regression_baseline_json=""
+	if [[ "${merge_perf_same_sha_mode}" == "canary_only" ]]; then
+		merge_perf_presence_label="merge-perf-presence"
+		note "Running merge_perf suite coverage probe..."
+		run_primary_suite_presence_probe "merge_perf" "${merge_perf_presence_label}"
+		merge_perf_case_presence_status="$(assert_payload_contains_cases \
+			"$(json_path_for_label "${merge_perf_presence_label}" "merge_perf")" \
+			"merge_perf_upsert_10pct" \
+			"${MERGE_PERF_CANARY_CASE}" \
+			"merge_perf_localized_1pct" \
+			"merge_perf_delete_5pct")"
+		note "${merge_perf_case_presence_status}"
 
-	merge_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed "$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" "$(json_path_for_label "${merge_perf_cand_label}" "merge_perf")")"
-	note "${merge_perf_same_sha_status}"
-	merge_perf_case_presence_status="$(assert_payload_contains_cases \
-		"$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" \
-		"merge_perf_upsert_10pct" \
-		"${MERGE_PERF_CANARY_CASE}" \
-		"merge_perf_localized_1pct" \
-		"merge_perf_delete_5pct")"
-	note "${merge_perf_case_presence_status}"
+		merge_perf_same_sha_compare_runs="$(compute_regression_canary_compare_runs \
+			"$(json_path_for_label "${merge_perf_presence_label}" "merge_perf")" \
+			"${MERGE_PERF_CANARY_CASE}" \
+			"${VALIDATION_COMPARE_RUNS}")"
+		note ""
+		note "Running merge_perf same-SHA canary compare..."
+		note "- Merge perf same-SHA canary compare runs: ${merge_perf_same_sha_compare_runs}"
+		run_same_sha_canary_compare \
+			"merge_perf" \
+			"run_merge_perf_case" \
+			"${merge_perf_same_sha_compare_runs}" \
+			"merge-perf-same-sha-base" \
+			"merge-perf-same-sha-cand"
+		merge_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed \
+			"$(json_path_for_label "merge-perf-same-sha-base" "merge_perf")" \
+			"$(json_path_for_label "merge-perf-same-sha-cand" "merge_perf")")"
+		note "${merge_perf_same_sha_status}"
+		merge_perf_regression_baseline_json="$(json_path_for_label "merge-perf-same-sha-base" "merge_perf")"
+	else
+		note "Running merge_perf same-SHA branch compare..."
+		merge_perf_same_sha_log="${LOG_DIR}/merge_perf_same_sha_compare.log"
+		merge_perf_base_label="base-${VALIDATION_SHA}"
+		merge_perf_cand_label="cand-${VALIDATION_SHA}"
+		env \
+			DELTA_BENCH_FIXTURES="${PRIMARY_FIXTURES_DIR}" \
+			DELTA_BENCH_RESULTS="${RESULTS_DIR}" \
+			"${SCRIPT_DIR}/compare_branch.sh" \
+			"${same_sha_compare_args[@]}" \
+			--methodology-profile pr-merge-perf \
+			merge_perf | tee "${merge_perf_same_sha_log}"
+
+		merge_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed "$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" "$(json_path_for_label "${merge_perf_cand_label}" "merge_perf")")"
+		note "${merge_perf_same_sha_status}"
+		merge_perf_case_presence_status="$(assert_payload_contains_cases \
+			"$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" \
+			"merge_perf_upsert_10pct" \
+			"${MERGE_PERF_CANARY_CASE}" \
+			"merge_perf_localized_1pct" \
+			"merge_perf_delete_5pct")"
+		note "${merge_perf_case_presence_status}"
+		merge_perf_regression_baseline_json="$(json_path_for_label "${merge_perf_base_label}" "merge_perf")"
+	fi
 
 	note ""
 	note "Running merge_perf regression-detection canary..."
 	merge_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
-		"$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" \
+		"${merge_perf_regression_baseline_json}" \
 		"${MERGE_PERF_CANARY_CASE}" \
 		"${VALIDATION_MERGE_PERF_DELAY_MS}")"
 	merge_perf_regression_compare_runs="$(compute_regression_canary_compare_runs \
-		"$(json_path_for_label "${merge_perf_base_label}" "merge_perf")" \
+		"${merge_perf_regression_baseline_json}" \
 		"${MERGE_PERF_CANARY_CASE}" \
 		"${VALIDATION_COMPARE_RUNS}")"
 	note "- Merge perf regression canary delay: ${merge_perf_regression_delay_ms} ms"
 	note "- Merge perf regression canary compare runs: ${merge_perf_regression_compare_runs}"
 
-	merge_perf_base_run_labels=()
-	merge_perf_cand_run_labels=()
-	run_idx=1
-	while ((run_idx <= merge_perf_regression_compare_runs)); do
-		base_label="merge-perf-regression-base-r${run_idx}"
-		cand_label="merge-perf-regression-cand-r${run_idx}"
-		run_merge_perf_case "${base_label}"
-		run_merge_perf_case "${cand_label}" \
-			"DELTA_BENCH_ALLOW_MERGE_PERF_DELAY=1" \
-			"DELTA_BENCH_MERGE_PERF_DELAY_MS=${merge_perf_regression_delay_ms}"
-		merge_perf_base_run_labels+=("${base_label}")
-		merge_perf_cand_run_labels+=("${cand_label}")
-		run_idx=$((run_idx + 1))
-	done
-
-	aggregate_suite_labels "merge_perf" "merge-perf-regression-base" "${merge_perf_base_run_labels[@]}"
-	aggregate_suite_labels "merge_perf" "merge-perf-regression-cand" "${merge_perf_cand_run_labels[@]}"
+	run_delayed_canary_compare \
+		"merge_perf" \
+		"run_merge_perf_case" \
+		"${merge_perf_regression_compare_runs}" \
+		"merge-perf-regression-base" \
+		"merge-perf-regression-cand" \
+		"DELTA_BENCH_ALLOW_MERGE_PERF_DELAY=1" \
+		"DELTA_BENCH_MERGE_PERF_DELAY_MS=${merge_perf_regression_delay_ms}"
 	merge_perf_regression_status="$(assert_regression_canary_detected \
 		"$(json_path_for_label "merge-perf-regression-base" "merge_perf")" \
 		"$(json_path_for_label "merge-perf-regression-cand" "merge_perf")" \
@@ -980,57 +1133,82 @@ if validation_plan_includes "${VALIDATION_GATE_LABELS}" "delete_update_perf"; th
 	note "${merge_perf_regression_status}"
 
 	note ""
-	note "Running optimize_perf same-SHA branch compare..."
-	optimize_perf_same_sha_log="${LOG_DIR}/optimize_perf_same_sha_compare.log"
-	optimize_perf_base_label="base-${VALIDATION_SHA}"
-	optimize_perf_cand_label="cand-${VALIDATION_SHA}"
-	env \
-		DELTA_BENCH_FIXTURES="${PRIMARY_FIXTURES_DIR}" \
-		DELTA_BENCH_RESULTS="${RESULTS_DIR}" \
-		"${SCRIPT_DIR}/compare_branch.sh" \
-		"${same_sha_compare_args[@]}" \
-		--methodology-profile pr-optimize-perf \
-		optimize_perf | tee "${optimize_perf_same_sha_log}"
+	optimize_perf_same_sha_mode="$(validation_same_sha_mode_for_suite "${VALIDATION_SCOPE}" "optimize_perf")"
+	optimize_perf_regression_baseline_json=""
+	if [[ "${optimize_perf_same_sha_mode}" == "canary_only" ]]; then
+		optimize_perf_presence_label="optimize-perf-presence"
+		note "Running optimize_perf suite coverage probe..."
+		run_primary_suite_presence_probe "optimize_perf" "${optimize_perf_presence_label}"
+		optimize_perf_case_presence_status="$(assert_payload_contains_cases \
+			"$(json_path_for_label "${optimize_perf_presence_label}" "optimize_perf")" \
+			"${OPTIMIZE_PERF_CANARY_CASE}" \
+			"optimize_perf_noop_already_compact" \
+			"vacuum_perf_execute_lite")"
+		note "${optimize_perf_case_presence_status}"
 
-	optimize_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed "$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" "$(json_path_for_label "${optimize_perf_cand_label}" "optimize_perf")")"
-	note "${optimize_perf_same_sha_status}"
-	optimize_perf_case_presence_status="$(assert_payload_contains_cases \
-		"$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" \
-		"${OPTIMIZE_PERF_CANARY_CASE}" \
-		"optimize_perf_noop_already_compact" \
-		"vacuum_perf_execute_lite")"
-	note "${optimize_perf_case_presence_status}"
+		optimize_perf_same_sha_compare_runs="$(compute_regression_canary_compare_runs \
+			"$(json_path_for_label "${optimize_perf_presence_label}" "optimize_perf")" \
+			"${OPTIMIZE_PERF_CANARY_CASE}" \
+			"${VALIDATION_COMPARE_RUNS}")"
+		note ""
+		note "Running optimize_perf same-SHA canary compare..."
+		note "- Optimize perf same-SHA canary compare runs: ${optimize_perf_same_sha_compare_runs}"
+		run_same_sha_canary_compare \
+			"optimize_perf" \
+			"run_optimize_perf_case" \
+			"${optimize_perf_same_sha_compare_runs}" \
+			"optimize-perf-same-sha-base" \
+			"optimize-perf-same-sha-cand"
+		optimize_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed \
+			"$(json_path_for_label "optimize-perf-same-sha-base" "optimize_perf")" \
+			"$(json_path_for_label "optimize-perf-same-sha-cand" "optimize_perf")")"
+		note "${optimize_perf_same_sha_status}"
+		optimize_perf_regression_baseline_json="$(json_path_for_label "optimize-perf-same-sha-base" "optimize_perf")"
+	else
+		note "Running optimize_perf same-SHA branch compare..."
+		optimize_perf_same_sha_log="${LOG_DIR}/optimize_perf_same_sha_compare.log"
+		optimize_perf_base_label="base-${VALIDATION_SHA}"
+		optimize_perf_cand_label="cand-${VALIDATION_SHA}"
+		env \
+			DELTA_BENCH_FIXTURES="${PRIMARY_FIXTURES_DIR}" \
+			DELTA_BENCH_RESULTS="${RESULTS_DIR}" \
+			"${SCRIPT_DIR}/compare_branch.sh" \
+			"${same_sha_compare_args[@]}" \
+			--methodology-profile pr-optimize-perf \
+			optimize_perf | tee "${optimize_perf_same_sha_log}"
+
+		optimize_perf_same_sha_status="$(assert_same_sha_compare_is_fail_closed "$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" "$(json_path_for_label "${optimize_perf_cand_label}" "optimize_perf")")"
+		note "${optimize_perf_same_sha_status}"
+		optimize_perf_case_presence_status="$(assert_payload_contains_cases \
+			"$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" \
+			"${OPTIMIZE_PERF_CANARY_CASE}" \
+			"optimize_perf_noop_already_compact" \
+			"vacuum_perf_execute_lite")"
+		note "${optimize_perf_case_presence_status}"
+		optimize_perf_regression_baseline_json="$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")"
+	fi
 
 	note ""
 	note "Running optimize_perf regression-detection canary..."
 	optimize_perf_regression_delay_ms="$(compute_regression_canary_delay_ms \
-		"$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" \
+		"${optimize_perf_regression_baseline_json}" \
 		"${OPTIMIZE_PERF_CANARY_CASE}" \
 		"${VALIDATION_OPTIMIZE_PERF_DELAY_MS}")"
 	optimize_perf_regression_compare_runs="$(compute_regression_canary_compare_runs \
-		"$(json_path_for_label "${optimize_perf_base_label}" "optimize_perf")" \
+		"${optimize_perf_regression_baseline_json}" \
 		"${OPTIMIZE_PERF_CANARY_CASE}" \
 		"${VALIDATION_COMPARE_RUNS}")"
 	note "- Optimize perf regression canary delay: ${optimize_perf_regression_delay_ms} ms"
 	note "- Optimize perf regression canary compare runs: ${optimize_perf_regression_compare_runs}"
 
-	optimize_perf_base_run_labels=()
-	optimize_perf_cand_run_labels=()
-	run_idx=1
-	while ((run_idx <= optimize_perf_regression_compare_runs)); do
-		base_label="optimize-perf-regression-base-r${run_idx}"
-		cand_label="optimize-perf-regression-cand-r${run_idx}"
-		run_optimize_perf_case "${base_label}"
-		run_optimize_perf_case "${cand_label}" \
-			"DELTA_BENCH_ALLOW_OPTIMIZE_PERF_DELAY=1" \
-			"DELTA_BENCH_OPTIMIZE_PERF_DELAY_MS=${optimize_perf_regression_delay_ms}"
-		optimize_perf_base_run_labels+=("${base_label}")
-		optimize_perf_cand_run_labels+=("${cand_label}")
-		run_idx=$((run_idx + 1))
-	done
-
-	aggregate_suite_labels "optimize_perf" "optimize-perf-regression-base" "${optimize_perf_base_run_labels[@]}"
-	aggregate_suite_labels "optimize_perf" "optimize-perf-regression-cand" "${optimize_perf_cand_run_labels[@]}"
+	run_delayed_canary_compare \
+		"optimize_perf" \
+		"run_optimize_perf_case" \
+		"${optimize_perf_regression_compare_runs}" \
+		"optimize-perf-regression-base" \
+		"optimize-perf-regression-cand" \
+		"DELTA_BENCH_ALLOW_OPTIMIZE_PERF_DELAY=1" \
+		"DELTA_BENCH_OPTIMIZE_PERF_DELAY_MS=${optimize_perf_regression_delay_ms}"
 	optimize_perf_regression_status="$(assert_regression_canary_detected \
 		"$(json_path_for_label "optimize-perf-regression-base" "optimize_perf")" \
 		"$(json_path_for_label "optimize-perf-regression-cand" "optimize_perf")" \

@@ -206,6 +206,74 @@ pub async fn run(
     Ok(out)
 }
 
+fn usize_metric_to_u64(name: &str, value: usize) -> BenchResult<u64> {
+    u64::try_from(value).map_err(|_| {
+        BenchError::InvalidArgument(format!("{name} metric value does not fit in u64"))
+    })
+}
+
+trait IntoOptionalRowCount {
+    fn into_optional_row_count(self) -> Option<usize>;
+}
+
+impl IntoOptionalRowCount for usize {
+    fn into_optional_row_count(self) -> Option<usize> {
+        Some(self)
+    }
+}
+
+impl IntoOptionalRowCount for Option<usize> {
+    fn into_optional_row_count(self) -> Option<usize> {
+        self
+    }
+}
+
+fn optional_usize_metric_to_u64(name: &str, value: Option<usize>) -> BenchResult<Option<u64>> {
+    value
+        .map(|count| usize_metric_to_u64(name, count))
+        .transpose()
+}
+
+fn delete_result_contract<T: IntoOptionalRowCount>(
+    operation: &str,
+    rows_affected: T,
+    num_added_files: usize,
+    num_removed_files: usize,
+    table_version: Option<u64>,
+) -> BenchResult<(Option<u64>, String, String)> {
+    let rows_affected =
+        optional_usize_metric_to_u64("rows_affected", rows_affected.into_optional_row_count())?;
+    let files_added = usize_metric_to_u64("files_added", num_added_files)?;
+    let files_removed = usize_metric_to_u64("files_removed", num_removed_files)?;
+
+    let mut payload = serde_json::Map::new();
+    payload.insert("operation".to_string(), json!(operation));
+    if let Some(rows_affected) = rows_affected {
+        payload.insert("rows_affected".to_string(), json!(rows_affected));
+    }
+    payload.insert("files_added".to_string(), json!(files_added));
+    payload.insert("files_removed".to_string(), json!(files_removed));
+    payload.insert("table_version".to_string(), json!(table_version));
+
+    let rows_affected_schema = if rows_affected.is_some() {
+        "rows_affected:u64"
+    } else {
+        "rows_affected:optional<u64>"
+    };
+
+    Ok((
+        rows_affected,
+        hash_json(&json!(payload))?,
+        hash_json(&json!([
+            "operation:string",
+            rows_affected_schema,
+            "files_added:u64",
+            "files_removed:u64",
+            "table_version:u64",
+        ]))?,
+    ))
+}
+
 pub(crate) async fn run_delete_update_case(
     table: DeltaTable,
     case: DeleteUpdateCase,
@@ -218,20 +286,13 @@ pub(crate) async fn run_delete_update_case(
             })?;
             let (table, metrics) = table.delete().with_predicate(predicate.as_str()).await?;
             let table_version = optional_table_version_to_u64(table.version())?;
-            let result_hash = hash_json(&json!({
-                "operation": "delete",
-                "rows_affected": metrics.num_deleted_rows as u64,
-                "files_added": metrics.num_added_files as u64,
-                "files_removed": metrics.num_removed_files as u64,
-                "table_version": table_version,
-            }))?;
-            let mut schema_hash = hash_json(&json!([
-                "operation:string",
-                "rows_affected:u64",
-                "files_added:u64",
-                "files_removed:u64",
-                "table_version:u64",
-            ]))?;
+            let (rows_affected, result_hash, mut schema_hash) = delete_result_contract(
+                "delete",
+                metrics.num_deleted_rows,
+                metrics.num_added_files,
+                metrics.num_removed_files,
+                table_version,
+            )?;
             let mut semantic_state_digest = None;
             let mut validation_summary = None;
             if lane_requires_semantic_validation(lane) {
@@ -240,10 +301,18 @@ pub(crate) async fn run_delete_update_case(
                 semantic_state_digest = Some(validation.digest);
                 validation_summary = Some(validation.summary);
             }
+            let file_operations = metrics
+                .num_added_files
+                .checked_add(metrics.num_removed_files)
+                .ok_or_else(|| {
+                    BenchError::InvalidArgument(
+                        "delete file operation count overflowed usize".to_string(),
+                    )
+                })?;
             let sample = SampleMetrics::base(
-                Some(metrics.num_deleted_rows as u64),
+                rows_affected,
                 None,
-                Some((metrics.num_added_files + metrics.num_removed_files) as u64),
+                Some(usize_metric_to_u64("file_operations", file_operations)?),
                 table_version,
             )
             .with_scan_rewrite(ScanRewriteMetrics {
@@ -455,6 +524,102 @@ fn case_predicate(case: DeleteUpdateCase) -> Option<String> {
         Some(format!("region = 'us' AND id % {localized_divisor} = 0"))
     } else {
         Some(format!("id % {scatter_divisor} = 0"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::delete_result_contract;
+    use crate::fingerprint::hash_json;
+    use serde_json::json;
+
+    #[test]
+    fn delete_result_contract_accepts_legacy_row_count_shape() {
+        let (rows_affected, result_hash, schema_hash) =
+            delete_result_contract("delete", 7_usize, 2, 3, Some(11)).expect("contract");
+
+        assert_eq!(rows_affected, Some(7));
+        assert_eq!(
+            result_hash,
+            hash_json(&json!({
+                "operation": "delete",
+                "rows_affected": 7_u64,
+                "files_added": 2_u64,
+                "files_removed": 3_u64,
+                "table_version": 11_u64,
+            }))
+            .expect("known hash")
+        );
+        assert_eq!(
+            schema_hash,
+            hash_json(&json!([
+                "operation:string",
+                "rows_affected:u64",
+                "files_added:u64",
+                "files_removed:u64",
+                "table_version:u64",
+            ]))
+            .expect("known schema hash")
+        );
+    }
+
+    #[test]
+    fn delete_result_contract_accepts_optional_known_row_count_shape() {
+        let (rows_affected, result_hash, schema_hash) =
+            delete_result_contract("delete", Some(7), 2, 3, Some(11)).expect("contract");
+
+        assert_eq!(rows_affected, Some(7));
+        assert_eq!(
+            result_hash,
+            hash_json(&json!({
+                "operation": "delete",
+                "rows_affected": 7_u64,
+                "files_added": 2_u64,
+                "files_removed": 3_u64,
+                "table_version": 11_u64,
+            }))
+            .expect("known hash")
+        );
+        assert_eq!(
+            schema_hash,
+            hash_json(&json!([
+                "operation:string",
+                "rows_affected:u64",
+                "files_added:u64",
+                "files_removed:u64",
+                "table_version:u64",
+            ]))
+            .expect("known schema hash")
+        );
+    }
+
+    #[test]
+    fn delete_result_contract_omits_unknown_rows_affected() {
+        let (rows_affected, result_hash, schema_hash) =
+            delete_result_contract("delete", None, 2, 3, Some(11)).expect("contract");
+
+        assert_eq!(rows_affected, None);
+        assert_eq!(
+            result_hash,
+            hash_json(&json!({
+                "operation": "delete",
+                "files_added": 2_u64,
+                "files_removed": 3_u64,
+                "table_version": 11_u64,
+            }))
+            .expect("unknown hash")
+        );
+        assert_eq!(
+            schema_hash,
+            hash_json(&json!([
+                "operation:string",
+                "rows_affected:optional<u64>",
+                "files_added:u64",
+                "files_removed:u64",
+                "table_version:u64",
+            ]))
+            .expect("unknown schema hash")
+        );
     }
 }
 

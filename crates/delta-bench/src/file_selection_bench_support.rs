@@ -12,7 +12,7 @@ use deltalake_core::logstore::{LogStore, LogStoreRef};
 use url::Url;
 
 use crate::data::fixtures::{delete_update_small_files_table_url, read_partitioned_table_url};
-use crate::error::{BenchError, BenchResult};
+use crate::error::BenchResult;
 use crate::storage::StorageConfig;
 
 const PARTITION_ONLY_PREDICATE: &str = "region = 'us'";
@@ -224,9 +224,9 @@ async fn find_files_scan_candidates(ctx: &FileSelectionCaseContext) -> BenchResu
 pub async fn timed_scan_files_where_matches(
     ctx: &FileSelectionCaseContext,
 ) -> BenchResult<FileSelectionBenchCount> {
-    let scan = matched_files_scan(ctx).await?;
+    let candidates = find_files_scan_candidates(ctx).await?;
     Ok(FileSelectionBenchCount {
-        candidate_count: scan.files_set().len(),
+        candidate_count: candidates.len(),
     })
 }
 
@@ -234,31 +234,12 @@ pub async fn timed_scan_files_where_matches(
 pub async fn benchmark_scan_files_where_matches(
     ctx: &FileSelectionCaseContext,
 ) -> BenchResult<MatchedFilesScanOutcome> {
-    let scan = matched_files_scan(ctx).await?;
-    let candidate_urls: HashSet<String> = scan.files_set().into_iter().collect();
+    let candidates = find_files_scan_candidates(ctx).await?;
     Ok(MatchedFilesScanOutcome {
-        candidate_count: candidate_urls.len(),
-        candidate_urls: normalize_candidate_urls(&ctx.table_root_url, candidate_urls),
-        predicate: scan.predicate().to_string(),
+        candidate_count: candidates.len(),
+        candidate_urls: normalize_add_urls(&ctx.table_root_url, &candidates),
+        predicate: ctx.predicate.to_string(),
     })
-}
-
-async fn matched_files_scan(
-    ctx: &FileSelectionCaseContext,
-) -> BenchResult<bench_support::MatchedFilesScan> {
-    let Some(scan) = bench_support::scan_files_where_matches(
-        ctx.session.as_ref(),
-        &ctx.snapshot,
-        ctx.log_store.clone(),
-        ctx.predicate.clone(),
-    )
-    .await?
-    else {
-        return Err(BenchError::InvalidArgument(
-            "file-selection predicate matched no files".to_string(),
-        ));
-    };
-    Ok(scan)
 }
 
 fn normalize_add_urls(table_root_url: &Url, adds: &[Add]) -> HashSet<String> {
@@ -279,27 +260,6 @@ fn normalize_add_urls(table_root_url: &Url, adds: &[Add]) -> HashSet<String> {
             }
         })
         .collect()
-}
-
-fn normalize_candidate_urls(
-    table_root_url: &Url,
-    candidate_urls: HashSet<String>,
-) -> HashSet<String> {
-    candidate_urls
-        .into_iter()
-        .map(|candidate| normalize_candidate_url(table_root_url, &candidate))
-        .collect()
-}
-
-fn normalize_candidate_url(table_root_url: &Url, candidate: &str) -> String {
-    if let Ok(url) = Url::parse(candidate) {
-        return normalize_resolved_url(url);
-    }
-
-    let joined = table_root_url
-        .join(ObjectStorePath::from(candidate).as_ref())
-        .expect("candidate path should join against table root");
-    normalize_resolved_url(joined)
 }
 
 fn normalize_resolved_url(url: Url) -> String {

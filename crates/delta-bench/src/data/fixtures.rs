@@ -7,6 +7,7 @@ use std::time::Duration;
 use deltalake_core::arrow;
 use deltalake_core::checkpoints;
 use deltalake_core::protocol::SaveMode;
+use deltalake_core::DeltaTable;
 use url::Url;
 
 use super::datasets::{FixtureManifest, FixtureRecipe, NarrowSaleRow};
@@ -1022,7 +1023,7 @@ async fn write_metadata_history_tables(
     )
     .await?;
     let checkpointed_table = storage.open_table(checkpointed_url).await?;
-    checkpoints::create_checkpoint(&checkpointed_table, None).await?;
+    create_checkpoint_on_dedicated_runtime(checkpointed_table).await?;
 
     let uncheckpointed_url = metadata_uncheckpointed_table_url(fixtures_dir, scale, storage)?;
     write_delta_table_with_checkpoint_interval(
@@ -1042,6 +1043,20 @@ async fn write_metadata_history_tables(
     .await?;
 
     Ok(())
+}
+
+async fn create_checkpoint_on_dedicated_runtime(table: DeltaTable) -> BenchResult<()> {
+    // delta-kernel checkpoint writing blocks on its own Tokio executor; isolating
+    // it avoids current-thread runtime deadlocks in tests and library callers.
+    tokio::task::spawn_blocking(move || -> BenchResult<()> {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(checkpoints::create_checkpoint(&table, None))?;
+        Ok(())
+    })
+    .await
+    .map_err(|err| BenchError::InvalidArgument(format!("checkpoint task failed: {err}")))?
 }
 
 async fn write_delta_table_with_checkpoint_interval(

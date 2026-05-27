@@ -18,7 +18,7 @@ mod tests {
 
         fs::write(
             &fake_python,
-            "#!/usr/bin/env sh\necho '{\"pandas\": true, \"polars\": false, \"pyarrow\": true}'\n",
+            "#!/bin/sh\necho '{\"pandas\": true, \"polars\": false, \"pyarrow\": true}'\n",
         )
         .expect("write fake executable");
         make_executable(&fake_python);
@@ -37,11 +37,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let fake_python = tmp.path().join("fake-python-fails");
 
-        fs::write(
-            &fake_python,
-            "#!/usr/bin/env sh\necho 'boom' 1>&2\nexit 7\n",
-        )
-        .expect("write fake executable");
+        fs::write(&fake_python, "#!/bin/sh\necho 'boom' 1>&2\nexit 7\n")
+            .expect("write fake executable");
         make_executable(&fake_python);
 
         let result = probe_python_modules(

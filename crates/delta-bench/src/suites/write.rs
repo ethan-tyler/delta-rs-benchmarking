@@ -55,7 +55,11 @@ pub async fn run(
         "write_append_small",
         warmup,
         iterations,
-        || async { prepare_write_iteration().await.map_err(|e| e.to_string()) },
+        || async {
+            prepare_write_iteration(storage)
+                .await
+                .map_err(|e| e.to_string())
+        },
         |setup| {
             let rows = Arc::clone(&rows);
             async move {
@@ -72,7 +76,11 @@ pub async fn run(
         "write_append_large",
         warmup,
         iterations,
-        || async { prepare_write_iteration().await.map_err(|e| e.to_string()) },
+        || async {
+            prepare_write_iteration(storage)
+                .await
+                .map_err(|e| e.to_string())
+        },
         |setup| {
             let rows = Arc::clone(&rows);
             async move {
@@ -89,7 +97,11 @@ pub async fn run(
         "write_overwrite",
         warmup,
         iterations,
-        || async { prepare_write_iteration().await.map_err(|e| e.to_string()) },
+        || async {
+            prepare_write_iteration(storage)
+                .await
+                .map_err(|e| e.to_string())
+        },
         |setup| {
             let rows = Arc::clone(&rows);
             async move {
@@ -105,7 +117,7 @@ pub async fn run(
     Ok(results)
 }
 
-async fn prepare_write_iteration() -> BenchResult<WriteIterationSetup> {
+async fn prepare_write_iteration(storage: &StorageConfig) -> BenchResult<WriteIterationSetup> {
     let temp = tempfile::tempdir()?;
     let table_url = Url::from_directory_path(temp.path()).map_err(|()| {
         BenchError::InvalidArgument(format!(
@@ -113,7 +125,7 @@ async fn prepare_write_iteration() -> BenchResult<WriteIterationSetup> {
             temp.path().display()
         ))
     })?;
-    let table = DeltaTable::try_from_url(table_url).await?;
+    let table = storage.try_from_url_for_write(table_url).await?;
     Ok(WriteIterationSetup { _temp: temp, table })
 }
 

@@ -116,7 +116,7 @@ async fn prepare_write_perf_iteration(
                 temp.path().display()
             ))
         })?;
-        (Some(temp), DeltaTable::try_from_url(table_url).await?)
+        (Some(temp), storage.try_from_url_for_write(table_url).await?)
     } else {
         let table_url = storage.isolated_table_url(scale, "write_perf_delta", spec.id)?;
         (None, storage.try_from_url_for_write(table_url).await?)

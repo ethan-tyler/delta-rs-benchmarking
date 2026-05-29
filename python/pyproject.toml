@@ -4,6 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = ["PyYAML>=6,<7"]
 
+[dependency-groups]
+dev = ["pytest>=8,<9"]
+
 [project.scripts]
 delta-bench-compare = "delta_bench_compare.compare:main"
 delta-bench-interop-run = "delta_bench_interop.run_case:main"

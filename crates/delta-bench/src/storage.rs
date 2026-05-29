@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -115,10 +115,11 @@ impl StorageConfig {
             } else {
                 std::env::current_dir()?.join(local_table_path)
             };
-            Url::from_directory_path(&absolute_path).map_err(|()| {
+            let canonical_path = canonicalize_local_url_path(&absolute_path)?;
+            Url::from_directory_path(&canonical_path).map_err(|()| {
                 BenchError::InvalidArgument(format!(
                     "failed to create table URL for {}",
-                    absolute_path.display()
+                    canonical_path.display()
                 ))
             })
         } else {
@@ -127,6 +128,7 @@ impl StorageConfig {
     }
 
     pub async fn open_table(&self, table_url: Url) -> BenchResult<DeltaTable> {
+        let table_url = self.normalize_table_url(table_url)?;
         let options = self.object_store_options();
         if options.is_empty() {
             Ok(open_table(table_url).await?)
@@ -136,6 +138,7 @@ impl StorageConfig {
     }
 
     pub async fn try_from_url_for_write(&self, table_url: Url) -> BenchResult<DeltaTable> {
+        let table_url = self.normalize_table_url(table_url)?;
         let options = self.object_store_options();
         if options.is_empty() {
             Ok(DeltaTable::try_from_url(table_url).await?)
@@ -143,6 +146,56 @@ impl StorageConfig {
             Ok(DeltaTable::try_from_url_with_storage_options(table_url, options).await?)
         }
     }
+
+    fn normalize_table_url(&self, table_url: Url) -> BenchResult<Url> {
+        if self.is_local() {
+            canonicalize_local_directory_url(table_url)
+        } else {
+            Ok(table_url)
+        }
+    }
+}
+
+fn canonicalize_local_directory_url(table_url: Url) -> BenchResult<Url> {
+    if table_url.scheme() != "file" {
+        return Ok(table_url);
+    }
+
+    let path = table_url.to_file_path().map_err(|()| {
+        BenchError::InvalidArgument(format!("failed to convert local table URL {table_url}"))
+    })?;
+    let canonical_path = canonicalize_local_url_path(&path)?;
+    Url::from_directory_path(&canonical_path).map_err(|()| {
+        BenchError::InvalidArgument(format!(
+            "failed to create table URL for {}",
+            canonical_path.display()
+        ))
+    })
+}
+
+fn canonicalize_local_url_path(path: &Path) -> BenchResult<PathBuf> {
+    if path.exists() {
+        return Ok(fs::canonicalize(path)?);
+    }
+
+    let mut existing = path;
+    let mut suffix = PathBuf::new();
+    while !existing.exists() {
+        let Some(name) = existing.file_name() else {
+            return Ok(path.to_path_buf());
+        };
+        let mut next_suffix = PathBuf::from(name);
+        next_suffix.push(&suffix);
+        suffix = next_suffix;
+        let Some(parent) = existing.parent() else {
+            return Ok(path.to_path_buf());
+        };
+        existing = parent;
+    }
+
+    let mut canonical = fs::canonicalize(existing)?;
+    canonical.push(suffix);
+    Ok(canonical)
 }
 
 pub fn load_backend_profile_options(profile: Option<&str>) -> BenchResult<HashMap<String, String>> {
@@ -265,6 +318,10 @@ fn next_isolation_suffix() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+
+    #[cfg(unix)]
+    use std::os::unix::fs::symlink;
 
     #[test]
     fn sanitize_alphanumeric_unchanged() {
@@ -314,5 +371,44 @@ mod tests {
     fn validate_matching_scheme_accepted() {
         let url = Url::parse("s3://bucket/path").unwrap();
         assert!(validate_table_root_scheme(StorageBackend::S3, &url).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_table_urls_resolve_symlinked_roots() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let real_root = temp.path().join("real-root");
+        let link_root = temp.path().join("link-root");
+        let real_table_path = real_root.join("sf1").join("tpcds").join("store_sales");
+        let table_path = link_root.join("sf1").join("tpcds").join("store_sales");
+        fs::create_dir_all(&real_table_path).expect("table path");
+        symlink(&real_root, &link_root).expect("symlink fixture root");
+
+        let url = StorageConfig::local()
+            .table_url_for(&table_path, "sf1", "tpcds/store_sales")
+            .expect("table url");
+        let expected_path = fs::canonicalize(real_table_path).expect("canonical table path");
+        let expected_url =
+            Url::from_directory_path(expected_path).expect("canonical table path URL");
+
+        assert_eq!(url, expected_url);
+
+        let missing_table_path = link_root.join("sf1").join("tpcds").join("new_table");
+        let missing_url = StorageConfig::local()
+            .table_url_for(&missing_table_path, "sf1", "tpcds/new_table")
+            .expect("missing table url");
+        let mut expected_missing_path =
+            fs::canonicalize(real_root.join("sf1").join("tpcds")).expect("canonical parent");
+        expected_missing_path.push("new_table");
+        let expected_missing_url =
+            Url::from_directory_path(expected_missing_path).expect("missing table path URL");
+
+        assert_eq!(missing_url, expected_missing_url);
+
+        let direct_url = Url::from_directory_path(table_path).expect("direct table path URL");
+        let canonical_direct_url =
+            canonicalize_local_directory_url(direct_url).expect("canonical direct table URL");
+
+        assert_eq!(canonical_direct_url, expected_url);
     }
 }

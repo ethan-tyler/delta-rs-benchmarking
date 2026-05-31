@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -113,6 +116,33 @@ def _self_hosted_benchmark_workflow_names() -> list[str]:
 def test_docs_check_entrypoint_exists_and_is_executable() -> None:
     assert DOCS_CHECK.exists(), "missing scripts/docs_check.sh"
     assert DOCS_CHECK.stat().st_mode & 0o111, "scripts/docs_check.sh must be executable"
+
+
+def test_docs_check_honors_python_override(tmp_path: Path) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_python = fake_bin / "python3"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo ambient python3 should not be used >&2\n"
+        "exit 99\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+    env["PYTHON"] = sys.executable
+    result = subprocess.run(
+        [str(DOCS_CHECK), "-k", "test_core_docs_include_required_sections"],
+        cwd=REPO_ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_markdown_links_resolve_for_repo_docs() -> None:

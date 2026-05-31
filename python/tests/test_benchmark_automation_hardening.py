@@ -472,6 +472,7 @@ def test_benchmark_workflow_uses_pack_planning_matrix_and_aggregation() -> None:
     assert "python3 -m delta_bench_compare.pack plan" in workflow
     assert "--format github-matrix" in workflow
     assert "fromJson(" in workflow
+    assert "max-parallel: ${{ fromJson(needs.plan_pack.outputs.max_parallel) }}" in workflow
     assert "matrix.timeout_minutes" in workflow
     assert "timeout --preserve-status" in workflow
     assert "./scripts/run_profile.sh --base-sha" in workflow

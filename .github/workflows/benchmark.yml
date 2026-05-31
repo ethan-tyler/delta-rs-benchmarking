@@ -791,7 +791,7 @@ jobs:
     timeout-minutes: 360
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: ${{ fromJson(needs.plan_pack.outputs.max_parallel) }}
       matrix: ${{ fromJson(needs.plan_pack.outputs.pack_matrix) }}
 
     steps:

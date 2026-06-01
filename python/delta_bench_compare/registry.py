@@ -96,6 +96,7 @@ def pack_suite_definitions(
         raise ValueError("pack suites must be a non-empty list")
 
     resolved: list[dict[str, Any]] = []
+    seen_identities: set[tuple[str, str]] = set()
     for index, entry in enumerate(raw_suite_entries):
         if not isinstance(entry, dict):
             raise ValueError(f"pack suite at index {index} must be a mapping")
@@ -129,6 +130,12 @@ def pack_suite_definitions(
         )
         if not isinstance(profile, str) or not profile:
             raise ValueError(f"suite '{suite_name}' is missing a profile")
+        identity = (suite_name, profile)
+        if identity in seen_identities:
+            raise ValueError(
+                f"pack includes duplicate suite/profile '{suite_name}[{profile}]'"
+            )
+        seen_identities.add(identity)
         profile_env = load_methodology_profile_env(profile)
         storage_backend = (
             entry.get("storage_backend")

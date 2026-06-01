@@ -528,6 +528,7 @@ jobs:
             env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.pack plan \
               --registry bench/evidence/registry.yaml \
               --pack "${{ needs.request.outputs.pack }}" \
+              --required-class authoritative_macro \
               --base-sha "$BASE_SHA" \
               --candidate-sha "$HEAD_SHA" \
               --format github-matrix \

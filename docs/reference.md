@@ -426,6 +426,8 @@ PR pack automation reads `bench/evidence/registry.yaml`. The currently defined p
 
 `pr-full-decision` contains only `readiness=ready` suites. In plain terms, it contains only readiness=ready suites. Gated perf-owned suites move to `pr-candidate-manual` so operators can refresh manual/candidate evidence without widening PR comment automation. `pr-candidate-manual` currently carries `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`; `delete_update_perf` uses `delete-update-perf-high-confidence` inside that pack so manual or nightly evidence keeps the longer compare shape, and `tpcds` remains candidate/manual in that pack until its gates are fully closed.
 
+Automation that plans a PR-authoritative `full` pack should pass `--required-class authoritative_macro` to `delta_bench_compare.pack plan`. That makes planning fail before returning a partial matrix while any authoritative macro suite is missing from the pack or any listed suite is not `readiness=ready`. Candidate/manual packs should omit that flag unless they intentionally want the same completeness check.
+
 Keep the entrypoints split:
 
 - Ready PR comment grammar: `run benchmark scan`, `run benchmark decision scan`, `run benchmark decision full`

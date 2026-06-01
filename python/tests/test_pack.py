@@ -304,6 +304,42 @@ def test_pack_plan_keeps_full_pack_ready_when_gated_suites_are_excluded(
     ]
 
 
+def test_pack_plan_required_class_fails_when_full_pack_omits_required_suites(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / "registry.yaml"
+    _write_registry(registry_path, write_perf_ready=False, tpcds_ready=False)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "delta_bench_compare.pack",
+            "plan",
+            "--registry",
+            str(registry_path),
+            "--pack",
+            "full",
+            "--required-class",
+            "authoritative_macro",
+            "--base-sha",
+            "a" * 40,
+            "--candidate-sha",
+            "b" * 40,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_python_env(),
+    )
+
+    assert result.returncode == 1
+    assert "failed required-class audit" in result.stderr
+    assert "authoritative_macro" in result.stderr
+    assert "write_perf" in result.stderr
+    assert "tpcds" in result.stderr
+
+
 def test_pack_audit_fails_full_pack_when_authoritative_macro_suites_are_missing() -> None:
     result = subprocess.run(
         [

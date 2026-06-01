@@ -183,9 +183,18 @@ def plan_pack(
     pack_ref: str,
     base_sha: str,
     candidate_sha: str,
+    required_class: str | None = None,
 ) -> dict[str, Any]:
     registry = load_registry(registry_path)
     pack_id, pack, alias = resolve_pack(registry, pack_ref)
+    if required_class:
+        audit_payload = audit_pack(
+            registry_path=registry_path,
+            pack_ref=pack_ref,
+            required_class=required_class,
+        )
+        if not audit_payload["ready"]:
+            raise ValueError(_format_audit_failure(audit_payload))
     blockers = readiness_blockers(registry, pack)
     if blockers:
         details = "\n".join(
@@ -292,6 +301,36 @@ def audit_pack(
         "missing_required_suites": missing_required_suites,
         "readiness_blockers": readiness_blocker_rows,
     }
+
+
+def _format_audit_failure(payload: dict[str, Any]) -> str:
+    required_class = str(payload.get("required_class") or "unknown")
+    parts: list[str] = []
+
+    missing_suites = [
+        str(row.get("suite") or "")
+        for row in payload.get("missing_required_suites") or []
+        if str(row.get("suite") or "")
+    ]
+    if missing_suites:
+        parts.append(
+            f"missing required {required_class} suites: {', '.join(missing_suites)}"
+        )
+
+    blocker_rows = []
+    for row in payload.get("readiness_blockers") or []:
+        suite = str(row.get("suite") or "")
+        reason = str(row.get("reason") or row.get("readiness") or "")
+        if suite:
+            blocker_rows.append(f"{suite}: {reason or 'not ready'}")
+    if blocker_rows:
+        parts.append(f"readiness blockers: {', '.join(blocker_rows)}")
+
+    details = "; ".join(parts) if parts else "audit did not report details"
+    return (
+        f"pack '{payload.get('pack_id')}' failed required-class audit for "
+        f"'{required_class}': {details}"
+    )
 
 
 def _render_plan_payload(
@@ -782,6 +821,7 @@ def _build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("--pack", required=True)
     plan_parser.add_argument("--base-sha", required=True)
     plan_parser.add_argument("--candidate-sha", required=True)
+    plan_parser.add_argument("--required-class")
     plan_parser.add_argument(
         "--format",
         choices=["json", "github-matrix"],
@@ -827,6 +867,7 @@ def main() -> None:
                 pack_ref=args.pack,
                 base_sha=args.base_sha,
                 candidate_sha=args.candidate_sha,
+                required_class=args.required_class,
             )
             rendered_payload = _render_plan_payload(payload, args.format)
             output = json.dumps(rendered_payload, indent=2) + "\n"

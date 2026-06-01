@@ -304,6 +304,53 @@ def test_pack_plan_keeps_full_pack_ready_when_gated_suites_are_excluded(
     ]
 
 
+def test_pack_audit_fails_full_pack_when_authoritative_macro_suites_are_missing() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "delta_bench_compare.pack",
+            "audit",
+            "--registry",
+            str(REGISTRY_PATH),
+            "--pack",
+            "full",
+            "--required-class",
+            "authoritative_macro",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_python_env(),
+    )
+
+    assert result.returncode == 1, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["pack_id"] == "pr-full-decision"
+    assert payload["pack_alias"] == "full"
+    assert payload["ready"] is False
+    assert payload["required_class"] == "authoritative_macro"
+    assert payload["planned_suites"] == [
+        {
+            "suite": "scan",
+            "profile": "pr-macro",
+            "readiness": "ready",
+            "automation_tier": "pr_bot",
+        }
+    ]
+    assert {row["suite"] for row in payload["missing_required_suites"]} == {
+        "write_perf",
+        "delete_update_perf",
+        "merge_perf",
+        "optimize_perf",
+        "metadata_perf",
+        "tpcds",
+    }
+    assert all(
+        row["readiness"] == "gated" for row in payload["missing_required_suites"]
+    )
+
+
 def test_candidate_pack_collects_gated_perf_suites_for_manual_runs(
     tmp_path: Path,
 ) -> None:

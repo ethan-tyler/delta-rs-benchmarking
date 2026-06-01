@@ -263,6 +263,8 @@ def test_docs_cover_pack_based_pr_decision_contract() -> None:
     assert "contains only readiness=ready suites" in combined
     assert "pr-candidate-manual" in combined
     assert "tpcds remains candidate/manual" in combined
+    assert "delta_bench_compare.pack audit" in combined
+    assert "--required-class authoritative_macro" in combined
 
 
 def test_docs_define_ready_vs_candidate_vs_diagnostic_entrypoints() -> None:

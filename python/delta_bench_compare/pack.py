@@ -230,6 +230,70 @@ def plan_pack(
     }
 
 
+def _suite_readiness_row(
+    *, suite: str, profile: str, registry: dict[str, Any]
+) -> dict[str, str]:
+    suite_registry = registry["suites"].get(suite) or {}
+    return {
+        "suite": suite,
+        "profile": profile,
+        "readiness": str(suite_registry.get("readiness") or "unknown"),
+        "automation_tier": str(suite_registry.get("automation_tier") or "unknown"),
+    }
+
+
+def audit_pack(
+    *,
+    registry_path: Path | None,
+    pack_ref: str,
+    required_class: str,
+) -> dict[str, Any]:
+    registry = load_registry(registry_path)
+    pack_id, pack, alias = resolve_pack(registry, pack_ref)
+    planned_entries = pack_suite_definitions(registry, pack)
+    planned_by_suite = {str(entry["suite"]): entry for entry in planned_entries}
+    planned_suites = [
+        _suite_readiness_row(
+            suite=str(entry["suite"]),
+            profile=str(entry["profile"]),
+            registry=registry,
+        )
+        for entry in planned_entries
+    ]
+
+    missing_required_suites = []
+    for suite_name, suite_registry in registry["suites"].items():
+        if not isinstance(suite_registry, dict):
+            continue
+        if str(suite_registry.get("class") or "") != required_class:
+            continue
+        if suite_name in planned_by_suite:
+            continue
+        missing_required_suites.append(
+            {
+                "suite": str(suite_name),
+                "profile": str(suite_registry.get("default_profile") or ""),
+                "readiness": str(suite_registry.get("readiness") or "unknown"),
+                "automation_tier": str(
+                    suite_registry.get("automation_tier") or "unknown"
+                ),
+                "reason": str(suite_registry.get("readiness_reason") or ""),
+            }
+        )
+
+    readiness_blocker_rows = readiness_blockers(registry, pack)
+    return {
+        "pack_id": pack_id,
+        "pack_alias": alias,
+        "pack_version": int(pack.get("pack_version") or 0),
+        "required_class": required_class,
+        "ready": not missing_required_suites and not readiness_blocker_rows,
+        "planned_suites": planned_suites,
+        "missing_required_suites": missing_required_suites,
+        "readiness_blockers": readiness_blocker_rows,
+    }
+
+
 def _render_plan_payload(
     payload: dict[str, Any], output_format: str
 ) -> dict[str, Any]:
@@ -725,6 +789,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     plan_parser.add_argument("--output", type=Path)
 
+    audit_parser = subparsers.add_parser(
+        "audit", help="Audit whether a pack covers required ready suites"
+    )
+    audit_parser.add_argument("--registry", type=Path, default=DEFAULT_REGISTRY_PATH)
+    audit_parser.add_argument("--pack", required=True)
+    audit_parser.add_argument("--required-class", default="authoritative_macro")
+    audit_parser.add_argument("--output", type=Path)
+
     summarize_parser = subparsers.add_parser(
         "summarize", help="Aggregate suite artifacts into a pack artifact bundle"
     )
@@ -761,6 +833,20 @@ def main() -> None:
             if args.output is not None:
                 args.output.write_text(output, encoding="utf-8")
             print(output, end="")
+            return
+
+        if args.command == "audit":
+            payload = audit_pack(
+                registry_path=args.registry,
+                pack_ref=args.pack,
+                required_class=args.required_class,
+            )
+            output = json.dumps(payload, indent=2) + "\n"
+            if args.output is not None:
+                args.output.write_text(output, encoding="utf-8")
+            print(output, end="")
+            if not payload["ready"]:
+                raise SystemExit(1)
             return
 
         if not args.pack and args.pack_manifest is None:

@@ -165,6 +165,16 @@ Use `--methodology-profile <name>` to load harness-owned compare defaults from `
 
 The PR pack registry lives in `bench/evidence/registry.yaml`. `pr-full-decision` maps the `full` alias to the ready PR decision surface only and contains only `readiness=ready` suites. `pr-candidate-manual` collects gated perf-owned suites for operator-run evidence refreshes: `write_perf`, `delete_update_perf`, `merge_perf`, `optimize_perf`, `metadata_perf`, and `tpcds`. Inside that pack, `delete_update_perf` resolves through `delete-update-perf-high-confidence` so manual or nightly evidence keeps the longer DML compare shape. `tpcds` remains candidate/manual there and stays out of PR comment automation until its gates are closed.
 
+Audit the pack before describing `full` as a complete PR surface:
+
+```bash
+PYTHONPATH=python python3 -m delta_bench_compare.pack audit \
+  --pack full \
+  --required-class authoritative_macro
+```
+
+The audit exits nonzero while `pr-full-decision` omits any authoritative macro suite or includes a suite that is not `readiness=ready`. This is an operator guardrail, not promotion evidence; close the suite-specific validation gates first, then update the registry.
+
 Remote candidate/manual surfaces use the same compare path instead of a second harness. Profiles such as `scan-s3-candidate`, `write-perf-s3-candidate`, and `metadata-perf-s3-candidate` carry `storage_backend=s3` and `backend_profile=s3_locking_vultr` directly in `bench/methodologies/`. The matching `s3-candidate-manual` pack batches those remote shards without widening the authoritative PR bot contract.
 
 ### Named branch-to-branch

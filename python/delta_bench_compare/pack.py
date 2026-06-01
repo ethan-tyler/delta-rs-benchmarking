@@ -260,7 +260,9 @@ def audit_pack(
     registry = load_registry(registry_path)
     pack_id, pack, alias = resolve_pack(registry, pack_ref)
     planned_entries = pack_suite_definitions(registry, pack)
-    planned_by_suite = {str(entry["suite"]): entry for entry in planned_entries}
+    planned_entries_by_suite: dict[str, list[dict[str, Any]]] = {}
+    for entry in planned_entries:
+        planned_entries_by_suite.setdefault(str(entry["suite"]), []).append(entry)
     planned_suites = [
         _suite_readiness_row(
             suite=str(entry["suite"]),
@@ -278,18 +280,19 @@ def audit_pack(
             continue
         if str(suite_registry.get("class") or "") != required_class:
             continue
-        planned_entry = planned_by_suite.get(suite_name)
-        if planned_entry is not None:
+        suite_planned_entries = planned_entries_by_suite.get(suite_name, [])
+        if suite_planned_entries:
             expected_profile = str(suite_registry.get("default_profile") or "").strip()
-            actual_profile = str(planned_entry.get("profile") or "").strip()
-            if expected_profile and actual_profile != expected_profile:
-                profile_mismatches.append(
-                    {
-                        "suite": str(suite_name),
-                        "expected_profile": expected_profile,
-                        "actual_profile": actual_profile,
-                    }
-                )
+            for planned_entry in suite_planned_entries:
+                actual_profile = str(planned_entry.get("profile") or "").strip()
+                if expected_profile and actual_profile != expected_profile:
+                    profile_mismatches.append(
+                        {
+                            "suite": str(suite_name),
+                            "expected_profile": expected_profile,
+                            "actual_profile": actual_profile,
+                        }
+                    )
             actual_automation_tier = str(
                 suite_registry.get("automation_tier") or ""
             ).strip()

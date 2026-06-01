@@ -419,6 +419,25 @@ def test_benchmark_workflow_treats_full_as_pack_alias_not_suite() -> None:
     ).group("body")
 
 
+def test_benchmark_workflow_audits_full_pack_before_planning() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    plan_step = workflow[
+        workflow.index("- name: Resolve pack plan") : workflow.index(
+            "- name: Extract plan metadata"
+        )
+    ]
+
+    assert "python3 -m delta_bench_compare.pack audit" in plan_step
+    assert "--required-class authoritative_macro" in plan_step
+    assert "pack-audit.json" in plan_step
+    assert "pack audit failed" in plan_step
+    assert_order(
+        plan_step,
+        "python3 -m delta_bench_compare.pack audit",
+        "python3 -m delta_bench_compare.pack plan",
+    )
+
+
 def test_benchmark_workflow_rejects_exploratory_full_command() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert "run benchmark full" in workflow

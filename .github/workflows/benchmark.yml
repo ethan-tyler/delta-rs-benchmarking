@@ -512,14 +512,28 @@ jobs:
           set -euo pipefail
           status=0
           set +e
-          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.pack plan \
+          env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.pack audit \
             --registry bench/evidence/registry.yaml \
             --pack "${{ needs.request.outputs.pack }}" \
-            --base-sha "$BASE_SHA" \
-            --candidate-sha "$HEAD_SHA" \
-            --format github-matrix \
-            --output pack-plan.json > pack-plan.stdout.json 2> pack-plan.stderr.txt
+            --required-class authoritative_macro \
+            --output pack-audit.json > pack-audit.stdout.json 2> pack-audit.stderr.txt
           status=$?
+          if [[ "${status}" -ne 0 ]]; then
+            {
+              echo "pack audit failed; refusing to plan an incomplete benchmark pack."
+              cat pack-audit.stdout.json
+              cat pack-audit.stderr.txt
+            } > pack-plan.stderr.txt
+          else
+            env PYTHONPATH="${GITHUB_WORKSPACE}/python" python3 -m delta_bench_compare.pack plan \
+              --registry bench/evidence/registry.yaml \
+              --pack "${{ needs.request.outputs.pack }}" \
+              --base-sha "$BASE_SHA" \
+              --candidate-sha "$HEAD_SHA" \
+              --format github-matrix \
+              --output pack-plan.json > pack-plan.stdout.json 2> pack-plan.stderr.txt
+            status=$?
+          fi
           set -e
           echo "exit_code=${status}" >> "$GITHUB_OUTPUT"
           if [[ "${status}" -eq 0 ]]; then

@@ -849,6 +849,8 @@ jobs:
           PROFILE: ${{ matrix.profile }}
           SUITE: ${{ matrix.suite }}
           TIMEOUT_MINUTES: ${{ matrix.timeout_minutes }}
+          MATRIX_STORAGE_BACKEND: ${{ matrix.storage_backend }}
+          MATRIX_BACKEND_PROFILE: ${{ matrix.backend_profile }}
           BENCH_BACKEND_PROFILE: ${{ vars.BENCH_BACKEND_PROFILE }}
           BENCH_RUNNER_MODE: ${{ vars.BENCH_RUNNER_MODE }}
           BENCH_STORAGE_BACKEND: ${{ vars.BENCH_STORAGE_BACKEND }}
@@ -858,8 +860,19 @@ jobs:
           artifact_name="${{ matrix.artifact_name }}"
           shard_status=0
           profile_args=()
-          if [[ -n "${BENCH_BACKEND_PROFILE:-}" ]]; then
-            profile_args+=(--backend-profile "${BENCH_BACKEND_PROFILE}")
+          storage_backend="${MATRIX_STORAGE_BACKEND:-${BENCH_STORAGE_BACKEND:-}}"
+          backend_profile="${MATRIX_BACKEND_PROFILE:-${BENCH_BACKEND_PROFILE:-}}"
+          if [[ -n "${storage_backend}" ]]; then
+            profile_args+=(--storage-backend "${storage_backend}")
+          fi
+          if [[ -n "${backend_profile}" ]]; then
+            profile_args+=(--backend-profile "${backend_profile}")
+          fi
+          if [[ -n "${BENCH_STORAGE_OPTIONS:-}" ]]; then
+            while IFS= read -r opt; do
+              [[ -z "${opt}" ]] && continue
+              profile_args+=(--storage-option "${opt}")
+            done <<< "${BENCH_STORAGE_OPTIONS}"
           fi
           if [[ -n "${BENCH_RUNNER_MODE:-}" ]]; then
             profile_args+=(--runner "${BENCH_RUNNER_MODE}")

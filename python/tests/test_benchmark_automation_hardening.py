@@ -2151,6 +2151,29 @@ def test_benchmark_workflow_pack_status_comment_fails_closed_when_any_shard_fail
     assert '`### Benchmark ${finalStatus ? "PASS" : "FAIL"}`' in workflow
 
 
+def test_benchmark_workflow_pack_shards_use_resolved_storage_contract() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    shard_step = workflow[
+        workflow.index("- name: Run suite shard") : workflow.index(
+            "- name: Upload suite artifact"
+        )
+    ]
+
+    assert "MATRIX_STORAGE_BACKEND: ${{ matrix.storage_backend }}" in shard_step
+    assert "MATRIX_BACKEND_PROFILE: ${{ matrix.backend_profile }}" in shard_step
+    assert (
+        'storage_backend="${MATRIX_STORAGE_BACKEND:-${BENCH_STORAGE_BACKEND:-}}"'
+        in shard_step
+    )
+    assert (
+        'backend_profile="${MATRIX_BACKEND_PROFILE:-${BENCH_BACKEND_PROFILE:-}}"'
+        in shard_step
+    )
+    assert 'profile_args+=(--storage-backend "${storage_backend}")' in shard_step
+    assert 'profile_args+=(--backend-profile "${backend_profile}")' in shard_step
+    assert 'profile_args+=(--storage-option "${opt}")' in shard_step
+
+
 def test_benchmark_workflow_does_not_mask_exploratory_failures() -> None:
     workflow = WORKFLOW.read_text(encoding="utf-8")
     assert (

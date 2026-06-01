@@ -1067,6 +1067,38 @@ def test_validation_script_plans_focused_gate_suite_sets_from_artifact_dir() -> 
         assert f"labels={expected_labels}" in result.stdout
 
 
+def test_validation_script_rejects_tpcds_gate_without_tpcds_dataset() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+    resolve_scope_block = shell_function_block(script, "resolve_validation_scope")
+    planned_labels_block = shell_function_block(
+        script, "planned_validation_gate_labels"
+    )
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            (
+                "set -euo pipefail\n"
+                'TPCDS_VALIDATION_DATASET_ID="tpcds_duckdb"\n'
+                f"{resolve_scope_block}\n"
+                f"{planned_labels_block}\n"
+                'scope="$(resolve_validation_scope "$1")"\n'
+                'planned_validation_gate_labels "$scope" "$2"\n'
+            ),
+            "validation_scope_test",
+            "results/validation/tpcds-gate",
+            "medium_selective",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "tpcds-gate requires --dataset-id tpcds_duckdb" in result.stderr
+
+
 def test_validation_script_uses_planned_gate_labels_to_skip_follow_on_validators() -> (
     None
 ):

@@ -46,7 +46,7 @@ Options:
   --sha <commit>          delta-rs commit to validate (default: current HEAD in DELTA_RS_DIR)
   --fetch-url <url>       Alternate fetch URL used when --sha is not reachable from origin
   --fetch-ref <ref>       Optional advertised branch/ref to fetch before resolving --sha
-  --dataset-id <id>       Optional gate selector (default: ${VALIDATION_DATASET_ID}; use ${TPCDS_VALIDATION_DATASET_ID} to enable the dedicated TPC-DS gate)
+  --dataset-id <id>       Optional gate selector (default: ${VALIDATION_DATASET_ID}; tpcds-gate requires ${TPCDS_VALIDATION_DATASET_ID})
   --artifact-dir <path>   Output directory for validation artifacts (default: ${VALIDATION_ARTIFACT_DIR}); stable gate names such as write-perf-ready, dml-maintenance-gate, metadata-perf-gate, and tpcds-gate run only their focused validator surfaces
   -h, --help              Show this help
 
@@ -118,6 +118,9 @@ planned_validation_gate_labels() {
 	tpcds)
 		if [[ "${dataset_id}" == "${TPCDS_VALIDATION_DATASET_ID}" ]]; then
 			labels+=("tpcds")
+		else
+			echo "tpcds-gate requires --dataset-id ${TPCDS_VALIDATION_DATASET_ID}; got ${dataset_id}" >&2
+			exit 1
 		fi
 		;;
 	*)

@@ -272,6 +272,7 @@ def audit_pack(
 
     missing_required_suites = []
     profile_mismatches = []
+    automation_tier_mismatches = []
     for suite_name, suite_registry in registry["suites"].items():
         if not isinstance(suite_registry, dict):
             continue
@@ -287,6 +288,17 @@ def audit_pack(
                         "suite": str(suite_name),
                         "expected_profile": expected_profile,
                         "actual_profile": actual_profile,
+                    }
+                )
+            actual_automation_tier = str(
+                suite_registry.get("automation_tier") or ""
+            ).strip()
+            if actual_automation_tier != "pr_bot":
+                automation_tier_mismatches.append(
+                    {
+                        "suite": str(suite_name),
+                        "expected_automation_tier": "pr_bot",
+                        "actual_automation_tier": actual_automation_tier,
                     }
                 )
             continue
@@ -311,11 +323,13 @@ def audit_pack(
         "ready": (
             not missing_required_suites
             and not profile_mismatches
+            and not automation_tier_mismatches
             and not readiness_blocker_rows
         ),
         "planned_suites": planned_suites,
         "missing_required_suites": missing_required_suites,
         "profile_mismatches": profile_mismatches,
+        "automation_tier_mismatches": automation_tier_mismatches,
         "readiness_blockers": readiness_blocker_rows,
     }
 
@@ -345,6 +359,20 @@ def _format_audit_failure(payload: dict[str, Any]) -> str:
             )
     if profile_mismatches:
         parts.append(f"profile mismatches: {', '.join(profile_mismatches)}")
+
+    automation_tier_mismatches = []
+    for row in payload.get("automation_tier_mismatches") or []:
+        suite = str(row.get("suite") or "")
+        expected_tier = str(row.get("expected_automation_tier") or "")
+        actual_tier = str(row.get("actual_automation_tier") or "")
+        if suite and expected_tier:
+            automation_tier_mismatches.append(
+                f"{suite}: expected {expected_tier}, found {actual_tier or 'unknown'}"
+            )
+    if automation_tier_mismatches:
+        parts.append(
+            f"automation tier mismatches: {', '.join(automation_tier_mismatches)}"
+        )
 
     blocker_rows = []
     for row in payload.get("readiness_blockers") or []:

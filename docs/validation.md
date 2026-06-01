@@ -28,7 +28,7 @@ PYTHONPATH=python python3 -m delta_bench_compare.pack audit \
   --required-class authoritative_macro
 ```
 
-This audit is a guardrail for registry scope and methodology-profile drift. It must pass alongside the suite-specific validation gates, but it does not replace same-SHA stability, delayed-canary evidence, fixture checks, or runtime signoff.
+This audit is a guardrail for registry scope, PR-bot automation tier, and methodology-profile drift. It must pass alongside the suite-specific validation gates, but it does not replace same-SHA stability, delayed-canary evidence, fixture checks, or runtime signoff.
 
 When you need to publish the current operator-facing contract itself, run `./scripts/publish_contract.sh`. It snapshots the current docs, manifests, and wrapper entrypoints into `results/contracts/`.
 

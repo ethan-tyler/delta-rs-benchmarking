@@ -173,7 +173,7 @@ PYTHONPATH=python python3 -m delta_bench_compare.pack audit \
   --required-class authoritative_macro
 ```
 
-The audit exits nonzero while `pr-full-decision` omits any authoritative macro suite, includes a suite that is not `readiness=ready`, or routes a required suite through a non-default methodology profile. This is an operator guardrail, not promotion evidence; close the suite-specific validation gates first, then update the registry.
+The audit exits nonzero while `pr-full-decision` omits any authoritative macro suite, includes a suite that is not `readiness=ready`, leaves a required suite below `automation_tier=pr_bot`, or routes a required suite through a non-default methodology profile. This is an operator guardrail, not promotion evidence; close the suite-specific validation gates first, then update the registry.
 
 Remote candidate/manual surfaces use the same compare path instead of a second harness. Profiles such as `scan-s3-candidate`, `write-perf-s3-candidate`, and `metadata-perf-s3-candidate` carry `storage_backend=s3` and `backend_profile=s3_locking_vultr` directly in `bench/methodologies/`. The matching `s3-candidate-manual` pack batches those remote shards without widening the authoritative PR bot contract.
 

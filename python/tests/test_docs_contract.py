@@ -267,6 +267,16 @@ def test_docs_cover_pack_based_pr_decision_contract() -> None:
     assert "--required-class authoritative_macro" in combined
 
 
+def test_validation_docs_require_full_pack_audit_before_full_pr_claim() -> None:
+    validation = (DOCS_DIR / "validation.md").read_text(encoding="utf-8")
+
+    assert "pr-full-decision" in validation
+    assert "delta_bench_compare.pack audit" in validation
+    assert "--pack full" in validation
+    assert "--required-class authoritative_macro" in validation
+    assert "before describing `full` as a complete PR surface" in validation
+
+
 def test_docs_define_ready_vs_candidate_vs_diagnostic_entrypoints() -> None:
     combined = "\n".join(
         (

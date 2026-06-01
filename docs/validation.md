@@ -20,6 +20,16 @@ The trust contract is split deliberately:
 
 Use this page as the stable operator guide, and use the generated artifact under `results/validation/` as the latest machine-local evidence.
 
+Audit the ready pack boundary before describing `full` as a complete PR surface:
+
+```bash
+PYTHONPATH=python python3 -m delta_bench_compare.pack audit \
+  --pack full \
+  --required-class authoritative_macro
+```
+
+This audit is a guardrail for registry scope. It must pass alongside the suite-specific validation gates, but it does not replace same-SHA stability, delayed-canary evidence, fixture checks, or runtime signoff.
+
 When you need to publish the current operator-facing contract itself, run `./scripts/publish_contract.sh`. It snapshots the current docs, manifests, and wrapper entrypoints into `results/contracts/`.
 
 The authoritative scan decision manifest is intentionally narrower than the raw suite: `scan_pruning_hit` now lives in Criterion microbench coverage, and `scan_pruning_miss` stays disabled from `core_rust.yaml` until it is requalified. Normal PR macro verdicts should therefore focus on `scan_full_narrow`, `scan_projection_region`, and `scan_filter_flag`.
@@ -75,6 +85,7 @@ Refresh the evidence on the current machine with:
 
 - `cargo test --locked -p delta-bench`
 - `python3 -m pytest -q python/tests`
+- `PYTHONPATH=python python3 -m delta_bench_compare.pack audit --pack full --required-class authoritative_macro`
 - `./scripts/validate_perf_harness.sh --dataset-id medium_selective --artifact-dir results/validation/latest`
 - `./scripts/validate_perf_harness.sh --sha 3fe2fa92a1dc54c8c6b378529b449f5f4c601e39 --fetch-url https://github.com/example/delta-rs --artifact-dir results/validation/fork-sha`
 - `./scripts/compare_branch.sh --current-vs-main --methodology-profile pr-write-perf write_perf`

@@ -78,17 +78,19 @@ async fn measure_load_phase_once(
     .expect("load phase should succeed")
 }
 
-async fn measure_load_phase(
+async fn measure_load_phase_delta(
     fixtures_dir: &std::path::Path,
     storage: &StorageConfig,
     entries: &[(&str, &str)],
 ) -> f64 {
     let _env_guard = env_mutex().lock().await;
-    let mut elapsed = Vec::with_capacity(PHASE_SAMPLE_RUNS);
+    let mut deltas = Vec::with_capacity(PHASE_SAMPLE_RUNS);
     for _ in 0..PHASE_SAMPLE_RUNS {
-        elapsed.push(measure_load_phase_once(fixtures_dir, storage, entries).await);
+        let baseline = measure_load_phase_once(fixtures_dir, storage, &[]).await;
+        let delayed = measure_load_phase_once(fixtures_dir, storage, entries).await;
+        deltas.push(delayed - baseline);
     }
-    median(&mut elapsed)
+    median(&mut deltas)
 }
 
 async fn measure_plan_phase_once(
@@ -109,17 +111,19 @@ async fn measure_plan_phase_once(
     .expect("plan phase should succeed")
 }
 
-async fn measure_plan_phase(
+async fn measure_plan_phase_delta(
     fixtures_dir: &std::path::Path,
     storage: &StorageConfig,
     entries: &[(&str, &str)],
 ) -> f64 {
     let _env_guard = env_mutex().lock().await;
-    let mut elapsed = Vec::with_capacity(PHASE_SAMPLE_RUNS);
+    let mut deltas = Vec::with_capacity(PHASE_SAMPLE_RUNS);
     for _ in 0..PHASE_SAMPLE_RUNS {
-        elapsed.push(measure_plan_phase_once(fixtures_dir, storage, entries).await);
+        let baseline = measure_plan_phase_once(fixtures_dir, storage, &[]).await;
+        let delayed = measure_plan_phase_once(fixtures_dir, storage, entries).await;
+        deltas.push(delayed - baseline);
     }
-    median(&mut elapsed)
+    median(&mut deltas)
 }
 
 async fn measure_execute_phase_once(
@@ -143,17 +147,19 @@ async fn measure_execute_phase_once(
     .expect("execute phase should succeed")
 }
 
-async fn measure_execute_phase(
+async fn measure_execute_phase_delta(
     fixtures_dir: &std::path::Path,
     storage: &StorageConfig,
     entries: &[(&str, &str)],
 ) -> f64 {
     let _env_guard = env_mutex().lock().await;
-    let mut elapsed = Vec::with_capacity(PHASE_SAMPLE_RUNS);
+    let mut deltas = Vec::with_capacity(PHASE_SAMPLE_RUNS);
     for _ in 0..PHASE_SAMPLE_RUNS {
-        elapsed.push(measure_execute_phase_once(fixtures_dir, storage, entries).await);
+        let baseline = measure_execute_phase_once(fixtures_dir, storage, &[]).await;
+        let delayed = measure_execute_phase_once(fixtures_dir, storage, entries).await;
+        deltas.push(delayed - baseline);
     }
-    median(&mut elapsed)
+    median(&mut deltas)
 }
 
 async fn measure_validate_phase_once(
@@ -180,17 +186,19 @@ async fn measure_validate_phase_once(
     .expect("validate phase should succeed")
 }
 
-async fn measure_validate_phase(
+async fn measure_validate_phase_delta(
     fixtures_dir: &std::path::Path,
     storage: &StorageConfig,
     entries: &[(&str, &str)],
 ) -> f64 {
     let _env_guard = env_mutex().lock().await;
-    let mut elapsed = Vec::with_capacity(PHASE_SAMPLE_RUNS);
+    let mut deltas = Vec::with_capacity(PHASE_SAMPLE_RUNS);
     for _ in 0..PHASE_SAMPLE_RUNS {
-        elapsed.push(measure_validate_phase_once(fixtures_dir, storage, entries).await);
+        let baseline = measure_validate_phase_once(fixtures_dir, storage, &[]).await;
+        let delayed = measure_validate_phase_once(fixtures_dir, storage, entries).await;
+        deltas.push(delayed - baseline);
     }
-    median(&mut elapsed)
+    median(&mut deltas)
 }
 
 async fn provider_query_result_hash(sql: &str, provider: Arc<dyn TableProvider>) -> String {
@@ -204,17 +212,17 @@ async fn provider_query_result_hash(sql: &str, provider: Arc<dyn TableProvider>)
     hash_record_batches_unordered(&batches).expect("hash query results")
 }
 
-fn assert_target_phase_shift(label: &str, baseline: f64, delayed: f64, expected_delay_ms: f64) {
+fn assert_target_phase_delta(label: &str, delta: f64, expected_delay_ms: f64) {
     assert!(
-        delayed - baseline >= expected_delay_ms - TARGET_DELAY_TOLERANCE_MS,
-        "{label} delay should move timing by about {expected_delay_ms} ms; baseline={baseline:.3}, delayed={delayed:.3}"
+        delta >= expected_delay_ms - TARGET_DELAY_TOLERANCE_MS,
+        "{label} delay should move timing by about {expected_delay_ms} ms; delta={delta:.3}"
     );
 }
 
-fn assert_control_phase_stable(label: &str, baseline: f64, delayed: f64) {
+fn assert_control_phase_delta(label: &str, delta: f64) {
     assert!(
-        (delayed - baseline).abs() <= CONTROL_DRIFT_TOLERANCE_MS,
-        "{label} delay leaked into unrelated timing; baseline={baseline:.3}, delayed={delayed:.3}"
+        delta.abs() <= CONTROL_DRIFT_TOLERANCE_MS,
+        "{label} delay leaked into unrelated timing; delta={delta:.3}"
     );
 }
 
@@ -268,30 +276,15 @@ async fn load_delay_canary_only_moves_load_timing() {
         .await
         .expect("generate fixtures");
 
-    let baseline_load = measure_load_phase(temp.path(), &storage, &[]).await;
-    let baseline_execute = measure_execute_phase(temp.path(), &storage, &[]).await;
+    let delay_entries = [
+        ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
+        ("DELTA_BENCH_SCAN_DELAY_LOAD_MS", "250"),
+    ];
+    let load_delta = measure_load_phase_delta(temp.path(), &storage, &delay_entries).await;
+    let execute_delta = measure_execute_phase_delta(temp.path(), &storage, &delay_entries).await;
 
-    let delayed_load = measure_load_phase(
-        temp.path(),
-        &storage,
-        &[
-            ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
-            ("DELTA_BENCH_SCAN_DELAY_LOAD_MS", "250"),
-        ],
-    )
-    .await;
-    let delayed_execute = measure_execute_phase(
-        temp.path(),
-        &storage,
-        &[
-            ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
-            ("DELTA_BENCH_SCAN_DELAY_LOAD_MS", "250"),
-        ],
-    )
-    .await;
-
-    assert_target_phase_shift("load", baseline_load, delayed_load, PHASE_DELAY_MS);
-    assert_control_phase_stable("load", baseline_execute, delayed_execute);
+    assert_target_phase_delta("load", load_delta, PHASE_DELAY_MS);
+    assert_control_phase_delta("load", execute_delta);
 }
 
 #[tokio::test]
@@ -302,30 +295,15 @@ async fn plan_delay_canary_only_moves_plan_timing() {
         .await
         .expect("generate fixtures");
 
-    let baseline_plan = measure_plan_phase(temp.path(), &storage, &[]).await;
-    let baseline_execute = measure_execute_phase(temp.path(), &storage, &[]).await;
+    let delay_entries = [
+        ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
+        ("DELTA_BENCH_SCAN_DELAY_PLAN_MS", "250"),
+    ];
+    let plan_delta = measure_plan_phase_delta(temp.path(), &storage, &delay_entries).await;
+    let execute_delta = measure_execute_phase_delta(temp.path(), &storage, &delay_entries).await;
 
-    let delayed_plan = measure_plan_phase(
-        temp.path(),
-        &storage,
-        &[
-            ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
-            ("DELTA_BENCH_SCAN_DELAY_PLAN_MS", "250"),
-        ],
-    )
-    .await;
-    let delayed_execute = measure_execute_phase(
-        temp.path(),
-        &storage,
-        &[
-            ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
-            ("DELTA_BENCH_SCAN_DELAY_PLAN_MS", "250"),
-        ],
-    )
-    .await;
-
-    assert_target_phase_shift("plan", baseline_plan, delayed_plan, PHASE_DELAY_MS);
-    assert_control_phase_stable("plan", baseline_execute, delayed_execute);
+    assert_target_phase_delta("plan", plan_delta, PHASE_DELAY_MS);
+    assert_control_phase_delta("plan", execute_delta);
 }
 
 #[tokio::test]
@@ -336,30 +314,15 @@ async fn execute_delay_canary_only_moves_execute_timing() {
         .await
         .expect("generate fixtures");
 
-    let baseline_execute = measure_execute_phase(temp.path(), &storage, &[]).await;
-    let baseline_plan = measure_plan_phase(temp.path(), &storage, &[]).await;
+    let delay_entries = [
+        ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
+        ("DELTA_BENCH_SCAN_DELAY_EXECUTE_MS", "250"),
+    ];
+    let execute_delta = measure_execute_phase_delta(temp.path(), &storage, &delay_entries).await;
+    let plan_delta = measure_plan_phase_delta(temp.path(), &storage, &delay_entries).await;
 
-    let delayed_execute = measure_execute_phase(
-        temp.path(),
-        &storage,
-        &[
-            ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
-            ("DELTA_BENCH_SCAN_DELAY_EXECUTE_MS", "250"),
-        ],
-    )
-    .await;
-    let delayed_plan = measure_plan_phase(
-        temp.path(),
-        &storage,
-        &[
-            ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
-            ("DELTA_BENCH_SCAN_DELAY_EXECUTE_MS", "250"),
-        ],
-    )
-    .await;
-
-    assert_target_phase_shift("execute", baseline_execute, delayed_execute, PHASE_DELAY_MS);
-    assert_control_phase_stable("execute", baseline_plan, delayed_plan);
+    assert_target_phase_delta("execute", execute_delta, PHASE_DELAY_MS);
+    assert_control_phase_delta("execute", plan_delta);
 }
 
 #[tokio::test]
@@ -370,35 +333,15 @@ async fn validate_delay_canary_only_moves_validate_timing() {
         .await
         .expect("generate fixtures");
 
-    let baseline_validate = measure_validate_phase(temp.path(), &storage, &[]).await;
-    let baseline_execute = measure_execute_phase(temp.path(), &storage, &[]).await;
+    let delay_entries = [
+        ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
+        ("DELTA_BENCH_SCAN_DELAY_VALIDATE_MS", "250"),
+    ];
+    let validate_delta = measure_validate_phase_delta(temp.path(), &storage, &delay_entries).await;
+    let execute_delta = measure_execute_phase_delta(temp.path(), &storage, &delay_entries).await;
 
-    let delayed_validate = measure_validate_phase(
-        temp.path(),
-        &storage,
-        &[
-            ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
-            ("DELTA_BENCH_SCAN_DELAY_VALIDATE_MS", "250"),
-        ],
-    )
-    .await;
-    let delayed_execute = measure_execute_phase(
-        temp.path(),
-        &storage,
-        &[
-            ("DELTA_BENCH_ALLOW_SCAN_PHASE_DELAY", "1"),
-            ("DELTA_BENCH_SCAN_DELAY_VALIDATE_MS", "250"),
-        ],
-    )
-    .await;
-
-    assert_target_phase_shift(
-        "validate",
-        baseline_validate,
-        delayed_validate,
-        PHASE_DELAY_MS,
-    );
-    assert_control_phase_stable("validate", baseline_execute, delayed_execute);
+    assert_target_phase_delta("validate", validate_delta, PHASE_DELAY_MS);
+    assert_control_phase_delta("validate", execute_delta);
 }
 
 #[tokio::test]

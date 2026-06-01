@@ -879,7 +879,14 @@ jobs:
           fi
           set +e
           timeout --preserve-status "${TIMEOUT_MINUTES}m" \
-            ./scripts/run_profile.sh --base-sha "$BASE_SHA" --candidate-sha "$HEAD_SHA" "$PROFILE" "${profile_args[@]}" > benchmark_output.md 2>&1
+            ./scripts/run_profile.sh \
+              --base-sha "$BASE_SHA" \
+              --candidate-sha "$HEAD_SHA" \
+              --enforce-run-mode \
+              --require-no-public-ipv4 \
+              --require-egress-policy \
+              "$PROFILE" \
+              "${profile_args[@]}" > benchmark_output.md 2>&1
           shard_status=$?
           set -e
           echo "exit_code=${shard_status}" >> "$GITHUB_OUTPUT"

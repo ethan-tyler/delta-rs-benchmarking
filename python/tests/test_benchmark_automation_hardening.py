@@ -494,8 +494,11 @@ def test_benchmark_workflow_uses_pack_planning_matrix_and_aggregation() -> None:
     assert "max-parallel: ${{ fromJson(needs.plan_pack.outputs.max_parallel) }}" in workflow
     assert "matrix.timeout_minutes" in workflow
     assert "timeout --preserve-status" in workflow
-    assert "./scripts/run_profile.sh --base-sha" in workflow
-    assert '"$PROFILE"' in workflow or '"$PROFILE"' in workflow
+    assert "./scripts/run_profile.sh \\" in workflow
+    assert '--base-sha "$BASE_SHA" \\' in workflow
+    assert '--candidate-sha "$HEAD_SHA" \\' in workflow
+    assert_order(workflow, "--base-sha", "--candidate-sha")
+    assert '"$PROFILE" \\' in workflow
     assert "python3 -m delta_bench_compare.pack summarize" in workflow
     assert "actions/download-artifact@v4" in workflow
 
@@ -2172,6 +2175,24 @@ def test_benchmark_workflow_pack_shards_use_resolved_storage_contract() -> None:
     assert 'profile_args+=(--storage-backend "${storage_backend}")' in shard_step
     assert 'profile_args+=(--backend-profile "${backend_profile}")' in shard_step
     assert 'profile_args+=(--storage-option "${opt}")' in shard_step
+
+
+def test_benchmark_workflow_pack_shards_pass_compare_security_hardening_flags() -> (
+    None
+):
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    shard_step = workflow[
+        workflow.index("- name: Run suite shard") : workflow.index(
+            "- name: Upload suite artifact"
+        )
+    ]
+
+    assert "./scripts/run_profile.sh" in shard_step
+    assert "--enforce-run-mode" in shard_step
+    assert "--require-no-public-ipv4" in shard_step
+    assert "--require-egress-policy" in shard_step
+    assert_order(shard_step, "--base-sha", "--enforce-run-mode")
+    assert_order(shard_step, "--require-egress-policy", '"$PROFILE"')
 
 
 def test_benchmark_workflow_does_not_mask_exploratory_failures() -> None:

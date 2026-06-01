@@ -209,7 +209,34 @@ def test_run_profile_dry_run_preserves_explicit_storage_contract_overrides() -> 
     assert result.stdout.strip() == (
         "./scripts/compare_branch.sh --current-vs-main "
         "--methodology-profile scan-s3-candidate "
-        "--storage-backend s3 --backend-profile custom_remote"
+        "--storage-backend s3 --backend-profile custom_remote scan"
+    )
+
+
+def test_run_profile_dry_run_keeps_compare_target_with_pass_through_flags() -> None:
+    result = subprocess.run(
+        [
+            str(RUN_PROFILE),
+            "--dry-run",
+            "pr-macro",
+            "--storage-backend",
+            "s3",
+            "--backend-profile",
+            "s3_locking_vultr",
+            "--runner",
+            "rust",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert result.stdout.strip() == (
+        "./scripts/compare_branch.sh --methodology-profile pr-macro "
+        "--storage-backend s3 --backend-profile s3_locking_vultr --runner rust scan"
     )
 
 

@@ -101,6 +101,38 @@ profile_args_include_flag() {
 	return 1
 }
 
+compare_profile_args_include_target() {
+	if [[ ${#profile_args[@]} -eq 0 ]]; then
+		return 1
+	fi
+	local index=0
+	local arg
+	while ((index < ${#profile_args[@]})); do
+		arg="${profile_args[index]}"
+		case "${arg}" in
+		--remote-runner | --remote-root | --noise-threshold | --aggregation | --methodology-profile | --compare-mode | --fail-on | --warmup | --iters | --prewarm-iters | --compare-runs | --measure-order | --base-sha | --candidate-sha | --base-fetch-url | --candidate-fetch-url | --upstream-remote | --storage-backend | --storage-option | --backend-profile | --runner | --mode | --dataset-id | --timing-phase)
+			index=$((index + 2))
+			;;
+		--current-vs-main | --working-vs-upstream-main | --enforce-run-mode | --require-no-public-ipv4 | --require-egress-policy)
+			index=$((index + 1))
+			;;
+		--)
+			if ((index + 1 < ${#profile_args[@]})); then
+				return 0
+			fi
+			return 1
+			;;
+		-*)
+			index=$((index + 1))
+			;;
+		*)
+			return 0
+			;;
+		esac
+	done
+	return 1
+}
+
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--dry-run)
@@ -221,10 +253,11 @@ compare)
 		append_flag_if_set --backend-profile "${BACKEND_PROFILE:-}"
 	fi
 	resolved_command+=(--methodology-profile "${profile_name}")
-	if [[ ${#profile_args[@]} -eq 0 ]]; then
-		resolved_command+=("${TARGET}")
-	else
+	if [[ ${#profile_args[@]} -gt 0 ]]; then
 		resolved_command+=("${profile_args[@]}")
+	fi
+	if ! compare_profile_args_include_target; then
+		resolved_command+=("${TARGET}")
 	fi
 	;;
 run)

@@ -14,6 +14,7 @@ VALIDATION_FETCH_URL="${VALIDATION_FETCH_URL:-}"
 VALIDATION_FETCH_REF="${VALIDATION_FETCH_REF:-}"
 VALIDATION_DATASET_ID="${VALIDATION_DATASET_ID:-${PRIMARY_VALIDATION_DATASET_ID}}"
 VALIDATION_CASE="${VALIDATION_CASE:-scan_filter_flag}"
+VALIDATION_PRINT_PLAN=0
 VALIDATION_COMPARE_RUNS="${VALIDATION_COMPARE_RUNS:-5}"
 VALIDATION_WARMUP="${VALIDATION_WARMUP:-1}"
 VALIDATION_ITERS="${VALIDATION_ITERS:-5}"
@@ -48,6 +49,7 @@ Options:
   --fetch-ref <ref>       Optional advertised branch/ref to fetch before resolving --sha
   --dataset-id <id>       Optional gate selector (default: ${VALIDATION_DATASET_ID}; tpcds-gate requires ${TPCDS_VALIDATION_DATASET_ID})
   --artifact-dir <path>   Output directory for validation artifacts (default: ${VALIDATION_ARTIFACT_DIR}); stable gate names such as write-perf-ready, dml-maintenance-gate, metadata-perf-gate, and tpcds-gate run only their focused validator surfaces
+  --print-plan            Print the resolved validation scope and planned gate labels without running validation
   -h, --help              Show this help
 
 Advanced tuning is available through environment variables:
@@ -191,6 +193,10 @@ while [[ $# -gt 0 ]]; do
 		VALIDATION_ARTIFACT_DIR="$2"
 		shift 2
 		;;
+	--print-plan)
+		VALIDATION_PRINT_PLAN=1
+		shift
+		;;
 	-h | --help)
 		usage
 		exit 0
@@ -202,6 +208,16 @@ while [[ $# -gt 0 ]]; do
 		;;
 	esac
 done
+
+if [[ "${VALIDATION_PRINT_PLAN}" == "1" ]]; then
+	VALIDATION_SCOPE="$(resolve_validation_scope "${VALIDATION_ARTIFACT_DIR}")"
+	VALIDATION_GATE_LABELS="$(planned_validation_gate_labels "${VALIDATION_SCOPE}" "${VALIDATION_DATASET_ID}")"
+	printf 'validation_scope=%s\n' "${VALIDATION_SCOPE}"
+	printf 'validation_gate_labels=%s\n' "${VALIDATION_GATE_LABELS}"
+	printf 'validation_dataset_id=%s\n' "${VALIDATION_DATASET_ID}"
+	printf 'validation_artifact_dir=%s\n' "${VALIDATION_ARTIFACT_DIR}"
+	exit 0
+fi
 
 VALIDATION_ARTIFACT_DIR="$(canonicalize_dir "${VALIDATION_ARTIFACT_DIR}")"
 RESULTS_DIR="${VALIDATION_ARTIFACT_DIR}/results"

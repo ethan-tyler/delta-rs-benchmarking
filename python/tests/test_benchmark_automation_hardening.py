@@ -1099,6 +1099,33 @@ def test_validation_script_rejects_tpcds_gate_without_tpcds_dataset() -> None:
     assert "tpcds-gate requires --dataset-id tpcds_duckdb" in result.stderr
 
 
+def test_validation_script_print_plan_reports_focused_gate_contract(
+    tmp_path: Path,
+) -> None:
+    artifact_dir = tmp_path / "results" / "validation" / "tpcds-gate"
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(VALIDATION_SCRIPT),
+            "--print-plan",
+            "--artifact-dir",
+            str(artifact_dir),
+            "--dataset-id",
+            "tpcds_duckdb",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "validation_scope=tpcds" in result.stdout
+    assert "validation_gate_labels=scan tpcds" in result.stdout
+    assert "validation_dataset_id=tpcds_duckdb" in result.stdout
+    assert not artifact_dir.exists()
+
+
 def test_validation_script_uses_planned_gate_labels_to_skip_follow_on_validators() -> (
     None
 ):

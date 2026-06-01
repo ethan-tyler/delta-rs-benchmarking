@@ -340,6 +340,71 @@ def test_pack_plan_required_class_fails_when_full_pack_omits_required_suites(
     assert "tpcds" in result.stderr
 
 
+def test_pack_audit_fails_when_required_suite_uses_non_default_profile(
+    tmp_path: Path,
+) -> None:
+    registry_path = tmp_path / "registry.yaml"
+    registry_path.write_text(
+        "\n".join(
+            [
+                "schema_version: 1",
+                "",
+                "suites:",
+                "  scan:",
+                "    class: authoritative_macro",
+                "    automation_tier: pr_bot",
+                "    default_profile: pr-macro",
+                "    readiness: ready",
+                "",
+                "packs:",
+                "  pr-full-decision:",
+                "    alias: full",
+                "    pack_version: 1",
+                "    compare_mode: decision",
+                "    strict_mode: require_all_ready",
+                "    max_parallel: 2",
+                "    overall_fail_on: [regression, inconclusive]",
+                "    suites:",
+                "      - suite: scan",
+                "        profile: scan-phase-criterion",
+                "        timeout_minutes: 90",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "delta_bench_compare.pack",
+            "audit",
+            "--registry",
+            str(registry_path),
+            "--pack",
+            "full",
+            "--required-class",
+            "authoritative_macro",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_python_env(),
+    )
+
+    assert result.returncode == 1
+    payload = json.loads(result.stdout)
+    assert payload["ready"] is False
+    assert payload["profile_mismatches"] == [
+        {
+            "suite": "scan",
+            "expected_profile": "pr-macro",
+            "actual_profile": "scan-phase-criterion",
+        }
+    ]
+
+
 def test_pack_audit_fails_full_pack_when_authoritative_macro_suites_are_missing() -> None:
     result = subprocess.run(
         [

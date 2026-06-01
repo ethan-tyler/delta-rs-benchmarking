@@ -271,12 +271,24 @@ def audit_pack(
     ]
 
     missing_required_suites = []
+    profile_mismatches = []
     for suite_name, suite_registry in registry["suites"].items():
         if not isinstance(suite_registry, dict):
             continue
         if str(suite_registry.get("class") or "") != required_class:
             continue
-        if suite_name in planned_by_suite:
+        planned_entry = planned_by_suite.get(suite_name)
+        if planned_entry is not None:
+            expected_profile = str(suite_registry.get("default_profile") or "").strip()
+            actual_profile = str(planned_entry.get("profile") or "").strip()
+            if expected_profile and actual_profile != expected_profile:
+                profile_mismatches.append(
+                    {
+                        "suite": str(suite_name),
+                        "expected_profile": expected_profile,
+                        "actual_profile": actual_profile,
+                    }
+                )
             continue
         missing_required_suites.append(
             {
@@ -296,9 +308,14 @@ def audit_pack(
         "pack_alias": alias,
         "pack_version": int(pack.get("pack_version") or 0),
         "required_class": required_class,
-        "ready": not missing_required_suites and not readiness_blocker_rows,
+        "ready": (
+            not missing_required_suites
+            and not profile_mismatches
+            and not readiness_blocker_rows
+        ),
         "planned_suites": planned_suites,
         "missing_required_suites": missing_required_suites,
+        "profile_mismatches": profile_mismatches,
         "readiness_blockers": readiness_blocker_rows,
     }
 
@@ -316,6 +333,18 @@ def _format_audit_failure(payload: dict[str, Any]) -> str:
         parts.append(
             f"missing required {required_class} suites: {', '.join(missing_suites)}"
         )
+
+    profile_mismatches = []
+    for row in payload.get("profile_mismatches") or []:
+        suite = str(row.get("suite") or "")
+        expected_profile = str(row.get("expected_profile") or "")
+        actual_profile = str(row.get("actual_profile") or "")
+        if suite and expected_profile:
+            profile_mismatches.append(
+                f"{suite}: expected {expected_profile}, found {actual_profile or 'unknown'}"
+            )
+    if profile_mismatches:
+        parts.append(f"profile mismatches: {', '.join(profile_mismatches)}")
 
     blocker_rows = []
     for row in payload.get("readiness_blockers") or []:

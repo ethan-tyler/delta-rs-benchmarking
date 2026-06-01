@@ -214,6 +214,22 @@ note() {
 	printf -- '%s\n' "$*" | tee -a "${SUMMARY_FILE}"
 }
 
+VALIDATION_SUMMARY_COMPLETE=0
+mark_validation_summary_incomplete() {
+	local status=$?
+	if [[ "${status}" -ne 0 && "${VALIDATION_SUMMARY_COMPLETE}" != "1" && -f "${SUMMARY_FILE}" ]]; then
+		{
+			printf '\n'
+			printf '## Result\n\n'
+			printf -- '- Status: failed\n'
+			printf -- '- Exit status: %s\n' "${status}"
+			printf -- '- The validation run exited before completing every planned gate; do not use this summary as promotion evidence.\n'
+		} >>"${SUMMARY_FILE}"
+	fi
+	return "${status}"
+}
+trap mark_validation_summary_incomplete EXIT
+
 json_path_for_label() {
 	local label="$1"
 	local suite="$2"
@@ -1352,4 +1368,9 @@ else
 fi
 
 note ""
+note "## Result"
+note ""
+note "- Status: passed"
+note ""
 note "Validation summary written to ${SUMMARY_FILE}"
+VALIDATION_SUMMARY_COMPLETE=1

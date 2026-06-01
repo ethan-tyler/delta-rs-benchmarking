@@ -974,6 +974,18 @@ def test_validation_script_exposes_artifact_dir_contract() -> None:
     assert "summary.md" in script
 
 
+def test_validation_script_marks_incomplete_summaries_as_failed() -> None:
+    script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
+
+    assert "VALIDATION_SUMMARY_COMPLETE=0" in script
+    assert "mark_validation_summary_incomplete()" in script
+    assert "trap mark_validation_summary_incomplete EXIT" in script
+    assert "Status: failed" in script
+    assert "do not use this summary as promotion evidence" in script
+    assert "VALIDATION_SUMMARY_COMPLETE=1" in script
+    assert "Status: passed" in script
+
+
 def test_validation_script_plans_focused_gate_suite_sets_from_artifact_dir() -> None:
     script = VALIDATION_SCRIPT.read_text(encoding="utf-8")
     resolve_scope_block = shell_function_block(script, "resolve_validation_scope")

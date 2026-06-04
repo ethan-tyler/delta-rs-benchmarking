@@ -28,7 +28,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "fs"] }
 chrono = { workspace = true, default-features = false, features = ["clock", "serde"] }
 url = { workspace = true }
-tempfile = { workspace = true }
+tempfile = "3"
 
 clap = { version = "4.5", features = ["derive", "env"] }
 anyhow = "1"
@@ -38,7 +38,7 @@ sha2 = "0.10"
 serde_yaml = "0.9"
 
 [dev-dependencies]
-tempfile = { workspace = true }
+tempfile = "3"
 criterion = "0.5"
 
 [[bench]]

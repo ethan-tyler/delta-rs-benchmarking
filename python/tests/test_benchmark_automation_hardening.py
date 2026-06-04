@@ -4570,6 +4570,17 @@ def test_gitignore_ignores_checkout_lock_artifacts() -> None:
     assert "Below is a **complete, production-qualit" not in gitignore
 
 
+def test_synced_delta_bench_manifest_does_not_inherit_tempfile_from_target_workspace() -> (
+    None
+):
+    manifest = (REPO_ROOT / "crates" / "delta-bench" / "Cargo.toml.delta-rs").read_text(
+        encoding="utf-8"
+    )
+
+    assert "tempfile = { workspace = true }" not in manifest
+    assert 'tempfile = "3"' in manifest
+
+
 def test_compare_branch_default_checkout_lock_does_not_block_initial_clone() -> None:
     with tempfile.TemporaryDirectory() as td:
         temp_root = Path(td)

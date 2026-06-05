@@ -20,14 +20,14 @@ bytes = "1"
 either = "1"
 futures = "0.3"
 itertools = "0.14"
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time", "fs"] }
-chrono = { workspace = true, default-features = false, features = ["clock", "serde"] }
-url = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "fs"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+url = "2"
 tempfile = "3"
 
 clap = { version = "4.5", features = ["derive", "env"] }
